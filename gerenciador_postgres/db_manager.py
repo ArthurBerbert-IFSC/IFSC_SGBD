@@ -129,3 +129,10 @@ class DBManager:
             """)
             return [row[0] for row in cur.fetchall()]
 
+    def enable_postgis(self, schema_name: str):
+        """Garante que a extensão PostGIS esteja disponível no schema informado."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f'CREATE EXTENSION IF NOT EXISTS postgis SCHEMA "{schema_name}"'
+            )
+

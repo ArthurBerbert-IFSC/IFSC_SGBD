@@ -5,8 +5,9 @@ from PyQt6.QtCore import Qt
 from .connection_dialog import ConnectionDialog
 from ..db_manager import DBManager
 from ..role_manager import RoleManager
+from ..schema_manager import SchemaManager
 from ..connection_manager import ConnectionManager
-from ..controllers import UsersController
+from ..controllers import UsersController, SchemaController
 from ..logger import setup_logger
 
 
@@ -23,6 +24,8 @@ class MainWindow(QMainWindow):
         self.db_manager = None
         self.role_manager = None
         self.users_controller = None
+        self.schema_manager = None
+        self.schema_controller = None
         self.logger = setup_logger()
         self.opened_windows = []
 
@@ -55,6 +58,7 @@ class MainWindow(QMainWindow):
         self.actionDesconectar.triggered.connect(self.on_desconectar)
         self.actionSair.triggered.connect(self.close)
         self.actionUsuariosGrupos.triggered.connect(self.on_usuarios_grupos)
+        self.actionAmbientes.triggered.connect(self.on_schemas)
 
         self.actionAjuda.triggered.connect(self.show_help)
         self.actionSobre.triggered.connect(self.show_about)
@@ -107,6 +111,8 @@ class MainWindow(QMainWindow):
                 self.db_manager = DBManager(conn)
                 self.role_manager = RoleManager(self.db_manager, self.logger, operador=params['user'])
                 self.users_controller = UsersController(self.role_manager)
+                self.schema_manager = SchemaManager(self.db_manager, self.logger, operador=params['user'])
+                self.schema_controller = SchemaController(self.schema_manager, self.logger)
                 self.menuGerenciar.setEnabled(True)
                 self.statusbar.showMessage(f"Conectado a {params['database']} como {params['user']}")
                 QMessageBox.information(self, "Conexão bem-sucedida", f"Conectado ao banco {params['database']}.")
@@ -115,6 +121,8 @@ class MainWindow(QMainWindow):
                 self.db_manager = None
                 self.role_manager = None
                 self.users_controller = None
+                self.schema_manager = None
+                self.schema_controller = None
                 self.menuGerenciar.setEnabled(False)
                 self.statusbar.showMessage("Não conectado")
                 QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {e}")
@@ -124,6 +132,8 @@ class MainWindow(QMainWindow):
         self.db_manager = None
         self.role_manager = None
         self.users_controller = None
+        self.schema_manager = None
+        self.schema_controller = None
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
@@ -144,3 +154,13 @@ class MainWindow(QMainWindow):
         self.label = QLabel("Bem-vindo ao Gerenciador PostgreSQL!\nUtilize o menu para começar.", self)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCentralWidget(self.label)
+
+    def on_schemas(self):
+        from .schema_view import SchemaView
+        if self.schema_controller:
+            schema_window = SchemaView(controller=self.schema_controller, logger=self.logger)
+            self.opened_windows.append(schema_window)
+            schema_window.setWindowTitle("Gerenciador de Schemas")
+            schema_window.show()
+        else:
+            QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar schemas.")
