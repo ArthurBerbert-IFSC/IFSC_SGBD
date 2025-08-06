@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QMainWindow, QLabel, QMenuBar
-from PyQt6.QtWidgets import QStatusBar, QApplication, QMessageBox, QDialog 
+from PyQt6.QtWidgets import QStatusBar, QApplication, QMessageBox, QDialog
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt
 from .connection_dialog import ConnectionDialog
@@ -7,12 +7,13 @@ import psycopg2
 from ..db_manager import DBManager
 from ..role_manager import RoleManager
 from ..logger import setup_logger
+from ..settings import APP_NAME
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Gerenciador PostgreSQL")
+        self.setWindowTitle(APP_NAME)
         self.resize(900, 600)
         self._setup_menu()
         self._setup_statusbar()
@@ -85,11 +86,13 @@ class MainWindow(QMainWindow):
             # Adiciona à lista para que ela não seja descartada pela memória
             self.opened_windows.append(users_window)
             # Define um título para a nova janela
-            users_window.setWindowTitle("Gerenciador de Usuários e Grupos")
+            users_window.setWindowTitle(
+                f"Gerenciador de Usuários e Grupos - {APP_NAME}"
+            )
             # Mostra a nova janela
             users_window.show()
         else:
-            QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar usuários.")
+            QMessageBox.warning(self, APP_NAME, "Você precisa estar conectado a um banco de dados para gerenciar usuários.")
 
 
     def on_conectar(self):
@@ -102,14 +105,14 @@ class MainWindow(QMainWindow):
                 self.role_manager = RoleManager(self.db_manager, self.logger, operador=params['user'])
                 self.menuGerenciar.setEnabled(True)
                 self.statusbar.showMessage(f"Conectado a {params['database']} como {params['user']}")
-                QMessageBox.information(self, "Conexão bem-sucedida", f"Conectado ao banco {params['database']}.")
+                QMessageBox.information(self, APP_NAME, f"Conectado ao banco {params['database']}.")
             except Exception as e:
                 self.db_conn = None
                 self.db_manager = None
                 self.role_manager = None
                 self.menuGerenciar.setEnabled(False)
                 self.statusbar.showMessage("Não conectado")
-                QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {e}")
+                QMessageBox.critical(self, APP_NAME, f"Falha ao conectar: {e}")
 
     def on_desconectar(self):
         if self.db_conn:
@@ -122,9 +125,9 @@ class MainWindow(QMainWindow):
         self.role_manager = None
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
-        QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
+        QMessageBox.information(self, APP_NAME, "Conexão encerrada.")
 
     def _setup_central(self):
-        self.label = QLabel("Bem-vindo ao Gerenciador PostgreSQL!\nUtilize o menu para começar.", self)
+        self.label = QLabel(f"Bem-vindo ao {APP_NAME}!\nUtilize o menu para começar.", self)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCentralWidget(self.label)

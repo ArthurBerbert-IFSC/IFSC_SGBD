@@ -2,12 +2,13 @@ from PyQt6.QtWidgets import (QWidget, QSplitter, QLineEdit, QListWidget, QTabWid
                              QVBoxLayout, QToolBar, QPushButton, QLabel, QListWidgetItem,
                              QInputDialog, QMessageBox)
 from PyQt6.QtCore import Qt
+from ..settings import APP_NAME
 
 class UsersView(QWidget):
     def __init__(self, parent=None, role_manager=None):
         super().__init__(parent)
         self.role_manager = role_manager
-        self.setWindowTitle("Gerenciador de Usuários e Grupos")
+        self.setWindowTitle(f"Gerenciador de Usuários e Grupos - {APP_NAME}")
         self._setup_ui()
         self._connect_signals()
         self.refresh_lists()
@@ -64,7 +65,7 @@ class UsersView(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, ('user', user))
                 self.lstEntities.addItem(item)
         except Exception as e:
-            QMessageBox.critical(self, "Erro de Listagem", f"Não foi possível listar usuários: {e}")
+            QMessageBox.critical(self, APP_NAME, f"Não foi possível listar usuários: {e}")
         try:
             groups = self.role_manager.list_groups()
             for group in groups:
@@ -72,7 +73,7 @@ class UsersView(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, ('group', group))
                 self.lstEntities.addItem(item)
         except Exception as e:
-            QMessageBox.critical(self, "Erro de Listagem", f"Não foi possível listar grupos: {e}")
+            QMessageBox.critical(self, APP_NAME, f"Não foi possível listar grupos: {e}")
 
     def filter_list(self):
         filter_text = self.txtFilter.text().lower()
@@ -98,34 +99,40 @@ class UsersView(QWidget):
         self.btnDelete.setEnabled(True)
 
     def on_new_user_clicked(self):
-        username, ok1 = QInputDialog.getText(self, "Novo Usuário", "Digite o nome do novo usuário:")
+        username, ok1 = QInputDialog.getText(
+            self, f"Novo Usuário - {APP_NAME}", "Digite o nome do novo usuário:"
+        )
         if ok1 and username:
             username = username.lower()
         else: return
-        password, ok2 = QInputDialog.getText(self, "Nova Senha", f"Senha para '{username}':", QLineEdit.EchoMode.Password)
+        password, ok2 = QInputDialog.getText(
+            self, f"Nova Senha - {APP_NAME}", f"Senha para '{username}':", QLineEdit.EchoMode.Password
+        )
         if not ok2 or not password: return
         try:
             self.role_manager.create_user(username, password)
-            QMessageBox.information(self, "Sucesso", f"Usuário '{username}' criado com sucesso!")
+            QMessageBox.information(self, APP_NAME, f"Usuário '{username}' criado com sucesso!")
             self.refresh_lists()
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Não foi possível criar o usuário.\nMotivo: {e}")
+            QMessageBox.critical(self, APP_NAME, f"Não foi possível criar o usuário.\nMotivo: {e}")
 
     def on_new_group_clicked(self):
-        group_name, ok = QInputDialog.getText(self, "Novo Grupo", "Digite o nome do novo grupo (deve começar com 'grp_'):")
+        group_name, ok = QInputDialog.getText(
+            self, f"Novo Grupo - {APP_NAME}", "Digite o nome do novo grupo (deve começar com 'grp_'):"
+        )
         if not ok or not group_name: return
         try:
             self.role_manager.create_group(group_name)
-            QMessageBox.information(self, "Sucesso", f"Grupo '{group_name}' criado com sucesso!")
+            QMessageBox.information(self, APP_NAME, f"Grupo '{group_name}' criado com sucesso!")
             self.refresh_lists()
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Não foi possível criar o grupo.\nMotivo: {e}")
+            QMessageBox.critical(self, APP_NAME, f"Não foi possível criar o grupo.\nMotivo: {e}")
 
     def on_delete_item_clicked(self):
         current_item = self.lstEntities.currentItem()
         if not current_item: return
         entity_type, entity_name = current_item.data(Qt.ItemDataRole.UserRole)
-        reply = QMessageBox.question(self, "Confirmar Deleção", f"Tem certeza que deseja deletar o {entity_type} '{entity_name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(self, APP_NAME, f"Tem certeza que deseja deletar o {entity_type} '{entity_name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 success = False
@@ -133,24 +140,30 @@ class UsersView(QWidget):
                     success = self.role_manager.delete_user(entity_name)
                 elif entity_type == 'group':
                     success = self.role_manager.delete_group(entity_name)
-                
+
                 if success:
-                    QMessageBox.information(self, "Sucesso", f"{entity_type.capitalize()} '{entity_name}' deletado com sucesso.")
+                    QMessageBox.information(self, APP_NAME, f"{entity_type.capitalize()} '{entity_name}' deletado com sucesso.")
                     self.refresh_lists()
                 else:
-                    QMessageBox.critical(self, "Erro", f"Ocorreu um erro ao deletar o item. Verifique os logs.")
+                    QMessageBox.critical(self, APP_NAME, f"Ocorreu um erro ao deletar o item. Verifique os logs.")
             except Exception as e:
-                QMessageBox.critical(self, "Erro", f"Não foi possível deletar o item.\nMotivo: {e}")
+                QMessageBox.critical(self, APP_NAME, f"Não foi possível deletar o item.\nMotivo: {e}")
 
     def on_change_password_clicked(self):
         current_item = self.lstEntities.currentItem()
         if not current_item: return
         entity_type, username = current_item.data(Qt.ItemDataRole.UserRole)
         if entity_type != 'user': return
-        password, ok = QInputDialog.getText(self, "Alterar Senha", f"Nova senha para '{username}':", QLineEdit.EchoMode.Password)
+        password, ok = QInputDialog.getText(
+            self, f"Alterar Senha - {APP_NAME}", f"Nova senha para '{username}':", QLineEdit.EchoMode.Password
+        )
         if ok and password:
             try:
                 self.role_manager.change_password(username, password)
-                QMessageBox.information(self, "Sucesso", "Senha alterada com sucesso!")
+                QMessageBox.information(self, APP_NAME, "Senha alterada com sucesso!")
             except Exception as e:
-                 QMessageBox.critical(self, "Erro", f"Não foi possível alterar a senha.\nMotivo: {e}")
+                QMessageBox.critical(
+                    self,
+                    APP_NAME,
+                    f"Não foi possível alterar a senha.\nMotivo: {e}",
+                )
