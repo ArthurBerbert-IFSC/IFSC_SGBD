@@ -21,6 +21,7 @@ except ImportError:
     raise SystemExit(1)
 import json
 import os
+from ..settings import APP_NAME
 
 PROFILE_FILE = os.path.expanduser('~/.gerenciador_postgres_profiles.json')
 
@@ -55,7 +56,7 @@ class ConnectionWorker(QThread):
 class ConnectionDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Conectar ao Banco de Dados")
+        self.setWindowTitle(f"Conectar ao Banco de Dados - {APP_NAME}")
         self.setModal(True)
         self.resize(400, 220)
         self._setup_ui()
@@ -210,10 +211,11 @@ class ConnectionDialog(QDialog):
     def accept(self):
         params = self.get_params()
         if not all([params['host'], params['database'], params['user'], params['password']] ):
-            QMessageBox.warning(self, "Campos obrigatórios", "Preencha todos os campos obrigatórios.")
+            QMessageBox.warning(self, APP_NAME, "Preencha todos os campos obrigatórios.")
             return
 
         self.progress_dialog = QProgressDialog("Conectando…", "Cancelar", 0, 0, self)
+        self.progress_dialog.setWindowTitle(f"Conectando - {APP_NAME}")
         self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self.progress_dialog.canceled.connect(self._on_cancel_connection)
         self.progress_dialog.show()
@@ -229,17 +231,19 @@ class ConnectionDialog(QDialog):
 
     def _on_connection_error(self, message):
         self.progress_dialog.close()
-        QMessageBox.critical(self, "Erro de conexão", f"Não foi possível conectar: {message}")
+        QMessageBox.critical(self, APP_NAME, f"Não foi possível conectar: {message}")
 
     def _on_cancel_connection(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.cancel()
         self.progress_dialog.close()
-        QMessageBox.warning(self, "Cancelado", "Conexão cancelada.")
+        QMessageBox.warning(self, APP_NAME, "Conexão cancelada.")
 
     def on_save_profile(self):
         # Pergunta o nome do perfil
-        profile_name, ok = QInputDialog.getText(self, "Salvar Perfil", "Digite o nome para o perfil:")
+        profile_name, ok = QInputDialog.getText(
+            self, f"Salvar Perfil - {APP_NAME}", "Digite o nome para o perfil:"
+        )
         if ok and profile_name:
             try:
                 self.save_profile(profile_name)
@@ -247,16 +251,16 @@ class ConnectionDialog(QDialog):
                 if self.cmbProfiles.findText(profile_name) == -1:
                     self.cmbProfiles.addItem(profile_name)
                 self.cmbProfiles.setCurrentText(profile_name)
-                QMessageBox.information(self, "Sucesso", f"Perfil '{profile_name}' salvo com sucesso.")
+                QMessageBox.information(self, APP_NAME, f"Perfil '{profile_name}' salvo com sucesso.")
             except Exception as e:
-                QMessageBox.critical(self, "Erro ao Salvar", f"Não foi possível salvar o perfil: {e}")
+                QMessageBox.critical(self, APP_NAME, f"Não foi possível salvar o perfil: {e}")
 
     def on_delete_profile(self):
         profile_name = self.cmbProfiles.currentText()
         if not profile_name or self.cmbProfiles.currentIndex() == 0:
             return
 
-        reply = QMessageBox.question(self, "Confirmar Deleção",
+        reply = QMessageBox.question(self, APP_NAME,
                                      f"Tem certeza que deseja deletar o perfil '{profile_name}'?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
@@ -275,6 +279,6 @@ class ConnectionDialog(QDialog):
                 if idx > 0:
                     self.cmbProfiles.removeItem(idx)
 
-                QMessageBox.information(self, "Sucesso", f"Perfil '{profile_name}' deletado.")
+                QMessageBox.information(self, APP_NAME, f"Perfil '{profile_name}' deletado.")
             except Exception as e:
-                QMessageBox.critical(self, "Erro ao Deletar", f"Não foi possível deletar o perfil: {e}")
+                QMessageBox.critical(self, APP_NAME, f"Não foi possível deletar o perfil: {e}")
