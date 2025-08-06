@@ -3,8 +3,10 @@ from psycopg2.extensions import connection
 from .data_models import User, Group
 from typing import Optional, List
 
+
 class DBManager:
-    """Camada de acesso a dados para gerenciamento de roles e grupos."""
+    """Camada de acesso a dados para gerenciamento de roles e schemas."""
+
     def __init__(self, conn: connection):
         if not conn or not hasattr(conn, 'cursor'):
             raise ValueError('Conexão inválida para DBManager')
@@ -50,8 +52,8 @@ class DBManager:
             cur.execute("""
                 SELECT rolname FROM pg_roles
                 WHERE rolcanlogin = true
-                  AND rolname NOT LIKE 'pg\_%'
-                  AND rolname NOT LIKE 'rls\_%'
+                  AND rolname NOT LIKE 'pg\\_%'
+                  AND rolname NOT LIKE 'rls\\_%'
                   AND rolname <> 'postgres'
                 ORDER BY rolname
             """)
@@ -61,7 +63,7 @@ class DBManager:
         with self.conn.cursor() as cur:
             cur.execute(f'CREATE ROLE "{group_name}" NOLOGIN')
 
-    def delete_group(self, group_name: str): # <-- NOVO MÉTODO ADICIONADO
+    def delete_group(self, group_name: str):  # <-- NOVO MÉTODO ADICIONADO
         with self.conn.cursor() as cur:
             cur.execute(f'DROP ROLE "{group_name}"')
 
@@ -90,9 +92,40 @@ class DBManager:
             cur.execute("""
                 SELECT rolname FROM pg_roles
                 WHERE rolcanlogin = false
-                  AND rolname NOT LIKE 'pg\_%'
-                  AND rolname NOT LIKE 'rls\_%'
+                  AND rolname NOT LIKE 'pg\\_%'
+                  AND rolname NOT LIKE 'rls\\_%'
                   AND rolname <> 'postgres'
                 ORDER BY rolname
             """)
             return [row[0] for row in cur.fetchall()]
+
+    # Métodos de schema
+    def create_schema(self, schema_name: str, owner: str | None = None):
+        with self.conn.cursor() as cur:
+            sql = f'CREATE SCHEMA "{schema_name}"'
+            if owner:
+                sql += f' AUTHORIZATION "{owner}"'
+            cur.execute(sql)
+
+    def drop_schema(self, schema_name: str, cascade: bool = False):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f'DROP SCHEMA "{schema_name}" {"CASCADE" if cascade else "RESTRICT"}'
+            )
+
+    def alter_schema_owner(self, schema_name: str, new_owner: str):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f'ALTER SCHEMA "{schema_name}" OWNER TO "{new_owner}"'
+            )
+
+    def list_schemas(self) -> List[str]:
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT schema_name
+                FROM information_schema.schemata
+                WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY schema_name
+            """)
+            return [row[0] for row in cur.fetchall()]
+
