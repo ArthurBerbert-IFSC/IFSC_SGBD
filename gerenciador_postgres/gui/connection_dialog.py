@@ -1,6 +1,19 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox, QDialogButtonBox, QMessageBox, QInputDialog, QPushButton, QCheckBox
+from PyQt6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QComboBox,
+    QDialogButtonBox,
+    QMessageBox,
+    QInputDialog,
+    QPushButton,
+    QCheckBox,
+    QProgressDialog,
+)
 from PyQt6.QtGui import QIcon, QAction
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 try:
     import keyring
 except ImportError:
@@ -10,6 +23,34 @@ import json
 import os
 
 PROFILE_FILE = os.path.expanduser('~/.gerenciador_postgres_profiles.json')
+
+
+class ConnectionWorker(QThread):
+    """Worker thread para testar conexão sem bloquear a interface."""
+
+    success = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, params, parent=None):
+        super().__init__(parent)
+        self.params = params
+        self._cancelled = False
+
+    def run(self):
+        try:
+            import psycopg2
+
+            conn = psycopg2.connect(connect_timeout=5, **self.params)
+            conn.close()
+            if not self._cancelled:
+                self.success.emit()
+        except Exception as e:
+            if not self._cancelled:
+                self.error.emit(str(e))
+
+    def cancel(self):
+        self._cancelled = True
+        self.terminate()
 
 class ConnectionDialog(QDialog):
     def __init__(self, parent=None):
@@ -172,16 +213,29 @@ class ConnectionDialog(QDialog):
             QMessageBox.warning(self, "Campos obrigatórios", "Preencha todos os campos obrigatórios.")
             return
 
-        # Testa a conexão
-        try:
-            import psycopg2
-            conn = psycopg2.connect(**params)
-            conn.close()
-            # Se a conexão for bem-sucedida, apenas aceita o diálogo
-            super().accept()
-        except Exception as e:
-            QMessageBox.critical(self, "Erro de conexão", f"Não foi possível conectar: {e}")
-            return
+        self.progress_dialog = QProgressDialog("Conectando…", "Cancelar", 0, 0, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.canceled.connect(self._on_cancel_connection)
+        self.progress_dialog.show()
+
+        self.worker = ConnectionWorker(params, self)
+        self.worker.success.connect(self._on_connection_success)
+        self.worker.error.connect(self._on_connection_error)
+        self.worker.start()
+
+    def _on_connection_success(self):
+        self.progress_dialog.close()
+        super().accept()
+
+    def _on_connection_error(self, message):
+        self.progress_dialog.close()
+        QMessageBox.critical(self, "Erro de conexão", f"Não foi possível conectar: {message}")
+
+    def _on_cancel_connection(self):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.cancel()
+        self.progress_dialog.close()
+        QMessageBox.warning(self, "Cancelado", "Conexão cancelada.")
 
     def on_save_profile(self):
         # Pergunta o nome do perfil
