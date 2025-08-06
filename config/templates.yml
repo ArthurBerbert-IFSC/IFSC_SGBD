@@ -1,0 +1,6 @@
+# Templates de privilégios para roles
+# Exemplo:
+# leitor:
+#   - schema: public
+#     tables: '*'
+#     privileges: [SELECT]
