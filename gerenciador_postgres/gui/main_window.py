@@ -55,7 +55,9 @@ class MainWindow(QMainWindow):
         self.actionDesconectar.triggered.connect(self.on_desconectar)
         self.actionSair.triggered.connect(self.close)
         self.actionUsuariosGrupos.triggered.connect(self.on_usuarios_grupos)
+
         self.actionAjuda.triggered.connect(self.show_help)
+        self.actionSobre.triggered.connect(self.show_about)
         # Outras ações seriam conectadas aqui no futuro...
 
         # --- Adicionar Ações aos Menus ---
@@ -130,6 +132,13 @@ class MainWindow(QMainWindow):
         from .help_dialog import HelpDialog
         dlg = HelpDialog(self)
         dlg.exec()
+
+    def show_about(self):
+        QMessageBox.about(
+            self,
+            "Sobre o Gerenciador PostgreSQL",
+            "Gerenciador PostgreSQL\nVersão 1.0\nAutor: Arthur Peixoto Berbert Lima",
+        )
 
     def _setup_central(self):
         self.label = QLabel("Bem-vindo ao Gerenciador PostgreSQL!\nUtilize o menu para começar.", self)
