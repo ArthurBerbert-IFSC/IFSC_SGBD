@@ -1,54 +1,120 @@
-import os
+
+import logging
+import unittest
 import sys
-from unittest.mock import MagicMock
+import pathlib
 
-import pytest
-
-# Ensure project root is on the Python path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 from gerenciador_postgres.schema_manager import SchemaManager
 
 
-def _make_dao(has_permission: bool):
-    """Create a mocked dao/connection pair returning given permission."""
-    dao = MagicMock()
-    conn = MagicMock()
-    cursor = MagicMock()
-    cursor.fetchone.return_value = (has_permission,)
-    conn.cursor.return_value.__enter__.return_value = cursor
-    dao.conn = conn
-    return dao, conn, cursor
+class DummyConn:
+    def __init__(self):
+        self.committed = False
+        self.rolled_back = False
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    # Context manager cursor for tests; not used because methods are overridden
+    def cursor(self):
+        class DummyCursor:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, exc_type, exc, tb):
+                pass
+
+            def execute(self_inner, *args, **kwargs):
+                pass
+
+            def fetchone(self_inner):
+                return (None,)
+
+        return DummyCursor()
 
 
-def test_create_schema_with_permission():
-    dao, conn, cursor = _make_dao(True)
-    logger = MagicMock()
-    manager = SchemaManager(dao=dao, logger=logger, operador="prof_user")
+class DummyDAO:
+    def __init__(self):
+        self.conn = DummyConn()
+        self.created = []
+        self.dropped = []
 
-    manager.create_schema("novo_schema")
+    def create_schema(self, name, owner=None):
+        self.created.append((name, owner))
 
-    cursor.execute.assert_called_once_with(
-        "SELECT pg_has_role(%s, %s, 'member')", ("prof_user", "Professores")
-    )
-    dao.create_schema.assert_called_once_with("novo_schema", None)
-    conn.commit.assert_called_once()
-    logger.info.assert_called_once_with("[prof_user] Criou schema: novo_schema")
+    def drop_schema(self, name, cascade=False):
+        self.dropped.append((name, cascade))
+
+    def alter_schema_owner(self, name, owner):
+        pass
+
+    def list_schemas(self):
+        return []
 
 
-def test_create_schema_without_permission():
-    dao, conn, cursor = _make_dao(False)
-    logger = MagicMock()
-    manager = SchemaManager(dao=dao, logger=logger, operador="aluno")
+class TestableSchemaManager(SchemaManager):
+    def __init__(self, dao, logger, perms):
+        super().__init__(dao, logger)
+        self._user = perms.get('user', 'alice')
+        self._is_super = perms.get('super', False)
+        self._in_prof = perms.get('professor', False)
+        self._owner = perms.get('owner', None)
 
-    with pytest.raises(PermissionError):
-        manager.create_schema("schema")
+    def _current_user(self):
+        return self._user
 
-    cursor.execute.assert_called_once_with(
-        "SELECT pg_has_role(%s, %s, 'member')", ("aluno", "Professores")
-    )
-    dao.create_schema.assert_not_called()
-    conn.commit.assert_not_called()
-    conn.rollback.assert_called_once()
-    logger.error.assert_called()
+    def _has_role(self, username, role):
+        return self._in_prof if role == 'Professores' else False
 
+    def _is_superuser(self, username):
+        return self._is_super
+
+    def _get_schema_owner(self, schema):
+        return self._owner
+
+
+class SchemaManagerPermissionTests(unittest.TestCase):
+    def setUp(self):
+        logger = logging.getLogger('test')
+        logger.addHandler(logging.NullHandler())
+        self.dao = DummyDAO()
+        self.logger = logger
+
+    def test_create_schema_authorized(self):
+        mgr = TestableSchemaManager(self.dao, self.logger, {'professor': True})
+        mgr.create_schema('novo')
+        self.assertEqual(self.dao.created, [('novo', None)])
+        self.assertTrue(self.dao.conn.committed)
+
+    def test_create_schema_unauthorized(self):
+        mgr = TestableSchemaManager(self.dao, self.logger, {'professor': False})
+        with self.assertRaises(PermissionError):
+            mgr.create_schema('novo')
+        self.assertEqual(self.dao.created, [])
+        self.assertFalse(self.dao.conn.committed)
+        self.assertFalse(self.dao.conn.rolled_back)  # Permission check occurs before transaction
+
+    def test_delete_schema_authorized_owner(self):
+        perms = {'owner': 'alice'}
+        mgr = TestableSchemaManager(self.dao, self.logger, perms)
+        mgr.delete_schema('teste')
+        self.assertEqual(self.dao.dropped, [('teste', False)])
+        self.assertTrue(self.dao.conn.committed)
+
+    def test_delete_schema_unauthorized(self):
+        perms = {'owner': 'other'}
+        mgr = TestableSchemaManager(self.dao, self.logger, perms)
+        with self.assertRaises(PermissionError):
+            mgr.delete_schema('teste')
+        self.assertEqual(self.dao.dropped, [])
+        self.assertFalse(self.dao.conn.committed)
+        self.assertFalse(self.dao.conn.rolled_back)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -10,7 +10,45 @@ class SchemaManager:
         self.logger = logger
         self.operador = operador
 
+    # --- Helpers de permissão -------------------------------------------------
+    def _current_user(self) -> str:
+        with self.dao.conn.cursor() as cur:
+            cur.execute('SELECT current_user')
+            return cur.fetchone()[0]
+
+    def _has_role(self, username: str, role: str) -> bool:
+        with self.dao.conn.cursor() as cur:
+            cur.execute("SELECT pg_has_role(%s, %s, 'member')", (username, role))
+            row = cur.fetchone()
+            return bool(row and row[0])
+
+    def _is_superuser(self, username: str) -> bool:
+        with self.dao.conn.cursor() as cur:
+            cur.execute("SELECT usesuper FROM pg_user WHERE usename = %s", (username,))
+            row = cur.fetchone()
+            return bool(row and row[0])
+
+    def _get_schema_owner(self, schema: str) -> str | None:
+        with self.dao.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT pg_catalog.pg_get_userbyid(nspowner)
+                FROM pg_namespace
+                WHERE nspname = %s
+                """,
+                (schema,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+    # --- Operações ------------------------------------------------------------
     def create_schema(self, name: str, owner: str | None = None):
+        user = self._current_user()
+        if not (self._is_superuser(user) or self._has_role(user, 'Professores')):
+            self.logger.error(
+                f"[{self.operador}] Usuário '{user}' não tem permissão para criar schema"
+            )
+            raise PermissionError('Apenas Professores ou superusuários podem criar schemas.')
         try:
             with self.dao.conn.cursor() as cur:
                 cur.execute(
@@ -28,6 +66,13 @@ class SchemaManager:
                 )
 
             self.dao.create_schema(name, owner)
+            if hasattr(self.dao, 'enable_postgis'):
+                try:
+                    self.dao.enable_postgis(name)
+                except Exception as e:
+                    self.logger.warning(
+                        f"[{self.operador}] Falha ao habilitar PostGIS no schema '{name}': {e}"
+                    )
             self.dao.conn.commit()
             self.logger.info(f"[{self.operador}] Criou schema: {name}")
         except PermissionError:
@@ -38,6 +83,13 @@ class SchemaManager:
             raise
 
     def delete_schema(self, name: str, cascade: bool = False):
+        user = self._current_user()
+        owner = self._get_schema_owner(name)
+        if not (self._is_superuser(user) or user == owner):
+            self.logger.error(
+                f"[{self.operador}] Usuário '{user}' não pode remover schema '{name}'"
+            )
+            raise PermissionError('Apenas o proprietário ou um superusuário pode remover schemas.')
         try:
             self.dao.drop_schema(name, cascade)
             self.dao.conn.commit()
