@@ -12,9 +12,26 @@ class SchemaManager:
 
     def create_schema(self, name: str, owner: str | None = None):
         try:
+            with self.dao.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_has_role(%s, %s, 'member')",
+                    (self.operador, 'Professores'),
+                )
+                has_permission = cur.fetchone()[0]
+            if not has_permission:
+                self.dao.conn.rollback()
+                self.logger.error(
+                    f"[{self.operador}] Permissão negada para criar schema '{name}'"
+                )
+                raise PermissionError(
+                    "Usuário não pertence ao grupo 'Professores'"
+                )
+
             self.dao.create_schema(name, owner)
             self.dao.conn.commit()
             self.logger.info(f"[{self.operador}] Criou schema: {name}")
+        except PermissionError:
+            raise
         except Exception as e:
             self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao criar schema '{name}': {e}")
