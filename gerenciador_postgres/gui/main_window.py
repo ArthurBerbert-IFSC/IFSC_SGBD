@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         self.actionAuditoria = QAction("Auditoria", self)
 
         # Ações do menu Ajuda
+        self.actionAjuda = QAction("Ajuda", self)
         self.actionSobre = QAction("Sobre", self)
 
         # --- Conectar Sinais (Handlers) ---
@@ -54,6 +55,8 @@ class MainWindow(QMainWindow):
         self.actionDesconectar.triggered.connect(self.on_desconectar)
         self.actionSair.triggered.connect(self.close)
         self.actionUsuariosGrupos.triggered.connect(self.on_usuarios_grupos)
+
+        self.actionAjuda.triggered.connect(self.show_help)
         self.actionSobre.triggered.connect(self.show_about)
         # Outras ações seriam conectadas aqui no futuro...
 
@@ -72,6 +75,7 @@ class MainWindow(QMainWindow):
         self.menuGerenciar.setEnabled(False) # Começa desabilitado
 
         # Menu Ajuda
+        self.menuAjuda.addAction(self.actionAjuda)
         self.menuAjuda.addAction(self.actionSobre)
 
     def _setup_statusbar(self):
@@ -123,6 +127,11 @@ class MainWindow(QMainWindow):
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
+
+    def show_help(self):
+        from .help_dialog import HelpDialog
+        dlg = HelpDialog(self)
+        dlg.exec()
 
     def show_about(self):
         QMessageBox.about(
