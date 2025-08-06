@@ -60,6 +60,7 @@ class ConnectionDialog(QDialog):
         self.resize(400, 220)
         self._setup_ui()
         self._load_profiles()
+        self._cancelled_by_user = False
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -213,6 +214,7 @@ class ConnectionDialog(QDialog):
             QMessageBox.warning(self, "Campos obrigatórios", "Preencha todos os campos obrigatórios.")
             return
 
+        self._cancelled_by_user = False
         self.progress_dialog = QProgressDialog("Conectando…", "Cancelar", 0, 0, self)
         self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self.progress_dialog.canceled.connect(self._on_cancel_connection)
@@ -224,18 +226,22 @@ class ConnectionDialog(QDialog):
         self.worker.start()
 
     def _on_connection_success(self):
+        self.progress_dialog.canceled.disconnect(self._on_cancel_connection)
         self.progress_dialog.close()
         super().accept()
 
     def _on_connection_error(self, message):
+        self.progress_dialog.canceled.disconnect(self._on_cancel_connection)
         self.progress_dialog.close()
         QMessageBox.critical(self, "Erro de conexão", f"Não foi possível conectar: {message}")
 
     def _on_cancel_connection(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
+            self._cancelled_by_user = True
             self.worker.cancel()
         self.progress_dialog.close()
-        QMessageBox.warning(self, "Cancelado", "Conexão cancelada.")
+        if self._cancelled_by_user:
+            QMessageBox.warning(self, "Cancelado", "Conexão cancelada.")
 
     def on_save_profile(self):
         # Pergunta o nome do perfil
