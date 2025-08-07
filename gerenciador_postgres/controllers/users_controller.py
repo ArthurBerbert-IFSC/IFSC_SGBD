@@ -26,6 +26,17 @@ class UsersController(QObject):
         self.data_changed.emit()
         return result
 
+    def list_groups(self):
+        """Retorna lista de grupos existentes."""
+        return self.role_manager.list_groups()
+
+    def add_user_to_group(self, username: str, group_name: str) -> bool:
+        """Associa um usuário a um grupo."""
+        success = self.role_manager.add_user_to_group(username, group_name)
+        if success:
+            self.data_changed.emit()
+        return success
+
     def delete_user(self, username: str) -> bool:
         success = self.role_manager.delete_user(username)
         if success:
