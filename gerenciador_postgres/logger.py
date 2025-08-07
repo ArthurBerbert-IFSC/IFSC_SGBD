@@ -5,10 +5,8 @@ from .config_manager import load_config
 import os
 
 def setup_logger(name: str = 'app'):
-    config = None
     try:
-        from .config_manager import load_config as _load_config
-        config = _load_config()
+        config = load_config()
     except Exception:
         config = {'log_path': str(BASE_DIR / 'logs' / 'app.log'), 'log_level': 'INFO'}
     log_path = config.get('log_path', str(BASE_DIR / 'logs' / 'app.log'))
