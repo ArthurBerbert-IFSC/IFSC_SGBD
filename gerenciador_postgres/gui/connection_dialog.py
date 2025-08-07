@@ -136,10 +136,9 @@ class ConnectionDialog(QDialog):
         self.toggle_password_action.setCheckable(True)
         self.toggle_password_action.triggered.connect(self.toggle_password_visibility)
         self.txtPassword.addAction(self.toggle_password_action, QLineEdit.ActionPosition.TrailingPosition)
-        try:
-            self.toggle_password_action.setIcon(self.style().standardIcon(getattr(self.style(), 'SP_DialogApplyButton', QIcon.FallbackThemeIcon)))
-        except:
-            pass
+        self.toggle_password_action.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
+        )
 
         form_layout.addLayout(password_layout)
         layout.addLayout(form_layout)
