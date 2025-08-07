@@ -19,8 +19,6 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._setup_statusbar()
         self._setup_central()
-        from .users_view import UsersView
-        from PyQt6.QtWidgets import QInputDialog, QLineEdit
         self.db_manager = None
         self.role_manager = None
         self.users_controller = None
@@ -44,7 +42,8 @@ class MainWindow(QMainWindow):
         self.actionSair = QAction("Sair", self)
 
         # Ações do menu Gerenciar
-        self.actionUsuariosGrupos = QAction("Usuários e Grupos", self)
+        self.actionAlunos = QAction("Alunos", self)
+        self.actionTurmas = QAction("Turmas", self)
         self.actionPrivilegios = QAction("Privilégios", self)
         self.actionAmbientes = QAction("Ambientes (Schemas)", self)
         self.actionAuditoria = QAction("Auditoria", self)
@@ -57,7 +56,8 @@ class MainWindow(QMainWindow):
         self.actionConectar.triggered.connect(self.on_conectar)
         self.actionDesconectar.triggered.connect(self.on_desconectar)
         self.actionSair.triggered.connect(self.close)
-        self.actionUsuariosGrupos.triggered.connect(self.on_usuarios_grupos)
+        self.actionAlunos.triggered.connect(self.on_alunos)
+        self.actionTurmas.triggered.connect(self.on_turmas)
         self.actionAmbientes.triggered.connect(self.on_schemas)
 
         self.actionAjuda.triggered.connect(self.show_help)
@@ -72,7 +72,8 @@ class MainWindow(QMainWindow):
         self.menuArquivo.addAction(self.actionSair)
 
         # Menu Gerenciar
-        self.menuGerenciar.addAction(self.actionUsuariosGrupos)
+        self.menuGerenciar.addAction(self.actionAlunos)
+        self.menuGerenciar.addAction(self.actionTurmas)
         self.menuGerenciar.addAction(self.actionPrivilegios)
         self.menuGerenciar.addAction(self.actionAmbientes)
         self.menuGerenciar.addAction(self.actionAuditoria)
@@ -87,19 +88,33 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage("Não conectado")
 
-    def on_usuarios_grupos(self):
-        from .users_view import UsersView
+    def on_alunos(self):
+        from .students_view import StudentsView
         if self.users_controller:
-            # Cria a UsersView como uma janela independente (sem pai)
-            users_window = UsersView(controller=self.users_controller)
-            # Adiciona à lista para que ela não seja descartada pela memória
-            self.opened_windows.append(users_window)
-            # Define um título para a nova janela
-            users_window.setWindowTitle("Gerenciador de Usuários e Grupos")
-            # Mostra a nova janela
-            users_window.show()
+            window = StudentsView(controller=self.users_controller)
+            self.opened_windows.append(window)
+            window.setWindowTitle("Gestão de Alunos")
+            window.show()
         else:
-            QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar usuários.")
+            QMessageBox.warning(
+                self,
+                "Não Conectado",
+                "Você precisa estar conectado a um banco de dados para gerenciar alunos.",
+            )
+
+    def on_turmas(self):
+        from .groups_view import GroupsView
+        if self.users_controller:
+            window = GroupsView(controller=self.users_controller)
+            self.opened_windows.append(window)
+            window.setWindowTitle("Gestão de Turmas")
+            window.show()
+        else:
+            QMessageBox.warning(
+                self,
+                "Não Conectado",
+                "Você precisa estar conectado a um banco de dados para gerenciar turmas.",
+            )
 
 
     def on_conectar(self):
