@@ -120,3 +120,10 @@ class SchemaManager:
             self.logger.error(f"[{self.operador}] Erro ao listar schemas: {e}")
             return []
 
+    def list_roles(self) -> list[str]:
+        try:
+            return self.dao.list_roles()
+        except Exception as e:
+            self.logger.error(f"[{self.operador}] Erro ao listar roles: {e}")
+            return []
+
