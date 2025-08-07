@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
         self.actionDesconectar.triggered.connect(self.on_desconectar)
         self.actionSair.triggered.connect(self.close)
         self.actionUsuariosGrupos.triggered.connect(self.on_usuarios_grupos)
+        self.actionPrivilegios.triggered.connect(self.on_privilegios)
         self.actionAmbientes.triggered.connect(self.on_schemas)
         self.actionAuditoria.triggered.connect(self.on_auditoria)
 
@@ -106,7 +107,26 @@ class MainWindow(QMainWindow):
             # Mostra a nova janela
             users_window.show()
         else:
-            QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar usuários.")
+            QMessageBox.warning(
+                self,
+                "Não Conectado",
+                "Você precisa estar conectado a um banco de dados para gerenciar usuários.",
+            )
+
+    def on_privilegios(self):
+        """Abre a janela para gerenciamento de privilégios."""
+        from .privileges_view import PrivilegesView
+        if self.users_controller:
+            priv_window = PrivilegesView(controller=self.users_controller)
+            self.opened_windows.append(priv_window)
+            priv_window.setWindowTitle("Gerenciador de Privilégios")
+            priv_window.show()
+        else:
+            QMessageBox.warning(
+                self,
+                "Não Conectado",
+                "Você precisa estar conectado a um banco de dados para gerenciar privilégios.",
+            )
 
 
     def on_conectar(self):
