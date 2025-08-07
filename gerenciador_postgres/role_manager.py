@@ -244,6 +244,13 @@ class RoleManager:
             self.logger.error(f"[{self.operador}] Erro ao listar membros do grupo '{group_name}': {e}")
             return []
 
+    def list_user_groups(self, username: str) -> List[str]:
+        try:
+            return self.dao.list_user_groups(username)
+        except Exception as e:
+            self.logger.error(f"[{self.operador}] Erro ao listar grupos do usuário '{username}': {e}")
+            return []
+
     def list_groups(self) -> List[str]:
         try:
             return self.dao.list_groups()

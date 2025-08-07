@@ -109,6 +109,18 @@ class DBManager:
             """, (group_name,))
             return [row[0] for row in cur.fetchall()]
 
+    def list_user_groups(self, username: str) -> List[str]:
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT g.rolname
+                FROM pg_auth_members m
+                JOIN pg_roles u ON m.member = u.oid
+                JOIN pg_roles g ON m.roleid = g.oid
+                WHERE u.rolname = %s
+                ORDER BY g.rolname
+            """, (username,))
+            return [row[0] for row in cur.fetchall()]
+
     def list_groups(self) -> List[str]:
         with self.conn.cursor() as cur:
             cur.execute("""
