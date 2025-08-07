@@ -196,6 +196,25 @@ class RoleManager:
             self.logger.error(f"[{self.operador}] Falha ao excluir grupo '{group_name}': {e}")
             return False
 
+    def delete_group_and_members(self, group_name: str) -> bool:
+        try:
+            members = self.dao.list_group_members(group_name)
+            for user in members:
+                if not self.delete_user(user):
+                    raise RuntimeError(f"Falha ao excluir usuário {user}")
+            self.dao.delete_group(group_name)
+            self.dao.conn.commit()
+            self.logger.info(
+                f"[{self.operador}] Excluiu grupo '{group_name}' e seus membros: {members}"
+            )
+            return True
+        except Exception as e:
+            self.dao.conn.rollback()
+            self.logger.error(
+                f"[{self.operador}] Falha ao excluir grupo '{group_name}' e seus membros: {e}"
+            )
+            return False
+
     def add_user_to_group(self, username: str, group_name: str) -> bool:
         try:
             self.dao.add_user_to_group(username, group_name)

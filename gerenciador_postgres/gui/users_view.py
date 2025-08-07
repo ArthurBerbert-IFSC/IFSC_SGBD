@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QTabWidget,
     QVBoxLayout,
+    QDialog,
+    QHBoxLayout,
     QToolBar,
     QPushButton,
     QLabel,
@@ -136,31 +138,75 @@ class UsersView(QWidget):
 
     def on_delete_item_clicked(self):
         current_item = self.lstEntities.currentItem()
-        if not current_item: return
+        if not current_item:
+            return
         entity_type, entity_name = current_item.data(Qt.ItemDataRole.UserRole)
-        reply = QMessageBox.question(self, "Confirmar Deleção", f"Tem certeza que deseja deletar o {entity_type} '{entity_name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if entity_type == 'group':
+            self.on_delete_group_clicked(entity_name)
+            return
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Deleção",
+            f"Tem certeza que deseja deletar o {entity_type} '{entity_name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                success = False
-                if entity_type == 'user':
-                    success = self.controller.delete_user(entity_name)
-                elif entity_type == 'group':
-                    success = self.controller.delete_group(entity_name)
-
+                success = self.controller.delete_user(entity_name)
                 if success:
                     QMessageBox.information(
                         self,
                         "Sucesso",
-                        f"{entity_type.capitalize()} '{entity_name}' deletado com sucesso."
+                        f"{entity_type.capitalize()} '{entity_name}' deletado com sucesso.",
                     )
                 else:
                     QMessageBox.critical(
                         self,
                         "Erro",
-                        f"Ocorreu um erro ao deletar o item. Verifique os logs."
+                        "Ocorreu um erro ao deletar o item. Verifique os logs.",
                     )
             except Exception as e:
-                QMessageBox.critical(self, "Erro", f"Não foi possível deletar o item.\nMotivo: {e}")
+                QMessageBox.critical(
+                    self,
+                    "Erro",
+                    f"Não foi possível deletar o item.\nMotivo: {e}",
+                )
+
+    def on_delete_group_clicked(self, group_name: str):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Confirmar Deleção")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(f"Como deseja excluir a turma '{group_name}'?"))
+        btn_all = QPushButton("Apagar Turma e Alunos")
+        btn_group = QPushButton("Apagar Apenas a Turma")
+        btn_cancel = QPushButton("Cancelar")
+        btn_all.clicked.connect(lambda: dialog.done(1))
+        btn_group.clicked.connect(lambda: dialog.done(2))
+        btn_cancel.clicked.connect(lambda: dialog.done(0))
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(btn_all)
+        btn_layout.addWidget(btn_group)
+        btn_layout.addWidget(btn_cancel)
+        layout.addLayout(btn_layout)
+        choice = dialog.exec()
+        success = False
+        if choice == 1:
+            success = self.controller.delete_group_and_members(group_name)
+            msg_success = f"Turma '{group_name}' e alunos deletados com sucesso."
+        elif choice == 2:
+            success = self.controller.delete_group(group_name)
+            msg_success = f"Turma '{group_name}' deletada com sucesso."
+        else:
+            return
+        if success:
+            QMessageBox.information(self, "Sucesso", msg_success)
+        else:
+            QMessageBox.critical(
+                self,
+                "Erro",
+                "Ocorreu um erro ao deletar o item. Verifique os logs.",
+            )
 
     def on_change_password_clicked(self):
         current_item = self.lstEntities.currentItem()
