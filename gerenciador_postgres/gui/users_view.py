@@ -38,6 +38,7 @@ class UsersView(QWidget):
         layout = QVBoxLayout(self)
         self.toolbar = QToolBar()
         self.btnNewUser = QPushButton("Novo Usuário")
+        self.btnBatchUsers = QPushButton("Inserir em Lote")
         self.btnNewGroup = QPushButton("Nova Turma")
         self.btnDelete = QPushButton("Excluir Selecionado")
         self.btnChangePassword = QPushButton("Alterar Senha")
@@ -46,6 +47,7 @@ class UsersView(QWidget):
         self.btnChangePassword.setEnabled(False)
         self.btnManageGroups.setEnabled(False)
         self.toolbar.addWidget(self.btnNewUser)
+        self.toolbar.addWidget(self.btnBatchUsers)
         self.toolbar.addWidget(self.btnNewGroup)
         self.toolbar.addWidget(self.btnDelete)
         self.toolbar.addWidget(self.btnChangePassword)
@@ -75,6 +77,7 @@ class UsersView(QWidget):
         self.txtFilter.textChanged.connect(self.filter_list)
         self.lstEntities.currentItemChanged.connect(self.on_entity_selected)
         self.btnNewUser.clicked.connect(self.on_new_user_clicked)
+        self.btnBatchUsers.clicked.connect(self.on_new_user_batch_clicked)
         self.btnNewGroup.clicked.connect(self.on_new_group_clicked)
         self.btnDelete.clicked.connect(self.on_delete_item_clicked)
         self.btnChangePassword.clicked.connect(self.on_change_password_clicked)
@@ -128,12 +131,54 @@ class UsersView(QWidget):
             username = username.lower()
         else: return
         password, ok2 = QInputDialog.getText(self, "Nova Senha", f"Senha para '{username}':", QLineEdit.EchoMode.Password)
-        if not ok2 or not password: return
+        if not ok2 or not password:
+            return
+        valid_until, ok3 = QInputDialog.getText(
+            self,
+            "Validade",
+            "Data de expiração (YYYY-MM-DD) - deixe em branco para nenhuma:",
+        )
+        if not ok3:
+            return
+        valid_until = valid_until.strip() or None
         try:
-            self.controller.create_user(username, password)
+            self.controller.create_user(username, password, valid_until)
             QMessageBox.information(self, "Sucesso", f"Usuário '{username}' criado com sucesso!")
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Não foi possível criar o usuário.\nMotivo: {e}")
+
+    def on_new_user_batch_clicked(self):
+        text, ok = QInputDialog.getMultiLineText(
+            self,
+            "Inserir Usuários em Lote",
+            "Informe um usuário por linha no formato 'usuario,senha[,YYYY-MM-DD]':",
+        )
+        if not ok or not text.strip():
+            return
+        users_data = []
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 2:
+                continue
+            username, password = parts[0].lower(), parts[1]
+            valid_until = parts[2] if len(parts) > 2 and parts[2] else None
+            users_data.append((username, password, valid_until))
+        if not users_data:
+            QMessageBox.warning(self, "Aviso", "Nenhum usuário válido informado.")
+            return
+        try:
+            created = self.controller.create_users_batch(users_data)
+            QMessageBox.information(
+                self, "Sucesso", f"{len(created)} usuários criados com sucesso!"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Erro",
+                f"Falha ao inserir usuários em lote.\nMotivo: {e}",
+            )
 
     def on_new_group_clicked(self):
         group_name, ok = QInputDialog.getText(

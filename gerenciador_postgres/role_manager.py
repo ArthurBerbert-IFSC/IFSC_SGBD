@@ -12,21 +12,25 @@ class RoleManager:
         self.operador = operador
         self.audit_manager = audit_manager
 
-    def create_user(self, username: str, password: str) -> str:
+    def create_user(self, username: str, password: str, valid_until: str | None = None) -> str:
         dados_antes = None
         dados_depois = None
         sucesso = False
-        
+
         try:
             if self.dao.find_user_by_name(username):
                 raise ValueError(f"Usuário '{username}' já existe.")
-            
-            self.dao.insert_user(username, password)
+
+            self.dao.insert_user(username, password, valid_until)
             self.dao.conn.commit()
-            
-            dados_depois = {'username': username, 'can_login': True}
+
+            dados_depois = {
+                'username': username,
+                'can_login': True,
+                'valid_until': valid_until,
+            }
             sucesso = True
-            
+
             self.logger.info(f"[{self.operador}] Criou usuário: {username}")
             
             # Registrar auditoria
@@ -36,7 +40,7 @@ class RoleManager:
                     operacao='CREATE_USER',
                     objeto_tipo='USER',
                     objeto_nome=username,
-                    detalhes={'password_set': True},
+                    detalhes={'password_set': True, 'valid_until': valid_until},
                     dados_antes=dados_antes,
                     dados_depois=dados_depois,
                     sucesso=sucesso
@@ -62,6 +66,16 @@ class RoleManager:
                 )
             
             raise
+
+    def create_users_batch(self, users_info: List[tuple[str, str, str | None]]):
+        """Cria múltiplos usuários de uma vez.
+
+        users_info: lista de tuplas (username, password, valid_until)
+        """
+        created = []
+        for username, password, valid_until in users_info:
+            created.append(self.create_user(username, password, valid_until))
+        return created
 
     def get_user(self, username: str) -> Optional[User]:
         try:
