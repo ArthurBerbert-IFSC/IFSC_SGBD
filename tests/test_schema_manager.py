@@ -29,11 +29,14 @@ class DummyConn:
             def __exit__(self_inner, exc_type, exc, tb):
                 pass
 
-            def execute(self_inner, *args, **kwargs):
-                pass
+            def execute(self_inner, sql, params=None):
+                if "pg_has_role" in sql:
+                    self_inner._result = [(True,)]
+                else:
+                    self_inner._result = [(None,)]
 
             def fetchone(self_inner):
-                return (None,)
+                return self_inner._result[0]
 
         return DummyCursor()
 

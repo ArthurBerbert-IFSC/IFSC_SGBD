@@ -14,6 +14,9 @@ class SchemaController(QObject):
     def list_schemas(self):
         return self.schema_manager.list_schemas()
 
+    def list_roles(self):
+        return self.schema_manager.list_roles()
+
     def create_schema(self, name: str, owner: str | None = None):
         try:
             result = self.schema_manager.create_schema(name, owner)

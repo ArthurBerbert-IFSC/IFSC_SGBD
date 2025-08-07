@@ -99,9 +99,39 @@ class DBManager:
             """)
             return [row[0] for row in cur.fetchall()]
 
+    def list_roles(self) -> List[str]:
+        """Retorna todos os roles disponíveis (usuários e grupos)."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT rolname FROM pg_roles
+                WHERE rolname NOT LIKE 'pg\\_%'
+                  AND rolname NOT LIKE 'rls\\_%'
+                ORDER BY rolname
+                """
+            )
+            return [row[0] for row in cur.fetchall()]
+
     # Métodos de schema
     def create_schema(self, schema_name: str, owner: str | None = None):
         with self.conn.cursor() as cur:
+            if owner:
+                cur.execute(
+                    "SELECT 1 FROM pg_roles WHERE rolname = %s", (owner,)
+                )
+                if not cur.fetchone():
+                    cur.execute(
+                        """
+                        SELECT rolname FROM pg_roles
+                        WHERE rolname NOT LIKE 'pg\\_%'
+                          AND rolname NOT LIKE 'rls\\_%'
+                        ORDER BY rolname
+                        """
+                    )
+                    roles = ", ".join(row[0] for row in cur.fetchall())
+                    raise ValueError(
+                        f"Role '{owner}' não existe. Roles disponíveis: {roles}"
+                    )
             sql = f'CREATE SCHEMA "{schema_name}"'
             if owner:
                 sql += f' AUTHORIZATION "{owner}"'

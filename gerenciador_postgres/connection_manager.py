@@ -20,8 +20,10 @@ class ConnectionManager:
         return self._conn
 
     def get_connection(self) -> connection:
-        """Retorna a conexão ativa, se houver."""
-        return self._conn
+        """Retorna a conexão ativa, garantindo que esteja aberta."""
+        if self._conn and getattr(self._conn, "closed", 1) == 0:
+            return self._conn
+        raise ConnectionError("Conexão não ativa")
 
     def disconnect(self):
         """Encerra a conexão ativa, se existir."""
