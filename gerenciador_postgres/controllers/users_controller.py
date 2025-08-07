@@ -37,6 +37,12 @@ class UsersController(QObject):
             self.data_changed.emit()
         return success
 
+    def delete_group_and_members(self, group_name: str) -> bool:
+        success = self.role_manager.delete_group_and_members(group_name)
+        if success:
+            self.data_changed.emit()
+        return success
+
     def change_password(self, username: str, new_password: str) -> bool:
         return self.role_manager.change_password(username, new_password)
 
