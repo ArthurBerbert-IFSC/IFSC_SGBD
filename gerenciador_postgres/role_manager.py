@@ -67,14 +67,40 @@ class RoleManager:
             
             raise
 
-    def create_users_batch(self, users_info: List[tuple[str, str, str | None]]):
-        """Cria múltiplos usuários de uma vez.
+    def create_users_batch(self, users_info: list, valid_until: str | None = None):
+        """Cria múltiplos usuários gerando usernames a partir do nome completo.
 
-        users_info: lista de tuplas (username, password, valid_until)
+        Parameters
+        ----------
+        users_info : list
+            Lista de tuplas ``(matricula, nome_completo)``.
+        valid_until : str | None
+            Data de expiração opcional aplicada a todos os usuários.
         """
-        created = []
-        for username, password, valid_until in users_info:
-            created.append(self.create_user(username, password, valid_until))
+
+        created: List[str] = []
+        for matricula, nome_completo in users_info:
+            password = matricula
+            partes = nome_completo.split()
+            if not partes:
+                continue
+            username_base = f"{partes[0].lower()}.{partes[-1].lower()}"
+            tentativa = 0
+            while True:
+                username = username_base if tentativa == 0 else f"{username_base}{tentativa}"
+                try:
+                    created.append(self.create_user(username, password, valid_until))
+                    break
+                except ValueError as e:
+                    if "já existe" in str(e):
+                        tentativa += 1
+                        continue
+                    else:
+                        self.logger.error(f"[{self.operador}] Falha ao criar usuário '{username}': {e}")
+                        break
+                except Exception as e:
+                    self.logger.error(f"[{self.operador}] Falha ao criar usuário '{username}': {e}")
+                    break
         return created
 
     def get_user(self, username: str) -> Optional[User]:

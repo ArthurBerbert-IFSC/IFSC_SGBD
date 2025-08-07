@@ -21,8 +21,18 @@ class UsersController(QObject):
         self.data_changed.emit()
         return result
 
-    def create_users_batch(self, users_data):
-        results = self.role_manager.create_users_batch(users_data)
+    def create_users_batch(self, users_data: list, valid_until: str | None = None):
+        """Cria múltiplos usuários de uma vez.
+
+        Parameters
+        ----------
+        users_data: list
+            Lista de tuplas ``(matricula, nome_completo)``.
+        valid_until: str | None
+            Data de expiração a ser aplicada a todos os usuários ou ``None``.
+        """
+
+        results = self.role_manager.create_users_batch(users_data, valid_until)
         self.data_changed.emit()
         return results
 
