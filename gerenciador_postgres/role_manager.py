@@ -255,3 +255,25 @@ class RoleManager:
                 f"[{self.operador}] Falha ao atualizar privilégios do grupo '{group_name}': {e}"
             )
             return False
+
+    def apply_template_to_group(self, group_name: str, template: str) -> bool:
+        """Aplica um template de permissões a todas as tabelas para o grupo."""
+        try:
+            from config.permission_templates import PERMISSION_TEMPLATES
+
+            perms = PERMISSION_TEMPLATES.get(template)
+            if perms is None:
+                raise ValueError(f"Template '{template}' não encontrado.")
+
+            tables = self.list_tables_by_schema()
+            privileges: Dict[str, Dict[str, Set[str]]] = {}
+            for schema, tbls in tables.items():
+                for table in tbls:
+                    privileges.setdefault(schema, {})[table] = set(perms)
+
+            return self.set_group_privileges(group_name, privileges)
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Falha ao aplicar template '{template}' ao grupo '{group_name}': {e}"
+            )
+            return False

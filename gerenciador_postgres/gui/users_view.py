@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from pathlib import Path
+from config.permission_templates import DEFAULT_TEMPLATE
 
 
 class UsersView(QWidget):
@@ -34,7 +35,7 @@ class UsersView(QWidget):
         layout = QVBoxLayout(self)
         self.toolbar = QToolBar()
         self.btnNewUser = QPushButton("Novo Usuário")
-        self.btnNewGroup = QPushButton("Novo Grupo")
+        self.btnNewGroup = QPushButton("Nova Turma")
         self.btnDelete = QPushButton("Excluir Selecionado")
         self.btnChangePassword = QPushButton("Alterar Senha")
         self.btnDelete.setEnabled(False)
@@ -126,13 +127,25 @@ class UsersView(QWidget):
             QMessageBox.critical(self, "Erro", f"Não foi possível criar o usuário.\nMotivo: {e}")
 
     def on_new_group_clicked(self):
-        group_name, ok = QInputDialog.getText(self, "Novo Grupo", "Digite o nome do novo grupo (deve começar com 'grp_'):")
-        if not ok or not group_name: return
+        group_name, ok = QInputDialog.getText(
+            self,
+            "Nova Turma",
+            "Nome da turma (deve começar com 'grp_'):",
+            QLineEdit.EchoMode.Normal,
+            "grp_",
+        )
+        if not ok or not group_name:
+            return
+        group_name = group_name.strip()
+        if not group_name.startswith("grp_"):
+            QMessageBox.warning(self, "Erro", "Nome da turma deve começar com 'grp_'.")
+            return
         try:
             self.controller.create_group(group_name)
-            QMessageBox.information(self, "Sucesso", f"Grupo '{group_name}' criado com sucesso!")
+            self.controller.apply_template_to_group(group_name, DEFAULT_TEMPLATE)
+            QMessageBox.information(self, "Sucesso", f"Turma '{group_name}' criada com sucesso!")
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Não foi possível criar o grupo.\nMotivo: {e}")
+            QMessageBox.critical(self, "Erro", f"Não foi possível criar a turma.\nMotivo: {e}")
 
     def on_delete_item_clicked(self):
         current_item = self.lstEntities.currentItem()
