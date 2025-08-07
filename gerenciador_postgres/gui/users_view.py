@@ -1,12 +1,27 @@
-from PyQt6.QtWidgets import (QWidget, QSplitter, QLineEdit, QListWidget, QTabWidget,
-                             QVBoxLayout, QToolBar, QPushButton, QLabel, QListWidgetItem,
-                             QInputDialog, QMessageBox)
+from PyQt6.QtWidgets import (
+    QWidget,
+    QSplitter,
+    QLineEdit,
+    QListWidget,
+    QTabWidget,
+    QVBoxLayout,
+    QToolBar,
+    QPushButton,
+    QLabel,
+    QListWidgetItem,
+    QInputDialog,
+    QMessageBox,
+)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
+from pathlib import Path
 
 
 class UsersView(QWidget):
     def __init__(self, parent=None, controller=None):
         super().__init__(parent)
+        assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
         self.controller = controller
         self.setWindowTitle("Gerenciador de Usuários e Grupos")
         self._setup_ui()

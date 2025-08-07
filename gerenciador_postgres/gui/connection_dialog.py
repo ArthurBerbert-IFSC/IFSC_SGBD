@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from pathlib import Path
 try:
     import keyring
 except ImportError:
@@ -55,6 +56,8 @@ class ConnectionWorker(QThread):
 class ConnectionDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
         self.setWindowTitle("Conectar ao Banco de Dados")
         self.setModal(True)
         self.resize(400, 220)

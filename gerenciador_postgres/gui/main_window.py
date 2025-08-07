@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import QMainWindow, QLabel, QMenuBar
 from PyQt6.QtWidgets import QStatusBar, QApplication, QMessageBox, QDialog
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import Qt
+from pathlib import Path
 from .connection_dialog import ConnectionDialog
 from ..db_manager import DBManager
 from ..role_manager import RoleManager
@@ -14,6 +15,8 @@ from ..logger import setup_logger
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
         self.setWindowTitle("Gerenciador PostgreSQL")
         self.resize(900, 600)
         self._setup_menu()
