@@ -1,4 +1,5 @@
 from PyQt6.QtCore import QObject, pyqtSignal
+from config.permission_templates import PERMISSION_TEMPLATES
 
 
 class UsersController(QObject):
@@ -54,15 +55,18 @@ class UsersController(QObject):
 
     def list_privilege_templates(self):
         """Templates simples de conjunto de permissões."""
-        return {
-            "Nenhum": set(),
-            "Leitura": {"SELECT"},
-            "Leitura/Escrita": {"SELECT", "INSERT", "UPDATE", "DELETE"},
-        }
+        return PERMISSION_TEMPLATES
 
     def apply_group_privileges(self, group_name: str, privileges):
         """Encaminha atualização de privilégios ao RoleManager."""
         success = self.role_manager.set_group_privileges(group_name, privileges)
+        if success:
+            self.data_changed.emit()
+        return success
+
+    def apply_template_to_group(self, group_name: str, template: str):
+        """Aplica um template de permissões diretamente a um grupo."""
+        success = self.role_manager.apply_template_to_group(group_name, template)
         if success:
             self.data_changed.emit()
         return success
