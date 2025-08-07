@@ -2,6 +2,7 @@ from .db_manager import DBManager
 from .data_models import User, Group
 from typing import Optional, List
 import logging
+from psycopg2 import sql
 
 class RoleManager:
     """Camada de serviço: orquestra operações, valida regras e controla transações."""
@@ -54,7 +55,11 @@ class RoleManager:
         try:
             # Limpeza de objetos antes do DROP ROLE (opcional mas boa prática)
             with self.dao.conn.cursor() as cur:
-                cur.execute(f'REASSIGN OWNED BY "{username}" TO CURRENT_USER')
+                cur.execute(
+                    sql.SQL("REASSIGN OWNED BY {} TO CURRENT_USER").format(
+                        sql.Identifier(username)
+                    )
+                )
             self.dao.delete_user(username)
             self.dao.conn.commit()
             self.logger.info(f"[{self.operador}] Excluiu usuário: {username}")
@@ -69,7 +74,12 @@ class RoleManager:
             if not self.dao.find_user_by_name(username):
                 raise ValueError(f"Usuário '{username}' não existe.")
             with self.dao.conn.cursor() as cur:
-                cur.execute(f'ALTER ROLE "{username}" WITH PASSWORD %s', (new_password,))
+                cur.execute(
+                    sql.SQL("ALTER ROLE {} WITH PASSWORD %s").format(
+                        sql.Identifier(username)
+                    ),
+                    (new_password,),
+                )
             self.dao.conn.commit()
             self.logger.info(f"[{self.operador}] Alterou senha do usuário: {username}")
             return True
