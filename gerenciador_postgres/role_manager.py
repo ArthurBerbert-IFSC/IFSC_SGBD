@@ -1,6 +1,6 @@
 from .db_manager import DBManager
 from .data_models import User, Group
-from typing import Optional, List
+from typing import Optional, List, Dict, Set
 import logging
 from psycopg2 import sql
 
@@ -231,3 +231,27 @@ class RoleManager:
         except Exception as e:
             self.logger.error(f"[{self.operador}] Erro ao listar grupos: {e}")
             return []
+
+    # Métodos de tabelas e privilégios ------------------------------------
+
+    def list_tables_by_schema(self) -> Dict[str, List[str]]:
+        try:
+            return self.dao.list_tables_by_schema()
+        except Exception as e:
+            self.logger.error(f"[{self.operador}] Erro ao listar tabelas: {e}")
+            return {}
+
+    def set_group_privileges(self, group_name: str, privileges: Dict[str, Dict[str, Set[str]]]) -> bool:
+        try:
+            self.dao.apply_group_privileges(group_name, privileges)
+            self.dao.conn.commit()
+            self.logger.info(
+                f"[{self.operador}] Atualizou privilégios do grupo '{group_name}'"
+            )
+            return True
+        except Exception as e:
+            self.dao.conn.rollback()
+            self.logger.error(
+                f"[{self.operador}] Falha ao atualizar privilégios do grupo '{group_name}': {e}"
+            )
+            return False
