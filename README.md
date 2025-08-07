@@ -9,8 +9,7 @@ Aplicação em Python com interface gráfica (PyQt6) para facilitar a administra
 - psycopg2-binary
 - PyYAML
 - pytest (para executar os testes)
- keyring
-- pytest (para executar os testes)
+- keyring
 
 ## Instalação
 1. Clone o repositório:
