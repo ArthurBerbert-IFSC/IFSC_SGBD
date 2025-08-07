@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from pathlib import Path
 from config.permission_templates import DEFAULT_TEMPLATE
+from .student_groups_dialog import StudentGroupsDialog
 
 
 class UsersView(QWidget):
@@ -40,12 +41,15 @@ class UsersView(QWidget):
         self.btnNewGroup = QPushButton("Nova Turma")
         self.btnDelete = QPushButton("Excluir Selecionado")
         self.btnChangePassword = QPushButton("Alterar Senha")
+        self.btnManageGroups = QPushButton("Gerir Turmas")
         self.btnDelete.setEnabled(False)
         self.btnChangePassword.setEnabled(False)
+        self.btnManageGroups.setEnabled(False)
         self.toolbar.addWidget(self.btnNewUser)
         self.toolbar.addWidget(self.btnNewGroup)
         self.toolbar.addWidget(self.btnDelete)
         self.toolbar.addWidget(self.btnChangePassword)
+        self.toolbar.addWidget(self.btnManageGroups)
         layout.addWidget(self.toolbar)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.leftPanel = QWidget()
@@ -74,6 +78,7 @@ class UsersView(QWidget):
         self.btnNewGroup.clicked.connect(self.on_new_group_clicked)
         self.btnDelete.clicked.connect(self.on_delete_item_clicked)
         self.btnChangePassword.clicked.connect(self.on_change_password_clicked)
+        self.btnManageGroups.clicked.connect(self.on_manage_groups_clicked)
 
     def refresh_lists(self):
         self.lstEntities.clear()
@@ -107,6 +112,7 @@ class UsersView(QWidget):
             self.propLayout.addWidget(QLabel("Selecione um usuário ou grupo para ver detalhes."))
             self.btnChangePassword.setEnabled(False)
             self.btnDelete.setEnabled(False)
+            self.btnManageGroups.setEnabled(False)
             return
         entity_type, entity_name = current.data(Qt.ItemDataRole.UserRole)
         self.propLayout.addWidget(QLabel(f"Nome: {entity_name}"))
@@ -114,6 +120,7 @@ class UsersView(QWidget):
         is_user = (entity_type == 'user')
         self.btnChangePassword.setEnabled(is_user)
         self.btnDelete.setEnabled(True)
+        self.btnManageGroups.setEnabled(is_user)
 
     def on_new_user_clicked(self):
         username, ok1 = QInputDialog.getText(self, "Novo Usuário", "Digite o nome do novo usuário:")
@@ -233,4 +240,14 @@ class UsersView(QWidget):
                 QMessageBox.information(self, "Sucesso", "Senha alterada com sucesso!")
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Não foi possível alterar a senha.\nMotivo: {e}")
+
+    def on_manage_groups_clicked(self):
+        current_item = self.lstEntities.currentItem()
+        if not current_item:
+            return
+        entity_type, username = current_item.data(Qt.ItemDataRole.UserRole)
+        if entity_type != 'user':
+            return
+        dialog = StudentGroupsDialog(self, controller=self.controller, username=username)
+        dialog.exec()
 

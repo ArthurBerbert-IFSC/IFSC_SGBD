@@ -58,6 +58,26 @@ class UsersController(QObject):
     def change_password(self, username: str, new_password: str) -> bool:
         return self.role_manager.change_password(username, new_password)
 
+    # --- Métodos de turmas ----------------------------------------------
+
+    def list_groups(self):
+        return self.role_manager.list_groups()
+
+    def list_user_groups(self, username: str):
+        return self.role_manager.list_user_groups(username)
+
+    def add_user_to_group(self, username: str, group_name: str) -> bool:
+        success = self.role_manager.add_user_to_group(username, group_name)
+        if success:
+            self.data_changed.emit()
+        return success
+
+    def remove_user_from_group(self, username: str, group_name: str) -> bool:
+        success = self.role_manager.remove_user_from_group(username, group_name)
+        if success:
+            self.data_changed.emit()
+        return success
+
     # --- Novos métodos de privilégios ----------------------------------
 
     def get_schema_tables(self):
