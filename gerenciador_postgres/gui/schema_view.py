@@ -7,11 +7,15 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QMessageBox,
 )
+from PyQt6.QtGui import QIcon
+from pathlib import Path
 
 
 class SchemaView(QWidget):
     def __init__(self, parent=None, controller=None, logger=None):
         super().__init__(parent)
+        assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
         self.controller = controller
         self.logger = logger
         self.setWindowTitle("Gerenciador de Schemas")
