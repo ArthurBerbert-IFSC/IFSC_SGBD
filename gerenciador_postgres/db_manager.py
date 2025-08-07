@@ -55,7 +55,14 @@ class DBManager:
 
     def delete_user(self, username: str):
         with self.conn.cursor() as cur:
-            cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(username)))
+            cur.execute(
+                sql.SQL("DROP OWNED BY {} CASCADE").format(
+                    sql.Identifier(username)
+                )
+            )
+            cur.execute(
+                sql.SQL("DROP ROLE {}").format(sql.Identifier(username))
+            )
 
     def list_users(self) -> List[str]:
         with self.conn.cursor() as cur:
@@ -77,7 +84,14 @@ class DBManager:
 
     def delete_group(self, group_name: str):  # <-- NOVO MÉTODO ADICIONADO
         with self.conn.cursor() as cur:
-            cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(group_name)))
+            cur.execute(
+                sql.SQL("DROP OWNED BY {} CASCADE").format(
+                    sql.Identifier(group_name)
+                )
+            )
+            cur.execute(
+                sql.SQL("DROP ROLE {}").format(sql.Identifier(group_name))
+            )
 
     def add_user_to_group(self, username: str, group_name: str):
         with self.conn.cursor() as cur:
@@ -107,6 +121,21 @@ class DBManager:
                 WHERE g.rolname = %s
                 ORDER BY u.rolname
             """, (group_name,))
+            return [row[0] for row in cur.fetchall()]
+
+    def list_user_groups(self, username: str) -> List[str]:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT g.rolname
+                FROM pg_auth_members m
+                JOIN pg_roles u ON m.member = u.oid
+                JOIN pg_roles g ON m.roleid = g.oid
+                WHERE u.rolname = %s
+                ORDER BY g.rolname
+                """,
+                (username,),
+            )
             return [row[0] for row in cur.fetchall()]
 
     def list_groups(self) -> List[str]:
@@ -153,6 +182,10 @@ class DBManager:
                 result.setdefault(schema, []).append(table)
             return result
 
+    def list_schemas_with_tables(self) -> Dict[str, List[str]]:
+        """Alias para list_tables_by_schema."""
+        return self.list_tables_by_schema()
+
     def apply_group_privileges(self, group: str, privileges: Dict[str, Dict[str, Set[str]]]):
         """Aplica GRANT/REVOKE de acordo com o dicionário de permissões informado."""
         with self.conn.cursor() as cur:
@@ -162,9 +195,7 @@ class DBManager:
                     cur.execute(
                         sql.SQL(
                             "REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLE {} FROM {}"
-                        ).format(
-                            identifier, sql.Identifier(group)
-                        )
+                        ).format(identifier, sql.Identifier(group))
                     )
                     if perms:
                         cur.execute(
@@ -174,6 +205,38 @@ class DBManager:
                                 sql.Identifier(group),
                             )
                         )
+
+    def grant_privileges(
+        self, role: str, schema: str, table: str, privileges: Set[str]
+    ):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("GRANT {} ON TABLE {} TO {}").format(
+                    sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                    sql.Identifier(schema, table),
+                    sql.Identifier(role),
+                )
+            )
+
+    def revoke_privileges(
+        self, role: str, schema: str, table: str, privileges: Set[str] | None = None
+    ):
+        with self.conn.cursor() as cur:
+            if privileges:
+                cur.execute(
+                    sql.SQL("REVOKE {} ON TABLE {} FROM {}").format(
+                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                        sql.Identifier(schema, table),
+                        sql.Identifier(role),
+                    )
+                )
+            else:
+                cur.execute(
+                    sql.SQL("REVOKE ALL ON TABLE {} FROM {}").format(
+                        sql.Identifier(schema, table),
+                        sql.Identifier(role),
+                    )
+                )
 
     # Métodos de schema
     def create_schema(self, schema_name: str, owner: str | None = None):

@@ -169,6 +169,26 @@ class RoleManager:
             self.logger.error(f"[{self.operador}] Falha ao alterar senha de '{username}': {e}")
             return False
 
+    def bulk_create_users(self, users: Dict[str, str]) -> List[str]:
+        criados: List[str] = []
+        try:
+            for username, password in users.items():
+                if self.dao.find_user_by_name(username):
+                    raise ValueError(f"Usuário '{username}' já existe.")
+                self.dao.insert_user(username, password)
+                criados.append(username)
+            self.dao.conn.commit()
+            self.logger.info(
+                f"[{self.operador}] Criou usuários em lote: {', '.join(criados)}"
+            )
+            return criados
+        except Exception as e:
+            self.dao.conn.rollback()
+            self.logger.error(
+                f"[{self.operador}] Falha ao criar usuários em lote: {e}"
+            )
+            return []
+
     # Métodos de grupo
     def create_group(self, group_name: str) -> str:
         try:
@@ -244,6 +264,15 @@ class RoleManager:
             self.logger.error(f"[{self.operador}] Erro ao listar membros do grupo '{group_name}': {e}")
             return []
 
+    def list_user_groups(self, username: str) -> List[str]:
+        try:
+            return self.dao.list_user_groups(username)
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Erro ao listar grupos do usuário '{username}': {e}"
+            )
+            return []
+
     def list_groups(self) -> List[str]:
         try:
             return self.dao.list_groups()
@@ -258,6 +287,15 @@ class RoleManager:
             return self.dao.list_tables_by_schema()
         except Exception as e:
             self.logger.error(f"[{self.operador}] Erro ao listar tabelas: {e}")
+            return {}
+
+    def list_schemas_with_tables(self) -> Dict[str, List[str]]:
+        try:
+            return self.dao.list_schemas_with_tables()
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Erro ao listar schemas e tabelas: {e}"
+            )
             return {}
 
     def set_group_privileges(self, group_name: str, privileges: Dict[str, Dict[str, Set[str]]]) -> bool:
@@ -294,5 +332,39 @@ class RoleManager:
         except Exception as e:
             self.logger.error(
                 f"[{self.operador}] Falha ao aplicar template '{template}' ao grupo '{group_name}': {e}"
+            )
+            return False
+
+    def grant_privileges(
+        self, role: str, schema: str, table: str, privileges: Set[str]
+    ) -> bool:
+        try:
+            self.dao.grant_privileges(role, schema, table, privileges)
+            self.dao.conn.commit()
+            self.logger.info(
+                f"[{self.operador}] Concedeu {privileges} em {schema}.{table} a {role}"
+            )
+            return True
+        except Exception as e:
+            self.dao.conn.rollback()
+            self.logger.error(
+                f"[{self.operador}] Falha ao conceder privilégios {privileges} em {schema}.{table} a {role}: {e}"
+            )
+            return False
+
+    def revoke_privileges(
+        self, role: str, schema: str, table: str, privileges: Set[str] | None = None
+    ) -> bool:
+        try:
+            self.dao.revoke_privileges(role, schema, table, privileges)
+            self.dao.conn.commit()
+            self.logger.info(
+                f"[{self.operador}] Revogou {privileges or 'ALL'} em {schema}.{table} de {role}"
+            )
+            return True
+        except Exception as e:
+            self.dao.conn.rollback()
+            self.logger.error(
+                f"[{self.operador}] Falha ao revogar privilégios em {schema}.{table} de {role}: {e}"
             )
             return False
