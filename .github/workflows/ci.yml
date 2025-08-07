@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install pip-tools
+        run: pip install pip-tools
+      - name: Verify dependency lock
+        run: |
+          pip-compile --no-upgrade --output-file=requirements.lock.txt requirements.in
+          git diff --exit-code requirements.lock.txt
+      - name: Install dependencies
+        run: pip install -r requirements.lock.txt
+      - name: Run tests
+        run: pytest
