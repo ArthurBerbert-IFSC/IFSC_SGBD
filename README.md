@@ -9,7 +9,8 @@ Aplicação em Python com interface gráfica (PyQt6) para facilitar a administra
 - psycopg2-binary
 - PyYAML
 - pytest (para executar os testes)
-- keyring (opcional, para salvar senhas com segurança)
+ keyring
+- pytest (para executar os testes)
 
 ## Instalação
 1. Clone o repositório:
@@ -22,10 +23,6 @@ Aplicação em Python com interface gráfica (PyQt6) para facilitar a administra
    ```bash
    pip install -r requirements.txt
    pip install pytest
-   ```
-   Para habilitar o armazenamento seguro de senhas, instale também o pacote opcional `keyring`:
-   ```bash
-   pip install keyring
    ```
 
 ## Execução
