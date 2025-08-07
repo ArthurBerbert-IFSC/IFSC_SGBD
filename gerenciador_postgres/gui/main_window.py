@@ -9,7 +9,12 @@ from ..role_manager import RoleManager
 from ..schema_manager import SchemaManager
 from ..audit_manager import AuditManager
 from ..connection_manager import ConnectionManager
-from ..controllers import UsersController, SchemaController, AuditController
+from ..controllers import (
+    UsersController,
+    GroupsController,
+    SchemaController,
+    AuditController,
+)
 from ..logger import setup_logger
 
 
@@ -23,11 +28,10 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._setup_statusbar()
         self._setup_central()
-        from .users_view import UsersView
-        from PyQt6.QtWidgets import QInputDialog, QLineEdit
         self.db_manager = None
         self.role_manager = None
         self.users_controller = None
+        self.groups_controller = None
         self.schema_manager = None
         self.schema_controller = None
         self.audit_manager = None
@@ -50,8 +54,8 @@ class MainWindow(QMainWindow):
         self.actionSair = QAction("Sair", self)
 
         # Ações do menu Gerenciar
-        self.actionUsuariosGrupos = QAction("Usuários e Grupos", self)
-        self.actionPrivilegios = QAction("Privilégios", self)
+        self.actionUsuarios = QAction("Usuários", self)
+        self.actionGrupos = QAction("Grupos", self)
         self.actionAmbientes = QAction("Ambientes (Schemas)", self)
         self.actionAuditoria = QAction("Auditoria", self)
 
@@ -63,8 +67,8 @@ class MainWindow(QMainWindow):
         self.actionConectar.triggered.connect(self.on_conectar)
         self.actionDesconectar.triggered.connect(self.on_desconectar)
         self.actionSair.triggered.connect(self.close)
-        self.actionUsuariosGrupos.triggered.connect(self.on_usuarios_grupos)
-        self.actionPrivilegios.triggered.connect(self.on_privilegios)
+        self.actionUsuarios.triggered.connect(self.on_usuarios)
+        self.actionGrupos.triggered.connect(self.on_grupos)
         self.actionAmbientes.triggered.connect(self.on_schemas)
         self.actionAuditoria.triggered.connect(self.on_auditoria)
 
@@ -80,8 +84,8 @@ class MainWindow(QMainWindow):
         self.menuArquivo.addAction(self.actionSair)
 
         # Menu Gerenciar
-        self.menuGerenciar.addAction(self.actionUsuariosGrupos)
-        self.menuGerenciar.addAction(self.actionPrivilegios)
+        self.menuGerenciar.addAction(self.actionUsuarios)
+        self.menuGerenciar.addAction(self.actionGrupos)
         self.menuGerenciar.addAction(self.actionAmbientes)
         self.menuGerenciar.addAction(self.actionAuditoria)
         self.menuGerenciar.setEnabled(False) # Começa desabilitado
@@ -95,16 +99,12 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage("Não conectado")
 
-    def on_usuarios_grupos(self):
+    def on_usuarios(self):
         from .users_view import UsersView
         if self.users_controller:
-            # Cria a UsersView como uma janela independente (sem pai)
             users_window = UsersView(controller=self.users_controller)
-            # Adiciona à lista para que ela não seja descartada pela memória
             self.opened_windows.append(users_window)
-            # Define um título para a nova janela
-            users_window.setWindowTitle("Gerenciador de Usuários e Grupos")
-            # Mostra a nova janela
+            users_window.setWindowTitle("Gerenciador de Usuários")
             users_window.show()
         else:
             QMessageBox.warning(
@@ -113,19 +113,19 @@ class MainWindow(QMainWindow):
                 "Você precisa estar conectado a um banco de dados para gerenciar usuários.",
             )
 
-    def on_privilegios(self):
-        """Abre a janela para gerenciamento de privilégios."""
-        from .privileges_view import PrivilegesView
-        if self.users_controller:
-            priv_window = PrivilegesView(controller=self.users_controller)
-            self.opened_windows.append(priv_window)
-            priv_window.setWindowTitle("Gerenciador de Privilégios")
-            priv_window.show()
+    def on_grupos(self):
+        """Abre a janela para gerenciamento de grupos e privilégios."""
+        from .groups_view import GroupsView
+        if self.groups_controller:
+            grp_window = GroupsView(controller=self.groups_controller)
+            self.opened_windows.append(grp_window)
+            grp_window.setWindowTitle("Gerenciador de Grupos e Privilégios")
+            grp_window.show()
         else:
             QMessageBox.warning(
                 self,
                 "Não Conectado",
-                "Você precisa estar conectado a um banco de dados para gerenciar privilégios.",
+                "Você precisa estar conectado a um banco de dados para gerenciar grupos.",
             )
 
 
@@ -143,11 +143,12 @@ class MainWindow(QMainWindow):
                 
                 # Passar audit_manager para os outros managers
                 self.role_manager = RoleManager(
-                    self.db_manager, self.logger, 
-                    operador=params['user'], 
+                    self.db_manager, self.logger,
+                    operador=params['user'],
                     audit_manager=self.audit_manager
                 )
                 self.users_controller = UsersController(self.role_manager)
+                self.groups_controller = GroupsController(self.role_manager)
                 
                 self.schema_manager = SchemaManager(
                     self.db_manager, self.logger, 
