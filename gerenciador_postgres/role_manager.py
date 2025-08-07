@@ -6,22 +6,61 @@ from psycopg2 import sql
 
 class RoleManager:
     """Camada de serviço: orquestra operações, valida regras e controla transações."""
-    def __init__(self, dao: DBManager, logger: logging.Logger, operador: str = 'sistema'):
+    def __init__(self, dao: DBManager, logger: logging.Logger, operador: str = 'sistema', audit_manager=None):
         self.dao = dao
         self.logger = logger
         self.operador = operador
+        self.audit_manager = audit_manager
 
     def create_user(self, username: str, password: str) -> str:
+        dados_antes = None
+        dados_depois = None
+        sucesso = False
+        
         try:
             if self.dao.find_user_by_name(username):
                 raise ValueError(f"Usuário '{username}' já existe.")
+            
             self.dao.insert_user(username, password)
             self.dao.conn.commit()
+            
+            dados_depois = {'username': username, 'can_login': True}
+            sucesso = True
+            
             self.logger.info(f"[{self.operador}] Criou usuário: {username}")
+            
+            # Registrar auditoria
+            if self.audit_manager:
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao='CREATE_USER',
+                    objeto_tipo='USER',
+                    objeto_nome=username,
+                    detalhes={'password_set': True},
+                    dados_antes=dados_antes,
+                    dados_depois=dados_depois,
+                    sucesso=sucesso
+                )
+            
             return username
+            
         except Exception as e:
             self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao criar usuário '{username}': {e}")
+            
+            # Registrar falha na auditoria
+            if self.audit_manager:
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao='CREATE_USER',
+                    objeto_tipo='USER',
+                    objeto_nome=username,
+                    detalhes={'error': str(e)},
+                    dados_antes=dados_antes,
+                    dados_depois=dados_depois,
+                    sucesso=False
+                )
+            
             raise
 
     def get_user(self, username: str) -> Optional[User]:
@@ -52,7 +91,20 @@ class RoleManager:
             return False
 
     def delete_user(self, username: str) -> bool:
+        dados_antes = None
+        sucesso = False
+        
         try:
+            # Capturar dados antes da exclusão
+            user = self.dao.find_user_by_name(username)
+            if user:
+                dados_antes = {
+                    'username': user.username,
+                    'oid': user.oid,
+                    'can_login': user.can_login,
+                    'valid_until': user.valid_until.isoformat() if user.valid_until else None
+                }
+            
             # Limpeza de objetos antes do DROP ROLE (opcional mas boa prática)
             with self.dao.conn.cursor() as cur:
                 cur.execute(
@@ -60,13 +112,42 @@ class RoleManager:
                         sql.Identifier(username)
                     )
                 )
+            
             self.dao.delete_user(username)
             self.dao.conn.commit()
+            sucesso = True
+            
             self.logger.info(f"[{self.operador}] Excluiu usuário: {username}")
+            
+            # Registrar auditoria
+            if self.audit_manager:
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao='DELETE_USER',
+                    objeto_tipo='USER',
+                    objeto_nome=username,
+                    dados_antes=dados_antes,
+                    sucesso=sucesso
+                )
+            
             return True
+            
         except Exception as e:
             self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao excluir usuário '{username}': {e}")
+            
+            # Registrar falha na auditoria
+            if self.audit_manager:
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao='DELETE_USER',
+                    objeto_tipo='USER',
+                    objeto_nome=username,
+                    detalhes={'error': str(e)},
+                    dados_antes=dados_antes,
+                    sucesso=False
+                )
+            
             return False
 
     def change_password(self, username: str, new_password: str) -> bool:

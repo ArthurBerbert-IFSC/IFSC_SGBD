@@ -5,10 +5,11 @@ from .db_manager import DBManager
 class SchemaManager:
     """Camada de serviço: orquestra operações e controla transações de schemas."""
 
-    def __init__(self, dao: DBManager, logger: logging.Logger, operador: str = 'sistema'):
+    def __init__(self, dao: DBManager, logger: logging.Logger, operador: str = 'sistema', audit_manager=None):
         self.dao = dao
         self.logger = logger
         self.operador = operador
+        self.audit_manager = audit_manager
 
     # --- Helpers de permissão -------------------------------------------------
     def _current_user(self) -> str:
@@ -44,11 +45,15 @@ class SchemaManager:
     # --- Operações ------------------------------------------------------------
     def create_schema(self, name: str, owner: str | None = None):
         user = self._current_user()
+        dados_depois = None
+        sucesso = False
+        
         if not (self._is_superuser(user) or self._has_role(user, 'Professores')):
             self.logger.error(
                 f"[{self.operador}] Usuário '{user}' não tem permissão para criar schema"
             )
             raise PermissionError('Apenas Professores ou superusuários podem criar schemas.')
+        
         try:
             with self.dao.conn.cursor() as cur:
                 cur.execute(
@@ -73,13 +78,52 @@ class SchemaManager:
                     self.logger.warning(
                         f"[{self.operador}] Falha ao habilitar PostGIS no schema '{name}': {e}"
                     )
+            
             self.dao.conn.commit()
+            sucesso = True
+            dados_depois = {'schema_name': name, 'owner': owner}
+            
             self.logger.info(f"[{self.operador}] Criou schema: {name}")
+            
+            # Registrar auditoria
+            if self.audit_manager:
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao='CREATE_SCHEMA',
+                    objeto_tipo='SCHEMA',
+                    objeto_nome=name,
+                    detalhes={'owner': owner, 'postgis_enabled': True},
+                    dados_depois=dados_depois,
+                    sucesso=sucesso
+                )
+                
         except PermissionError:
+            # Registrar falha de permissão na auditoria
+            if self.audit_manager:
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao='CREATE_SCHEMA',
+                    objeto_tipo='SCHEMA',
+                    objeto_nome=name,
+                    detalhes={'error': 'Permission denied', 'owner': owner},
+                    sucesso=False
+                )
             raise
         except Exception as e:
             self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao criar schema '{name}': {e}")
+            
+            # Registrar falha na auditoria
+            if self.audit_manager:
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao='CREATE_SCHEMA',
+                    objeto_tipo='SCHEMA',
+                    objeto_nome=name,
+                    detalhes={'error': str(e), 'owner': owner},
+                    sucesso=False
+                )
+            
             raise
 
     def delete_schema(self, name: str, cascade: bool = False):

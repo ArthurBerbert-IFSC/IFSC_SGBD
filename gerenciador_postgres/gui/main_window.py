@@ -7,8 +7,9 @@ from .connection_dialog import ConnectionDialog
 from ..db_manager import DBManager
 from ..role_manager import RoleManager
 from ..schema_manager import SchemaManager
+from ..audit_manager import AuditManager
 from ..connection_manager import ConnectionManager
-from ..controllers import UsersController, SchemaController
+from ..controllers import UsersController, SchemaController, AuditController
 from ..logger import setup_logger
 
 
@@ -29,6 +30,8 @@ class MainWindow(QMainWindow):
         self.users_controller = None
         self.schema_manager = None
         self.schema_controller = None
+        self.audit_manager = None
+        self.audit_controller = None
         self.logger = setup_logger()
         self.opened_windows = []
 
@@ -62,6 +65,7 @@ class MainWindow(QMainWindow):
         self.actionSair.triggered.connect(self.close)
         self.actionUsuariosGrupos.triggered.connect(self.on_usuarios_grupos)
         self.actionAmbientes.triggered.connect(self.on_schemas)
+        self.actionAuditoria.triggered.connect(self.on_auditoria)
 
         self.actionAjuda.triggered.connect(self.show_help)
         self.actionSobre.triggered.connect(self.show_about)
@@ -112,13 +116,45 @@ class MainWindow(QMainWindow):
             try:
                 conn = ConnectionManager().connect(**params)
                 self.db_manager = DBManager(conn)
-                self.role_manager = RoleManager(self.db_manager, self.logger, operador=params['user'])
+                
+                # Inicializar audit_manager primeiro
+                self.audit_manager = AuditManager(self.db_manager, self.logger)
+                self.audit_controller = AuditController(self.audit_manager, self.logger)
+                
+                # Passar audit_manager para os outros managers
+                self.role_manager = RoleManager(
+                    self.db_manager, self.logger, 
+                    operador=params['user'], 
+                    audit_manager=self.audit_manager
+                )
                 self.users_controller = UsersController(self.role_manager)
-                self.schema_manager = SchemaManager(self.db_manager, self.logger, operador=params['user'])
+                
+                self.schema_manager = SchemaManager(
+                    self.db_manager, self.logger, 
+                    operador=params['user'], 
+                    audit_manager=self.audit_manager
+                )
                 self.schema_controller = SchemaController(self.schema_manager, self.logger)
+                
                 self.menuGerenciar.setEnabled(True)
                 self.statusbar.showMessage(f"Conectado a {params['database']} como {params['user']}")
+                
+                # Registrar login na auditoria
+                self.audit_manager.log_operation(
+                    operador=params['user'],
+                    operacao='LOGIN',
+                    objeto_tipo='SYSTEM',
+                    objeto_nome='database_connection',
+                    detalhes={
+                        'database': params['database'],
+                        'host': params['host'],
+                        'port': params['port']
+                    },
+                    sucesso=True
+                )
+                
                 QMessageBox.information(self, "Conexão bem-sucedida", f"Conectado ao banco {params['database']}.")
+                
             except Exception as e:
                 ConnectionManager().disconnect()
                 self.db_manager = None
@@ -126,17 +162,34 @@ class MainWindow(QMainWindow):
                 self.users_controller = None
                 self.schema_manager = None
                 self.schema_controller = None
+                self.audit_manager = None
+                self.audit_controller = None
                 self.menuGerenciar.setEnabled(False)
                 self.statusbar.showMessage("Não conectado")
                 QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {e}")
 
     def on_desconectar(self):
+        # Registrar logout na auditoria antes de desconectar
+        if self.audit_manager:
+            try:
+                self.audit_manager.log_operation(
+                    operador='sistema',  # Usar sistema já que o usuário está se desconectando
+                    operacao='LOGOUT',
+                    objeto_tipo='SYSTEM',
+                    objeto_nome='database_connection',
+                    sucesso=True
+                )
+            except:
+                pass  # Ignorar erros de auditoria no logout
+        
         ConnectionManager().disconnect()
         self.db_manager = None
         self.role_manager = None
         self.users_controller = None
         self.schema_manager = None
         self.schema_controller = None
+        self.audit_manager = None
+        self.audit_controller = None
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
@@ -167,3 +220,20 @@ class MainWindow(QMainWindow):
             schema_window.show()
         else:
             QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar schemas.")
+    
+    def on_auditoria(self):
+        """Abre a janela de auditoria."""
+        from .audit_view import AuditView
+        if self.audit_manager and self.audit_controller:
+            audit_window = AuditView(
+                audit_manager=self.audit_manager, 
+                logger=self.logger
+            )
+            self.opened_windows.append(audit_window)
+            audit_window.setWindowTitle("Auditoria do Sistema")
+            audit_window.show()
+        else:
+            QMessageBox.warning(
+                self, "Não Conectado", 
+                "Você precisa estar conectado a um banco de dados para acessar a auditoria."
+            )
