@@ -8,7 +8,8 @@ Aplicação em Python com interface gráfica (PyQt6) para facilitar a administra
 - PyQt6
 - psycopg2-binary
 - PyYAML
-- keyring
+- pytest (para executar os testes)
+ keyring
 - pytest (para executar os testes)
 
 ## Instalação

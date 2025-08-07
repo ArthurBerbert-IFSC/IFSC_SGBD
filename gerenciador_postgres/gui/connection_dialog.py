@@ -16,10 +16,11 @@ from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from pathlib import Path
 try:
-    import keyring
+    import keyring  # type: ignore
+    KEYRING_AVAILABLE = True
 except ImportError:
-    print("O módulo 'keyring' não está instalado. Instale-o com: pip install keyring")
-    raise SystemExit(1)
+    keyring = None  # type: ignore
+    KEYRING_AVAILABLE = False
 import json
 import os
 
@@ -64,6 +65,14 @@ class ConnectionDialog(QDialog):
         self._setup_ui()
         self._load_profiles()
         self._cancelled_by_user = False
+        if not KEYRING_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "Keyring não disponível",
+                "O módulo 'keyring' não está instalado. As funções de salvar senha serão desabilitadas.\n"
+                "Instale-o com: pip install keyring",
+            )
+            self.chkSavePassword.setEnabled(False)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -169,7 +178,7 @@ class ConnectionDialog(QDialog):
             self.txtUser.clear()
             self.txtPassword.clear()
             self.txtPort.setText("5432")
-            self.chkSavePassword.setChecked(True)
+            self.chkSavePassword.setChecked(True if KEYRING_AVAILABLE else False)
         else:
             name = self.cmbProfiles.currentText()
             prof = self.profiles.get(name, {})
@@ -177,10 +186,14 @@ class ConnectionDialog(QDialog):
             self.txtDb.setText(prof.get('database', ''))
             self.txtUser.setText(prof.get('user', ''))
             self.txtPort.setText(str(prof.get('port', '5432')))
-            self.txtPassword.setText(keyring.get_password('gerenciador_postgres', name) or '')
-            # Verifica se existe uma senha salva e atualiza a checkbox
-            password_exists = bool(keyring.get_password('gerenciador_postgres', name))
-            self.chkSavePassword.setChecked(password_exists)
+            if KEYRING_AVAILABLE:
+                self.txtPassword.setText(keyring.get_password('gerenciador_postgres', name) or '')
+                # Verifica se existe uma senha salva e atualiza a checkbox
+                password_exists = bool(keyring.get_password('gerenciador_postgres', name))
+                self.chkSavePassword.setChecked(password_exists)
+            else:
+                self.txtPassword.clear()
+                self.chkSavePassword.setChecked(False)
 
     def get_params(self):
         return {
@@ -201,9 +214,9 @@ class ConnectionDialog(QDialog):
             json.dump(self.profiles, f, ensure_ascii=False, indent=2)
 
         # Decide se salva ou apaga a senha do keyring
-        if self.chkSavePassword.isChecked():
+        if KEYRING_AVAILABLE and self.chkSavePassword.isChecked():
             keyring.set_password('gerenciador_postgres', name, password_text)
-        else:
+        elif KEYRING_AVAILABLE:
             try:
                 # Garante que qualquer senha antiga seja removida se a caixa estiver desmarcada
                 keyring.delete_password('gerenciador_postgres', name)
@@ -236,6 +249,18 @@ class ConnectionDialog(QDialog):
     def _on_connection_error(self, message):
         self.progress_dialog.canceled.disconnect(self._on_cancel_connection)
         self.progress_dialog.close()
+        suggestions = []
+        lower_msg = message.lower()
+        if "could not translate host name" in lower_msg:
+            suggestions.append("Verifique se o host está correto.")
+        if "connection refused" in lower_msg or "timeout" in lower_msg or "could not connect to server" in lower_msg:
+            suggestions.append("Confirme se o servidor está acessível e se a porta está correta.")
+        if "authentication failed" in lower_msg or "password authentication failed" in lower_msg:
+            suggestions.append("Revise usuário e senha informados.")
+
+        if suggestions:
+            message = f"{message}\n\nPossíveis correções:\n- " + "\n- ".join(suggestions)
+
         QMessageBox.critical(self, "Erro de conexão", f"Não foi possível conectar: {message}")
 
     def _on_cancel_connection(self):
@@ -277,7 +302,8 @@ class ConnectionDialog(QDialog):
                     del self.profiles[profile_name]
                     with open(PROFILE_FILE, 'w', encoding='utf-8') as f:
                         json.dump(self.profiles, f, ensure_ascii=False, indent=2)
-                    keyring.delete_password('gerenciador_postgres', profile_name)
+                    if KEYRING_AVAILABLE:
+                        keyring.delete_password('gerenciador_postgres', profile_name)
 
                 # Remove da combobox
                 idx = self.cmbProfiles.findText(profile_name)
