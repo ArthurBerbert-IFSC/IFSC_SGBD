@@ -135,10 +135,18 @@ class ConnectionDialog(QDialog):
         self.toggle_password_action.setCheckable(True)
         self.toggle_password_action.triggered.connect(self.toggle_password_visibility)
         self.txtPassword.addAction(self.toggle_password_action, QLineEdit.ActionPosition.TrailingPosition)
-        try:
-            self.toggle_password_action.setIcon(self.style().standardIcon(getattr(self.style(), 'SP_DialogApplyButton', QIcon.FallbackThemeIcon)))
-        except:
-            pass
+        
+        # Carrega ícone do assets ou usa fallback
+        assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        eye_icon_path = assets_dir / "eye.png"  # ou o nome do seu ícone de olho
+        if eye_icon_path.exists():
+            self.toggle_password_action.setIcon(QIcon(str(eye_icon_path)))
+        else:
+            # Fallback para ícone padrão do sistema
+            try:
+                self.toggle_password_action.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon))
+            except:
+                pass  # Se não conseguir carregar nenhum ícone, fica sem
 
         form_layout.addLayout(password_layout)
         layout.addLayout(form_layout)

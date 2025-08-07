@@ -103,7 +103,6 @@ class PrivilegesView(QWidget):
         self.treePrivileges.clear()
         for schema, tables in data.items():
             schema_item = QTreeWidgetItem([schema])
-            schema_item.setFlags(schema_item.flags() | Qt.ItemFlag.Tristate)
             self.treePrivileges.addTopLevelItem(schema_item)
             for table in tables:
                 table_item = QTreeWidgetItem([table, "", "", "", ""])
