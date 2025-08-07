@@ -1,8 +1,12 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QComboBox, QPushButton, QTreeWidget, QTreeWidgetItem, QLabel, QHBoxLayout
+from PyQt6.QtGui import QIcon
+from pathlib import Path
 
 class PrivilegesView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
         self._setup_ui()
 
     def _setup_ui(self):
