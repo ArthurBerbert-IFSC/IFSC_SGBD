@@ -64,9 +64,25 @@ class SchemaView(QWidget):
         name, ok = QInputDialog.getText(self, "Novo Schema", "Nome do schema:")
         if not ok or not name:
             return
-        owner, ok2 = QInputDialog.getText(self, "Proprietário", "Owner (opcional):")
-        if not ok2:
-            owner = None
+        owner = None
+        roles = []
+        if self.controller:
+            try:
+                roles = self.controller.list_roles()
+            except Exception as e:
+                if self.logger:
+                    self.logger.error(f"Falha ao listar roles: {e}")
+        if roles:
+            items = [""] + roles
+            owner, ok2 = QInputDialog.getItem(
+                self, "Proprietário", "Owner (opcional):", items, 0, False
+            )
+            if not ok2:
+                owner = None
+        else:
+            owner, ok2 = QInputDialog.getText(self, "Proprietário", "Owner (opcional):")
+            if not ok2:
+                owner = None
         try:
             self.controller.create_schema(name, owner or None)
             QMessageBox.information(self, "Sucesso", f"Schema '{name}' criado.")
