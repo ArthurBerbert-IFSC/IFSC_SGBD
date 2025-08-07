@@ -1,0 +1,2 @@
+log_level: INFO
+log_path: D:\GitHub\IFSC_SGBD\logs\app.log
