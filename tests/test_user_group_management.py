@@ -62,12 +62,13 @@ class UserGroupManagementTests(unittest.TestCase):
 
     def test_create_users_batch(self):
         data = [
-            ('bob', 'pw1', None),
-            ('carol', 'pw2', '2024-06-30'),
+            ("111", "Bob Silva"),
+            ("222", "Carol Dias"),
         ]
-        created = self.uc.create_users_batch(data)
-        self.assertEqual(set(created), {'bob', 'carol'})
-        self.assertEqual(self.dao.users['carol']['valid_until'], '2024-06-30')
+        created = self.uc.create_users_batch(data, "2024-06-30")
+        self.assertEqual(set(created), {"bob.silva", "carol.dias"})
+        self.assertEqual(self.dao.users["bob.silva"]["password"], "111")
+        self.assertEqual(self.dao.users["carol.dias"]["valid_until"], "2024-06-30")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,6 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QLineEdit,
     QListWidget,
-    QTabWidget,
     QVBoxLayout,
     QDialog,
     QHBoxLayout,
@@ -13,11 +12,14 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QInputDialog,
     QMessageBox,
+    QCheckBox,
+    QDateEdit,
+    QTextEdit,
+    QDialogButtonBox,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QIcon
 from pathlib import Path
-from .student_groups_dialog import StudentGroupsDialog
 
 
 class UsersView(QWidget):
@@ -40,35 +42,71 @@ class UsersView(QWidget):
         self.btnBatchUsers = QPushButton("Inserir em Lote")
         self.btnDelete = QPushButton("Excluir Selecionado")
         self.btnChangePassword = QPushButton("Alterar Senha")
-        self.btnManageGroups = QPushButton("Gerir Turmas")
         self.btnDelete.setEnabled(False)
         self.btnChangePassword.setEnabled(False)
-        self.btnManageGroups.setEnabled(False)
         self.toolbar.addWidget(self.btnNewUser)
         self.toolbar.addWidget(self.btnBatchUsers)
         self.toolbar.addWidget(self.btnDelete)
         self.toolbar.addWidget(self.btnChangePassword)
-        self.toolbar.addWidget(self.btnManageGroups)
         layout.addWidget(self.toolbar)
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.leftPanel = QWidget()
-        leftLayout = QVBoxLayout(self.leftPanel)
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.topPanel = QWidget()
+        leftLayout = QVBoxLayout(self.topPanel)
         self.txtFilter = QLineEdit()
         self.txtFilter.setPlaceholderText("Buscar usuário...")
         self.lstEntities = QListWidget()
         leftLayout.addWidget(self.txtFilter)
         leftLayout.addWidget(self.lstEntities)
-        self.splitter.addWidget(self.leftPanel)
-        self.rightPanel = QTabWidget()
-        self.tabProperties = QWidget()
-        self.tabMembers = QWidget()
-        self.rightPanel.addTab(self.tabProperties, "Propriedades")
-        self.rightPanel.addTab(self.tabMembers, "Membros de Grupo")
-        self.splitter.addWidget(self.rightPanel)
+        self.splitter.addWidget(self.topPanel)
+
+        # Bottom panel with details and group management
+        self.bottomPanel = QWidget()
+        bottomLayout = QVBoxLayout(self.bottomPanel)
+        self.detailSplitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Details section
+        self.detailSection = QWidget()
+        self.propLayout = QVBoxLayout(self.detailSection)
+        self.propLayout.addWidget(QLabel("Selecione um usuário para ver detalhes."))
+        self.detailSplitter.addWidget(self.detailSection)
+
+        # Group management section
+        self.groupSection = QWidget()
+        groupLayout = QVBoxLayout(self.groupSection)
+        lists_layout = QHBoxLayout()
+
+        left_groups_layout = QVBoxLayout()
+        left_groups_layout.addWidget(QLabel("Turmas do Aluno"))
+        self.lstUserGroups = QListWidget()
+        left_groups_layout.addWidget(self.lstUserGroups)
+        lists_layout.addLayout(left_groups_layout)
+
+        btns_layout = QVBoxLayout()
+        self.btnAddGroup = QPushButton(">>")
+        self.btnRemoveGroup = QPushButton("<<")
+        self.btnAddGroup.setEnabled(False)
+        self.btnRemoveGroup.setEnabled(False)
+        btns_layout.addStretch()
+        btns_layout.addWidget(self.btnAddGroup)
+        btns_layout.addWidget(self.btnRemoveGroup)
+        btns_layout.addStretch()
+        lists_layout.addLayout(btns_layout)
+
+        right_groups_layout = QVBoxLayout()
+        right_groups_layout.addWidget(QLabel("Turmas Disponíveis"))
+        self.lstAvailableGroups = QListWidget()
+        right_groups_layout.addWidget(self.lstAvailableGroups)
+        lists_layout.addLayout(right_groups_layout)
+
+        groupLayout.addLayout(lists_layout)
+        self.groupSection.setLayout(groupLayout)
+        self.detailSplitter.addWidget(self.groupSection)
+
+        bottomLayout.addWidget(self.detailSplitter)
+        self.splitter.addWidget(self.bottomPanel)
+
         layout.addWidget(self.splitter)
         self.setLayout(layout)
-        self.propLayout = QVBoxLayout(self.tabProperties)
-        self.propLayout.addWidget(QLabel("Selecione um usuário para ver detalhes."))
 
     def _connect_signals(self):
         self.txtFilter.textChanged.connect(self.filter_list)
@@ -77,7 +115,8 @@ class UsersView(QWidget):
         self.btnBatchUsers.clicked.connect(self.on_new_user_batch_clicked)
         self.btnDelete.clicked.connect(self.on_delete_user_clicked)
         self.btnChangePassword.clicked.connect(self.on_change_password_clicked)
-        self.btnManageGroups.clicked.connect(self.on_manage_groups_clicked)
+        self.btnAddGroup.clicked.connect(self.on_add_group_clicked)
+        self.btnRemoveGroup.clicked.connect(self.on_remove_group_clicked)
 
     def refresh_lists(self):
         self.lstEntities.clear()
@@ -102,63 +141,136 @@ class UsersView(QWidget):
             child = self.propLayout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+        self.lstUserGroups.clear()
+        self.lstAvailableGroups.clear()
+        self.btnAddGroup.setEnabled(False)
+        self.btnRemoveGroup.setEnabled(False)
+
         if not current:
             self.propLayout.addWidget(QLabel("Selecione um usuário para ver detalhes."))
             self.btnChangePassword.setEnabled(False)
             self.btnDelete.setEnabled(False)
-            self.btnManageGroups.setEnabled(False)
             return
+
         username = current.data(Qt.ItemDataRole.UserRole)
         self.propLayout.addWidget(QLabel(f"Nome: {username}"))
         self.btnChangePassword.setEnabled(True)
         self.btnDelete.setEnabled(True)
-        self.btnManageGroups.setEnabled(True)
+
+        # Populate group lists
+        if self.controller:
+            try:
+                user_groups = set(self.controller.list_user_groups(username))
+                all_groups = set(self.controller.list_groups())
+                for g in sorted(user_groups):
+                    self.lstUserGroups.addItem(g)
+                for g in sorted(all_groups - user_groups):
+                    self.lstAvailableGroups.addItem(g)
+                self.btnAddGroup.setEnabled(True)
+                self.btnRemoveGroup.setEnabled(True)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Erro", f"Não foi possível carregar turmas do usuário.\nMotivo: {e}"
+                )
 
     def on_new_user_clicked(self):
-        username, ok1 = QInputDialog.getText(self, "Novo Usuário", "Digite o nome do novo usuário:")
+        username, ok1 = QInputDialog.getText(
+            self, "Novo Usuário", "Digite o nome do novo usuário:"
+        )
         if ok1 and username:
             username = username.lower()
-        else: return
-        password, ok2 = QInputDialog.getText(self, "Nova Senha", f"Senha para '{username}':", QLineEdit.EchoMode.Password)
+        else:
+            return
+
+        password, ok2 = QInputDialog.getText(
+            self,
+            "Nova Senha",
+            f"Senha para '{username}':",
+            QLineEdit.EchoMode.Password,
+        )
         if not ok2 or not password:
             return
-        valid_until, ok3 = QInputDialog.getText(
-            self,
-            "Validade",
-            "Data de expiração (YYYY-MM-DD) - deixe em branco para nenhuma:",
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Validade do Usuário")
+        vlayout = QVBoxLayout(dlg)
+        chk = QCheckBox("Definir data de expiração")
+        date_edit = QDateEdit()
+        date_edit.setCalendarPopup(True)
+        date_edit.setDate(QDate.currentDate())
+        date_edit.setEnabled(False)
+        chk.toggled.connect(date_edit.setEnabled)
+        vlayout.addWidget(chk)
+        vlayout.addWidget(date_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        if not ok3:
+        vlayout.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        valid_until = valid_until.strip() or None
+        valid_until = (
+            date_edit.date().toString("yyyy-MM-dd") if chk.isChecked() else None
+        )
         try:
             self.controller.create_user(username, password, valid_until)
-            QMessageBox.information(self, "Sucesso", f"Usuário '{username}' criado com sucesso!")
+            QMessageBox.information(
+                self, "Sucesso", f"Usuário '{username}' criado com sucesso!"
+            )
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Não foi possível criar o usuário.\nMotivo: {e}")
+            QMessageBox.critical(
+                self, "Erro", f"Não foi possível criar o usuário.\nMotivo: {e}"
+            )
 
     def on_new_user_batch_clicked(self):
-        text, ok = QInputDialog.getMultiLineText(
-            self,
-            "Inserir Usuários em Lote",
-            "Informe um usuário por linha no formato 'usuario,senha[,YYYY-MM-DD]':",
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Inserir Usuários em Lote")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(
+            QLabel(
+                "Cole a lista de alunos no formato: matrícula nome completo (um por linha)"
+            )
         )
-        if not ok or not text.strip():
+        txt = QTextEdit()
+        layout.addWidget(txt)
+        chk = QCheckBox("Definir data de expiração para todos")
+        date_edit = QDateEdit()
+        date_edit.setCalendarPopup(True)
+        date_edit.setDate(QDate.currentDate())
+        date_edit.setEnabled(False)
+        chk.toggled.connect(date_edit.setEnabled)
+        layout.addWidget(chk)
+        layout.addWidget(date_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
+        text = txt.toPlainText()
         users_data = []
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 2:
-                continue
-            username, password = parts[0].lower(), parts[1]
-            valid_until = parts[2] if len(parts) > 2 and parts[2] else None
-            users_data.append((username, password, valid_until))
+        try:
+            for idx, line in enumerate(text.splitlines(), start=1):
+                if not line.strip():
+                    continue
+                parts = line.strip().split(maxsplit=1)
+                if len(parts) < 2:
+                    raise ValueError(f"Linha {idx} inválida: '{line}'")
+                users_data.append((parts[0], parts[1]))
+        except ValueError as e:
+            QMessageBox.warning(self, "Erro de Formato", str(e))
+            return
         if not users_data:
             QMessageBox.warning(self, "Aviso", "Nenhum usuário válido informado.")
             return
+        valid_until = (
+            date_edit.date().toString("yyyy-MM-dd") if chk.isChecked() else None
+        )
         try:
-            created = self.controller.create_users_batch(users_data)
+            created = self.controller.create_users_batch(users_data, valid_until)
             QMessageBox.information(
                 self, "Sucesso", f"{len(created)} usuários criados com sucesso!"
             )
@@ -223,11 +335,51 @@ class UsersView(QWidget):
                     self, "Erro", f"Não foi possível alterar a senha.\nMotivo: {e}"
                 )
 
-    def on_manage_groups_clicked(self):
-        current_item = self.lstEntities.currentItem()
-        if not current_item:
+    def on_add_group_clicked(self):
+        user_item = self.lstEntities.currentItem()
+        group_item = self.lstAvailableGroups.currentItem()
+        if not user_item or not group_item:
             return
-        username = current_item.data(Qt.ItemDataRole.UserRole)
-        dialog = StudentGroupsDialog(self, controller=self.controller, username=username)
-        dialog.exec()
+        username = user_item.data(Qt.ItemDataRole.UserRole)
+        group = group_item.text()
+        try:
+            if self.controller.add_user_to_group(username, group):
+                QMessageBox.information(
+                    self, "Sucesso", f"Aluno adicionado à turma '{group}'."
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Erro",
+                    f"Não foi possível adicionar o aluno à turma '{group}'.",
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Erro", f"Falha ao adicionar o aluno à turma.\nMotivo: {e}"
+            )
+        self.on_entity_selected(self.lstEntities.currentItem(), None)
+
+    def on_remove_group_clicked(self):
+        user_item = self.lstEntities.currentItem()
+        group_item = self.lstUserGroups.currentItem()
+        if not user_item or not group_item:
+            return
+        username = user_item.data(Qt.ItemDataRole.UserRole)
+        group = group_item.text()
+        try:
+            if self.controller.remove_user_from_group(username, group):
+                QMessageBox.information(
+                    self, "Sucesso", f"Aluno removido da turma '{group}'."
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Erro",
+                    f"Não foi possível remover o aluno da turma '{group}'.",
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Erro", f"Falha ao remover o aluno da turma.\nMotivo: {e}"
+            )
+        self.on_entity_selected(self.lstEntities.currentItem(), None)
 
