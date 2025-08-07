@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QCheckBox,
     QProgressDialog,
+    QStyle,
 )
 from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -136,8 +137,10 @@ class ConnectionDialog(QDialog):
         self.toggle_password_action.triggered.connect(self.toggle_password_visibility)
         self.txtPassword.addAction(self.toggle_password_action, QLineEdit.ActionPosition.TrailingPosition)
         try:
-            self.toggle_password_action.setIcon(self.style().standardIcon(getattr(self.style(), 'SP_DialogApplyButton', QIcon.FallbackThemeIcon)))
-        except:
+            self.toggle_password_action.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
+            )
+        except Exception:
             pass
 
         form_layout.addLayout(password_layout)
