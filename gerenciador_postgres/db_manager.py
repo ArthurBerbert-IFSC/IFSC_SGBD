@@ -1,4 +1,5 @@
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extensions import connection
 from .data_models import User, Group
 from typing import Optional, List
@@ -26,26 +27,35 @@ class DBManager:
 
     def insert_user(self, username: str, password_hash: str):
         with self.conn.cursor() as cur:
-            cur.execute(f'CREATE ROLE "{username}" WITH LOGIN PASSWORD %s', (password_hash,))
+            cur.execute(
+                sql.SQL("CREATE ROLE {} WITH LOGIN PASSWORD %s").format(
+                    sql.Identifier(username)
+                ),
+                (password_hash,),
+            )
 
     def update_user(self, username: str, **fields):
         with self.conn.cursor() as cur:
-            sql = f'ALTER ROLE "{username}" '
             clauses = []
             params = []
             if 'valid_until' in fields:
-                clauses.append("VALID UNTIL %s")
+                clauses.append(sql.SQL("VALID UNTIL %s"))
                 params.append(fields['valid_until'])
             if 'can_login' in fields:
-                clauses.append("LOGIN" if fields['can_login'] else "NOLOGIN")
+                clauses.append(
+                    sql.SQL("LOGIN") if fields['can_login'] else sql.SQL("NOLOGIN")
+                )
             if not clauses:
                 return
-            sql += ' '.join(clauses)
-            cur.execute(sql, params)
+            query = (
+                sql.SQL("ALTER ROLE {} ").format(sql.Identifier(username))
+                + sql.SQL(" ").join(clauses)
+            )
+            cur.execute(query, params)
 
     def delete_user(self, username: str):
         with self.conn.cursor() as cur:
-            cur.execute(f'DROP ROLE "{username}"')
+            cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(username)))
 
     def list_users(self) -> List[str]:
         with self.conn.cursor() as cur:
@@ -61,19 +71,31 @@ class DBManager:
 
     def create_group(self, group_name: str):
         with self.conn.cursor() as cur:
-            cur.execute(f'CREATE ROLE "{group_name}" NOLOGIN')
+            cur.execute(
+                sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(group_name))
+            )
 
     def delete_group(self, group_name: str):  # <-- NOVO MÉTODO ADICIONADO
         with self.conn.cursor() as cur:
-            cur.execute(f'DROP ROLE "{group_name}"')
+            cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(group_name)))
 
     def add_user_to_group(self, username: str, group_name: str):
         with self.conn.cursor() as cur:
-            cur.execute(f'GRANT "{group_name}" TO "{username}"')
+            cur.execute(
+                sql.SQL("GRANT {} TO {}").format(
+                    sql.Identifier(group_name),
+                    sql.Identifier(username),
+                )
+            )
 
     def remove_user_from_group(self, username: str, group_name: str):
         with self.conn.cursor() as cur:
-            cur.execute(f'REVOKE "{group_name}" FROM "{username}"')
+            cur.execute(
+                sql.SQL("REVOKE {} FROM {}").format(
+                    sql.Identifier(group_name),
+                    sql.Identifier(username),
+                )
+            )
 
     def list_group_members(self, group_name: str) -> List[str]:
         with self.conn.cursor() as cur:
@@ -132,21 +154,29 @@ class DBManager:
                     raise ValueError(
                         f"Role '{owner}' não existe. Roles disponíveis: {roles}"
                     )
-            sql = f'CREATE SCHEMA "{schema_name}"'
+            query = sql.SQL("CREATE SCHEMA {}").format(
+                sql.Identifier(schema_name)
+            )
             if owner:
-                sql += f' AUTHORIZATION "{owner}"'
-            cur.execute(sql)
+                query += sql.SQL(" AUTHORIZATION {}").format(sql.Identifier(owner))
+            cur.execute(query)
 
     def drop_schema(self, schema_name: str, cascade: bool = False):
         with self.conn.cursor() as cur:
             cur.execute(
-                f'DROP SCHEMA "{schema_name}" {"CASCADE" if cascade else "RESTRICT"}'
+                sql.SQL("DROP SCHEMA {} {}").format(
+                    sql.Identifier(schema_name),
+                    sql.SQL("CASCADE") if cascade else sql.SQL("RESTRICT"),
+                )
             )
 
     def alter_schema_owner(self, schema_name: str, new_owner: str):
         with self.conn.cursor() as cur:
             cur.execute(
-                f'ALTER SCHEMA "{schema_name}" OWNER TO "{new_owner}"'
+                sql.SQL("ALTER SCHEMA {} OWNER TO {}").format(
+                    sql.Identifier(schema_name),
+                    sql.Identifier(new_owner),
+                )
             )
 
     def list_schemas(self) -> List[str]:
@@ -163,6 +193,8 @@ class DBManager:
         """Garante que a extensão PostGIS esteja disponível no schema informado."""
         with self.conn.cursor() as cur:
             cur.execute(
-                f'CREATE EXTENSION IF NOT EXISTS postgis SCHEMA "{schema_name}"'
+                sql.SQL("CREATE EXTENSION IF NOT EXISTS postgis SCHEMA {}").format(
+                    sql.Identifier(schema_name)
+                )
             )
 
