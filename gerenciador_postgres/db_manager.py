@@ -2,7 +2,7 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extensions import connection
 from .data_models import User, Group
-from typing import Optional, List
+from typing import Optional, List, Dict, Set
 
 
 class DBManager:
@@ -133,6 +133,47 @@ class DBManager:
                 """
             )
             return [row[0] for row in cur.fetchall()]
+
+    # Métodos de tabelas e privilégios ------------------------------------
+
+    def list_tables_by_schema(self) -> Dict[str, List[str]]:
+        """Lista todas as tabelas organizadas por schema."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_schema, table_name
+                FROM information_schema.tables
+                WHERE table_type = 'BASE TABLE'
+                  AND table_schema NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY table_schema, table_name
+                """
+            )
+            result: Dict[str, List[str]] = {}
+            for schema, table in cur.fetchall():
+                result.setdefault(schema, []).append(table)
+            return result
+
+    def apply_group_privileges(self, group: str, privileges: Dict[str, Dict[str, Set[str]]]):
+        """Aplica GRANT/REVOKE de acordo com o dicionário de permissões informado."""
+        with self.conn.cursor() as cur:
+            for schema, tables in privileges.items():
+                for table, perms in tables.items():
+                    identifier = sql.Identifier(schema, table)
+                    cur.execute(
+                        sql.SQL(
+                            "REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLE {} FROM {}"
+                        ).format(
+                            identifier, sql.Identifier(group)
+                        )
+                    )
+                    if perms:
+                        cur.execute(
+                            sql.SQL("GRANT {} ON TABLE {} TO {}").format(
+                                sql.SQL(", ").join(sql.SQL(p) for p in sorted(perms)),
+                                identifier,
+                                sql.Identifier(group),
+                            )
+                        )
 
     # Métodos de schema
     def create_schema(self, schema_name: str, owner: str | None = None):

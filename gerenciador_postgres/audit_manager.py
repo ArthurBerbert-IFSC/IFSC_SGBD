@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from .db_manager import DBManager
 from psycopg2 import sql
+from psycopg2.extras import Json
 
 
 class AuditManager:
@@ -74,9 +75,9 @@ class AuditManager:
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     operador, operacao, objeto_tipo, objeto_nome,
-                    sql.Json(detalhes) if detalhes else None,
-                    sql.Json(dados_antes) if dados_antes else None,
-                    sql.Json(dados_depois) if dados_depois else None,
+                    Json(detalhes) if detalhes else None,
+                    Json(dados_antes) if dados_antes else None,
+                    Json(dados_depois) if dados_depois else None,
                     sucesso, ip_address
                 ))
             
@@ -153,27 +154,27 @@ class AuditManager:
                 
                 # Operações por tipo
                 cur.execute("""
-                    SELECT operacao, COUNT(*) 
-                    FROM audit_log 
-                    GROUP BY operacao 
-                    ORDER BY COUNT(*) DESC
+                    SELECT operacao, COUNT(1)
+                    FROM audit_log
+                    GROUP BY operacao
+                    ORDER BY COUNT(1) DESC
                 """)
                 ops_por_tipo = dict(cur.fetchall())
                 
                 # Atividade por operador
                 cur.execute("""
-                    SELECT operador, COUNT(*) 
-                    FROM audit_log 
-                    GROUP BY operador 
-                    ORDER BY COUNT(*) DESC 
+                    SELECT operador, COUNT(1)
+                    FROM audit_log
+                    GROUP BY operador
+                    ORDER BY COUNT(1) DESC
                     LIMIT 10
                 """)
                 atividade_operadores = dict(cur.fetchall())
                 
                 # Atividade recente (últimas 24h)
                 cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM audit_log 
+                    SELECT COUNT(1)
+                    FROM audit_log
                     WHERE timestamp >= NOW() - INTERVAL '24 hours'
                 """)
                 atividade_24h = cur.fetchone()[0]

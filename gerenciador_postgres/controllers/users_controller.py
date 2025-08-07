@@ -40,3 +40,24 @@ class UsersController(QObject):
     def change_password(self, username: str, new_password: str) -> bool:
         return self.role_manager.change_password(username, new_password)
 
+    # --- Novos métodos de privilégios ----------------------------------
+
+    def get_schema_tables(self):
+        """Retorna dicionário de schemas e suas tabelas."""
+        return self.role_manager.list_tables_by_schema()
+
+    def list_privilege_templates(self):
+        """Templates simples de conjunto de permissões."""
+        return {
+            "Nenhum": set(),
+            "Leitura": {"SELECT"},
+            "Leitura/Escrita": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+        }
+
+    def apply_group_privileges(self, group_name: str, privileges):
+        """Encaminha atualização de privilégios ao RoleManager."""
+        success = self.role_manager.set_group_privileges(group_name, privileges)
+        if success:
+            self.data_changed.emit()
+        return success
+
