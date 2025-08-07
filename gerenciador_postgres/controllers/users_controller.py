@@ -16,10 +16,15 @@ class UsersController(QObject):
         groups = self.role_manager.list_groups()
         return users, groups
 
-    def create_user(self, username: str, password: str):
-        result = self.role_manager.create_user(username, password)
+    def create_user(self, username: str, password: str, valid_until: str | None = None):
+        result = self.role_manager.create_user(username, password, valid_until)
         self.data_changed.emit()
         return result
+
+    def create_users_batch(self, users_data):
+        results = self.role_manager.create_users_batch(users_data)
+        self.data_changed.emit()
+        return results
 
     def create_group(self, group_name: str):
         result = self.role_manager.create_group(group_name)

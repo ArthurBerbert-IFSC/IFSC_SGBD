@@ -25,14 +25,22 @@ class DBManager:
                 return User(username=row[0], oid=row[1], valid_until=row[2], can_login=row[3])
             return None
 
-    def insert_user(self, username: str, password_hash: str):
+    def insert_user(self, username: str, password_hash: str, valid_until: str | None = None):
         with self.conn.cursor() as cur:
-            cur.execute(
-                sql.SQL("CREATE ROLE {} WITH LOGIN PASSWORD %s").format(
-                    sql.Identifier(username)
-                ),
-                (password_hash,),
-            )
+            if valid_until:
+                cur.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} WITH LOGIN PASSWORD %s VALID UNTIL %s"
+                    ).format(sql.Identifier(username)),
+                    (password_hash, valid_until),
+                )
+            else:
+                cur.execute(
+                    sql.SQL("CREATE ROLE {} WITH LOGIN PASSWORD %s").format(
+                        sql.Identifier(username)
+                    ),
+                    (password_hash,),
+                )
 
     def update_user(self, username: str, **fields):
         with self.conn.cursor() as cur:
