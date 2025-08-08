@@ -156,18 +156,43 @@ class DBManager:
 
     # Métodos de tabelas e privilégios ------------------------------------
 
-    def list_tables_by_schema(self) -> Dict[str, List[str]]:
-        """Lista todas as tabelas organizadas por schema."""
+    def list_tables_by_schema(
+        self,
+        include_types: tuple[str, ...] = ("r", "v"),
+        include_schemas: list[str] | None = None,
+        exclude_schemas: tuple[str, ...] = ("pg_catalog", "information_schema"),
+    ) -> Dict[str, List[str]]:
+        """Lista objetos por schema.
+
+        Args:
+            include_types: tipos de objetos em ``pg_class`` a serem incluídos
+                (``r``=tabelas, ``v``=views, etc.).
+            include_schemas: lista de schemas a incluir. Se ``None``, inclui
+                todos exceto ``exclude_schemas``.
+            exclude_schemas: schemas a ignorar quando ``include_schemas`` for
+                ``None``.
+        """
+
+        query = [
+            "SELECT n.nspname, c.relname",
+            "FROM pg_catalog.pg_class c",
+            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace",
+            "WHERE c.relkind = ANY(%s)",
+        ]
+        params: list[object] = [list(include_types)]
+
+        if include_schemas is not None:
+            query.append("AND n.nspname = ANY(%s)")
+            params.append(include_schemas)
+        else:
+            query.append("AND n.nspname <> ALL(%s)")
+            params.append(list(exclude_schemas))
+
+        query.append("ORDER BY n.nspname, c.relname")
+        sql_query = "\n".join(query)
+
         with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT table_schema, table_name
-                FROM information_schema.tables
-                WHERE table_type = 'BASE TABLE'
-                  AND table_schema NOT IN ('pg_catalog', 'information_schema')
-                ORDER BY table_schema, table_name
-                """
-            )
+            cur.execute(sql_query, params)
             result: Dict[str, List[str]] = {}
             for schema, table in cur.fetchall():
                 result.setdefault(schema, []).append(table)
