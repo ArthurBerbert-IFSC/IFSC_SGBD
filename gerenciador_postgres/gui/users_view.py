@@ -173,6 +173,13 @@ class UsersView(QWidget):
         self.splitter.addWidget(self.bottomPanel)
 
         layout.addWidget(self.splitter)
+
+        self.buttonBox = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Close
+        )
+        layout.addWidget(self.buttonBox)
+
         self.setLayout(layout)
 
     def _connect_signals(self):
@@ -184,6 +191,8 @@ class UsersView(QWidget):
         self.btnChangePassword.clicked.connect(self.on_change_password_clicked)
         self.btnAddGroup.clicked.connect(self.on_add_group_clicked)
         self.btnRemoveGroup.clicked.connect(self.on_remove_group_clicked)
+        self.buttonBox.rejected.connect(self.close)
+        self.buttonBox.accepted.connect(self.on_save_clicked)
 
     def refresh_lists(self):
         # Preserva seleção e posição de scroll atuais
@@ -478,4 +487,11 @@ class UsersView(QWidget):
                 self, "Erro", f"Falha ao remover o aluno da turma.\nMotivo: {e}"
             )
         self._update_group_lists(username)
+
+    def on_save_clicked(self):
+        if self.controller:
+            try:
+                self.controller.flush()
+            except AttributeError:
+                pass
 
