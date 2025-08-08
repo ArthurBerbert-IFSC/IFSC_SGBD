@@ -1,7 +1,6 @@
-from PyQt6.QtWidgets import QMainWindow, QLabel, QMenuBar
-from PyQt6.QtWidgets import QStatusBar, QApplication, QMessageBox, QDialog
+from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea
+from PyQt6.QtWidgets import QStatusBar, QMessageBox, QDialog
 from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtCore import Qt
 from pathlib import Path
 from .connection_dialog import ConnectionDialog
 from ..db_manager import DBManager
@@ -103,9 +102,10 @@ class MainWindow(QMainWindow):
         from .users_view import UsersView
         if self.users_controller:
             users_window = UsersView(controller=self.users_controller)
-            self.opened_windows.append(users_window)
             users_window.setWindowTitle("Gerenciador de Usuários")
-            users_window.show()
+            sub_window = self.mdi.addSubWindow(users_window)
+            self.opened_windows.append(sub_window)
+            sub_window.show()
         else:
             QMessageBox.warning(
                 self,
@@ -228,9 +228,8 @@ class MainWindow(QMainWindow):
         )
 
     def _setup_central(self):
-        self.label = QLabel("Bem-vindo ao Gerenciador PostgreSQL!\nUtilize o menu para começar.", self)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCentralWidget(self.label)
+        self.mdi = QMdiArea(self)
+        self.setCentralWidget(self.mdi)
 
     def on_schemas(self):
         from .schema_view import SchemaView
