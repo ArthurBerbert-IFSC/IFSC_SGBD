@@ -67,7 +67,9 @@ class RoleManager:
             
             raise
 
-    def create_users_batch(self, users_info: list, valid_until: str | None = None):
+    def create_users_batch(
+        self, users_info: list, valid_until: str | None = None, group_name: str | None = None
+    ):
         """Cria múltiplos usuários gerando usernames a partir do nome completo.
 
         Parameters
@@ -76,30 +78,55 @@ class RoleManager:
             Lista de tuplas ``(matricula, nome_completo)``.
         valid_until : str | None
             Data de expiração opcional aplicada a todos os usuários.
+        group_name : str | None
+            Turma à qual os usuários serão adicionados.
         """
+
+        if group_name:
+            try:
+                if group_name not in self.list_groups():
+                    self.create_group(group_name)
+            except Exception as e:
+                self.logger.error(
+                    f"[{self.operador}] Falha ao garantir existência da turma '{group_name}': {e}"
+                )
+                raise
 
         created: List[str] = []
         for matricula, nome_completo in users_info:
             password = matricula
-            partes = nome_completo.split()
+            partes = nome_completo.strip().split()
             if not partes:
                 continue
-            username_base = f"{partes[0].lower()}.{partes[-1].lower()}"
+            first = partes[0].lower()
+            last = partes[-1].lower() if len(partes) > 1 else ""
             tentativa = 0
             while True:
-                username = username_base if tentativa == 0 else f"{username_base}{tentativa}"
+                if tentativa == 0:
+                    username = first
+                elif tentativa == 1:
+                    username = f"{first}.{last}" if last else first
+                else:
+                    username = f"{first}.{last}{tentativa}" if last else f"{first}{tentativa}"
                 try:
-                    created.append(self.create_user(username, password, valid_until))
+                    created_username = self.create_user(username, password, valid_until)
+                    if group_name:
+                        self.add_user_to_group(created_username, group_name)
+                    created.append(created_username)
                     break
                 except ValueError as e:
                     if "já existe" in str(e):
                         tentativa += 1
                         continue
                     else:
-                        self.logger.error(f"[{self.operador}] Falha ao criar usuário '{username}': {e}")
+                        self.logger.error(
+                            f"[{self.operador}] Falha ao criar usuário '{username}': {e}"
+                        )
                         break
                 except Exception as e:
-                    self.logger.error(f"[{self.operador}] Falha ao criar usuário '{username}': {e}")
+                    self.logger.error(
+                        f"[{self.operador}] Falha ao criar usuário '{username}': {e}"
+                    )
                     break
         return created
 
