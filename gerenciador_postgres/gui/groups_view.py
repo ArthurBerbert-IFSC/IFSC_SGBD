@@ -170,7 +170,7 @@ class GroupsView(QWidget):
             schema_item = QTreeWidgetItem([schema])
             # Only set the tristate flag so the parent reflects its children.
             schema_item.setFlags(
-                schema_item.flags() | Qt.ItemFlag.ItemIsTristate
+                schema_item.flags() | Qt.ItemFlag.ItemIsAutoTristate
             )
             self.treePrivileges.addTopLevelItem(schema_item)
             for table in tables:
