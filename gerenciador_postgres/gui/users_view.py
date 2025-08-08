@@ -16,10 +16,75 @@ from PyQt6.QtWidgets import (
     QDateEdit,
     QTextEdit,
     QDialogButtonBox,
+    QComboBox,
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QIcon
 from pathlib import Path
+
+
+class BatchUserDialog(QDialog):
+    def __init__(self, parent=None, controller=None):
+        super().__init__(parent)
+        self.controller = controller
+        self.setWindowTitle("Inserir Usuários em Lote")
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(
+            QLabel(
+                "Cole a lista de alunos no formato: número matrícula nome completo (um por linha)"
+            )
+        )
+
+        self.txt = QTextEdit()
+        layout.addWidget(self.txt)
+
+        layout.addWidget(QLabel("Turma"))
+        self.cmbGroups = QComboBox()
+        if controller:
+            self.cmbGroups.addItems(controller.list_groups())
+        self.cmbGroups.addItem("-- Criar nova turma --")
+        layout.addWidget(self.cmbGroups)
+
+        self.chk = QCheckBox("Definir data de expiração para todos")
+        layout.addWidget(self.chk)
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDate(QDate.currentDate())
+        self.date_edit.setEnabled(False)
+        self.chk.toggled.connect(self.date_edit.setEnabled)
+        layout.addWidget(self.date_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        layout.addWidget(buttons)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+    def get_data(self):
+        text = self.txt.toPlainText()
+        users_data = []
+        for idx, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            parts = line.strip().split(maxsplit=2)
+            if len(parts) < 3:
+                raise ValueError(f"Linha {idx} inválida: '{line}'")
+            users_data.append((parts[1], parts[2]))
+        if not users_data:
+            raise ValueError("Nenhum usuário válido informado.")
+        valid_until = (
+            self.date_edit.date().toString("yyyy-MM-dd") if self.chk.isChecked() else None
+        )
+        group_name = self.cmbGroups.currentText()
+        if group_name == "-- Criar nova turma --":
+            group_name, ok = QInputDialog.getText(
+                self, "Nova Turma", "Nome da nova turma:"
+            )
+            if not ok or not group_name:
+                raise ValueError("Nome da turma inválido.")
+        return users_data, valid_until, group_name
 
 
 class UsersView(QWidget):
@@ -82,8 +147,8 @@ class UsersView(QWidget):
         lists_layout.addLayout(left_groups_layout)
 
         btns_layout = QVBoxLayout()
-        self.btnAddGroup = QPushButton(">>")
-        self.btnRemoveGroup = QPushButton("<<")
+        self.btnAddGroup = QPushButton("<- Adicionar")
+        self.btnRemoveGroup = QPushButton("Remover ->")
         self.btnAddGroup.setEnabled(False)
         self.btnRemoveGroup.setEnabled(False)
         btns_layout.addStretch()
@@ -153,25 +218,19 @@ class UsersView(QWidget):
             return
 
         username = current.data(Qt.ItemDataRole.UserRole)
-        self.propLayout.addWidget(QLabel(f"Nome: {username}"))
+        user_details = self.controller.get_user(username) if self.controller else None
+        if user_details:
+            details_text = f"<b>Usuário:</b> {user_details.username}"
+            if user_details.valid_until:
+                details_text += f"<br><b>Expira em:</b> {user_details.valid_until.strftime('%d/%m/%Y')}"
+            self.lblUserDetails = QLabel(details_text)
+            self.propLayout.addWidget(self.lblUserDetails)
+        else:
+            self.propLayout.addWidget(QLabel(f"Nome: {username}"))
         self.btnChangePassword.setEnabled(True)
         self.btnDelete.setEnabled(True)
 
-        # Populate group lists
-        if self.controller:
-            try:
-                user_groups = set(self.controller.list_user_groups(username))
-                all_groups = set(self.controller.list_groups())
-                for g in sorted(user_groups):
-                    self.lstUserGroups.addItem(g)
-                for g in sorted(all_groups - user_groups):
-                    self.lstAvailableGroups.addItem(g)
-                self.btnAddGroup.setEnabled(True)
-                self.btnRemoveGroup.setEnabled(True)
-            except Exception as e:
-                QMessageBox.critical(
-                    self, "Erro", f"Não foi possível carregar turmas do usuário.\nMotivo: {e}"
-                )
+        self._update_group_lists(username)
 
     def on_new_user_clicked(self):
         username, ok1 = QInputDialog.getText(
@@ -224,61 +283,22 @@ class UsersView(QWidget):
             )
 
     def on_new_user_batch_clicked(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Inserir Usuários em Lote")
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(
-            QLabel(
-                "Cole a lista de alunos no formato: matrícula nome completo (um por linha)"
-            )
-        )
-        txt = QTextEdit()
-        layout.addWidget(txt)
-        chk = QCheckBox("Definir data de expiração para todos")
-        date_edit = QDateEdit()
-        date_edit.setCalendarPopup(True)
-        date_edit.setDate(QDate.currentDate())
-        date_edit.setEnabled(False)
-        chk.toggled.connect(date_edit.setEnabled)
-        layout.addWidget(chk)
-        layout.addWidget(date_edit)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        layout.addWidget(buttons)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
+        dlg = BatchUserDialog(self, self.controller)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        text = txt.toPlainText()
-        users_data = []
         try:
-            for idx, line in enumerate(text.splitlines(), start=1):
-                if not line.strip():
-                    continue
-                parts = line.strip().split(maxsplit=1)
-                if len(parts) < 2:
-                    raise ValueError(f"Linha {idx} inválida: '{line}'")
-                users_data.append((parts[0], parts[1]))
+            users_data, valid_until, group_name = dlg.get_data()
         except ValueError as e:
             QMessageBox.warning(self, "Erro de Formato", str(e))
             return
-        if not users_data:
-            QMessageBox.warning(self, "Aviso", "Nenhum usuário válido informado.")
-            return
-        valid_until = (
-            date_edit.date().toString("yyyy-MM-dd") if chk.isChecked() else None
-        )
         try:
-            created = self.controller.create_users_batch(users_data, valid_until)
+            created = self.controller.create_users_batch(users_data, valid_until, group_name)
             QMessageBox.information(
                 self, "Sucesso", f"{len(created)} usuários criados com sucesso!"
             )
         except Exception as e:
             QMessageBox.critical(
-                self,
-                "Erro",
-                f"Falha ao inserir usuários em lote.\nMotivo: {e}",
+                self, "Erro", f"Falha ao inserir usuários em lote.\nMotivo: {e}"
             )
 
     def on_delete_user_clicked(self):
@@ -335,6 +355,24 @@ class UsersView(QWidget):
                     self, "Erro", f"Não foi possível alterar a senha.\nMotivo: {e}"
                 )
 
+    def _update_group_lists(self, username):
+        self.lstUserGroups.clear()
+        self.lstAvailableGroups.clear()
+        if self.controller:
+            try:
+                user_groups = set(self.controller.list_user_groups(username))
+                all_groups = set(self.controller.list_groups())
+                for g in sorted(user_groups):
+                    self.lstUserGroups.addItem(g)
+                for g in sorted(all_groups - user_groups):
+                    self.lstAvailableGroups.addItem(g)
+                self.btnAddGroup.setEnabled(True)
+                self.btnRemoveGroup.setEnabled(True)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Erro", f"Não foi possível carregar turmas do usuário.\nMotivo: {e}"
+                )
+
     def on_add_group_clicked(self):
         user_item = self.lstEntities.currentItem()
         group_item = self.lstAvailableGroups.currentItem()
@@ -357,7 +395,7 @@ class UsersView(QWidget):
             QMessageBox.critical(
                 self, "Erro", f"Falha ao adicionar o aluno à turma.\nMotivo: {e}"
             )
-        self.on_entity_selected(self.lstEntities.currentItem(), None)
+        self._update_group_lists(username)
 
     def on_remove_group_clicked(self):
         user_item = self.lstEntities.currentItem()
@@ -381,5 +419,5 @@ class UsersView(QWidget):
             QMessageBox.critical(
                 self, "Erro", f"Falha ao remover o aluno da turma.\nMotivo: {e}"
             )
-        self.on_entity_selected(self.lstEntities.currentItem(), None)
+        self._update_group_lists(username)
 
