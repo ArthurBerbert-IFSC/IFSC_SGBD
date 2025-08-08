@@ -173,29 +173,42 @@ class DBManager:
                 ``None``.
         """
 
+        # Determine schemas to include
+        if include_schemas is not None:
+            schemas = include_schemas
+        else:
+            schemas = [s for s in self.list_schemas() if s not in exclude_schemas]
+
         query = [
             "SELECT n.nspname, c.relname",
             "FROM pg_catalog.pg_class c",
             "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace",
             "WHERE c.relkind = ANY(%s)",
+            "AND n.nspname = ANY(%s)",
+            "ORDER BY n.nspname, c.relname",
         ]
-        params: list[object] = [list(include_types)]
-
-        if include_schemas is not None:
-            query.append("AND n.nspname = ANY(%s)")
-            params.append(include_schemas)
-        else:
-            query.append("AND n.nspname <> ALL(%s)")
-            params.append(list(exclude_schemas))
-
-        query.append("ORDER BY n.nspname, c.relname")
         sql_query = "\n".join(query)
+        params: list[object] = [list(include_types), schemas]
 
         with self.conn.cursor() as cur:
             cur.execute(sql_query, params)
-            result: Dict[str, List[str]] = {}
+            result: Dict[str, List[str]] = {schema: [] for schema in schemas}
             for schema, table in cur.fetchall():
                 result.setdefault(schema, []).append(table)
+            return result
+
+    def get_group_privileges(self, group: str) -> Dict[str, Dict[str, Set[str]]]:
+        """Retorna os privilégios de tabela concedidos a um grupo."""
+        query = (
+            "SELECT table_schema, table_name, privilege_type "
+            "FROM information_schema.role_table_grants "
+            "WHERE grantee = %s"
+        )
+        with self.conn.cursor() as cur:
+            cur.execute(query, (group,))
+            result: Dict[str, Dict[str, Set[str]]] = {}
+            for schema, table, priv in cur.fetchall():
+                result.setdefault(schema, {}).setdefault(table, set()).add(priv)
             return result
 
     def apply_group_privileges(self, group: str, privileges: Dict[str, Dict[str, Set[str]]]):
