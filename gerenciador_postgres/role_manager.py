@@ -292,7 +292,7 @@ class RoleManager:
             self.logger.error(f"[{self.operador}] Falha ao criar grupo '{group_name}': {e}")
             raise
 
-    def delete_group(self, group_name: str) -> bool: # <-- NOVO MÉTODO ADICIONADO
+    def delete_group(self, group_name: str) -> bool:
         try:
             self.dao.delete_group(group_name)
             self.dao.conn.commit()
@@ -372,6 +372,15 @@ class RoleManager:
             return self.dao.list_tables_by_schema(**kwargs)
         except Exception as e:
             self.logger.error(f"[{self.operador}] Erro ao listar tabelas: {e}")
+            return {}
+
+    def get_group_privileges(self, group_name: str) -> Dict[str, Dict[str, Set[str]]]:
+        try:
+            return self.dao.get_group_privileges(group_name)
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Erro ao obter privilégios do grupo '{group_name}': {e}"
+            )
             return {}
 
     def set_group_privileges(self, group_name: str, privileges: Dict[str, Dict[str, Set[str]]]) -> bool:
