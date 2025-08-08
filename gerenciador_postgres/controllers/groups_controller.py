@@ -43,6 +43,9 @@ class GroupsController(QObject):
     def get_schema_tables(self, **kwargs):
         return self.role_manager.list_tables_by_schema(**kwargs)
 
+    def get_group_privileges(self, group_name: str):
+        return self.role_manager.get_group_privileges(group_name)
+
     def list_privilege_templates(self):
         return PERMISSION_TEMPLATES
 

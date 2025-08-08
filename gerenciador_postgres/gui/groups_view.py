@@ -211,6 +211,7 @@ class GroupsView(QWidget):
         if not self.controller or not self.current_group:
             return
         data = self.controller.get_schema_tables()
+        privileges = self.controller.get_group_privileges(self.current_group)
         self.treePrivileges.clear()
         for schema, tables in data.items():
             schema_item = QTreeWidgetItem([schema])
@@ -226,8 +227,10 @@ class GroupsView(QWidget):
                     | Qt.ItemFlag.ItemIsUserCheckable
                     | Qt.ItemFlag.ItemIsSelectable
                 )
-                for col in range(1, 5):
-                    table_item.setCheckState(col, Qt.CheckState.Unchecked)
+                perms = privileges.get(schema, {}).get(table, set())
+                for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
+                    state = Qt.CheckState.Checked if label in perms else Qt.CheckState.Unchecked
+                    table_item.setCheckState(col, state)
                 schema_item.addChild(table_item)
         self.treePrivileges.expandAll()
 
