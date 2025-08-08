@@ -34,11 +34,14 @@ class GroupsController(QObject):
             self.data_changed.emit()
         return success
 
+    def list_group_members(self, group_name: str):
+        return self.role_manager.list_group_members(group_name)
+
     # ---------------------------------------------------------------
     # Operações de privilégios
     # ---------------------------------------------------------------
-    def get_schema_tables(self):
-        return self.role_manager.list_tables_by_schema()
+    def get_schema_tables(self, **kwargs):
+        return self.role_manager.list_tables_by_schema(**kwargs)
 
     def list_privilege_templates(self):
         return PERMISSION_TEMPLATES

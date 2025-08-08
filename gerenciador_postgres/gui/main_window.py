@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
         self.role_manager = None
         self.users_controller = None
         self.groups_controller = None
+        self.groups_view = None
         self.schema_manager = None
         self.schema_controller = None
         self.audit_manager = None
@@ -117,10 +118,9 @@ class MainWindow(QMainWindow):
         """Abre a janela para gerenciamento de grupos e privilégios."""
         from .groups_view import GroupsView
         if self.groups_controller:
-            grp_window = GroupsView(controller=self.groups_controller)
-            self.opened_windows.append(grp_window)
-            grp_window.setWindowTitle("Gerenciador de Grupos e Privilégios")
-            grp_window.show()
+            if not self.groups_view:
+                self.groups_view = GroupsView(controller=self.groups_controller)
+            self.setCentralWidget(self.groups_view)
         else:
             QMessageBox.warning(
                 self,
@@ -211,6 +211,8 @@ class MainWindow(QMainWindow):
         self.schema_controller = None
         self.audit_manager = None
         self.audit_controller = None
+        self.groups_view = None
+        self.setCentralWidget(self.label)
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")

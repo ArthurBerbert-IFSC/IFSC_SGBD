@@ -14,8 +14,10 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QLineEdit,
+    QProgressDialog,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QFutureWatcher
+from PyQt6 import QtConcurrent
 from PyQt6.QtGui import QIcon
 from pathlib import Path
 
@@ -30,6 +32,7 @@ class GroupsView(QWidget):
         self.controller = controller
         self.current_group = None
         self.templates = {}
+        self._watchers: list[QFutureWatcher] = []
         self._setup_ui()
         self._connect_signals()
         if self.controller:
@@ -52,6 +55,9 @@ class GroupsView(QWidget):
         left_layout.addWidget(self.toolbar)
         self.lstGroups = QListWidget()
         left_layout.addWidget(self.lstGroups)
+        left_layout.addWidget(QLabel("Membros do Grupo:"))
+        self.lstMembers = QListWidget()
+        left_layout.addWidget(self.lstMembers)
         self.splitter.addWidget(left_panel)
 
         # Right panel: privileges
@@ -85,6 +91,7 @@ class GroupsView(QWidget):
         self.treePrivileges.setEnabled(False)
         self.btnApplyTemplate.setEnabled(False)
         self.btnSave.setEnabled(False)
+        self.lstMembers.setEnabled(False)
 
     def _connect_signals(self):
         self.btnNewGroup.clicked.connect(self._on_new_group)
@@ -96,6 +103,7 @@ class GroupsView(QWidget):
     # ------------------------------------------------------------------
     def refresh_groups(self):
         self.lstGroups.clear()
+        self.lstMembers.clear()
         if not self.controller:
             return
         for grp in self.controller.list_groups():
@@ -131,22 +139,41 @@ class GroupsView(QWidget):
         if not item:
             return
         group = item.text()
-        reply = QMessageBox.question(
-            self,
-            "Confirmar Deleção",
-            f"Tem certeza que deseja excluir o grupo '{group}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            if self.controller.delete_group(group):
-                QMessageBox.information(
-                    self, "Sucesso", f"Grupo '{group}' excluído com sucesso."
-                )
-            else:
-                QMessageBox.critical(
-                    self, "Erro", "Não foi possível excluir o grupo."
-                )
+        members = self.controller.list_group_members(group)
+        if members:
+            msg = (
+                f"O grupo '{group}' possui {len(members)} membro(s).\n"
+                "Deseja removê-los junto com o grupo?"
+            )
+            reply = QMessageBox.question(
+                self,
+                "Grupo com membros",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            success = self.controller.delete_group_and_members(group)
+        else:
+            reply = QMessageBox.question(
+                self,
+                "Confirmar Deleção",
+                f"Tem certeza que deseja excluir o grupo '{group}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            success = self.controller.delete_group(group)
+        if success:
+            QMessageBox.information(
+                self, "Sucesso", f"Grupo '{group}' excluído com sucesso."
+            )
+        else:
+            QMessageBox.critical(
+                self, "Erro", "Não foi possível excluir o grupo."
+            )
 
     def _on_group_selected(self, current, previous):
         if not current:
@@ -154,12 +181,16 @@ class GroupsView(QWidget):
             self.treePrivileges.setEnabled(False)
             self.btnApplyTemplate.setEnabled(False)
             self.btnSave.setEnabled(False)
+            self.lstMembers.setEnabled(False)
+            self.lstMembers.clear()
             return
         self.current_group = current.text()
         self.treePrivileges.setEnabled(True)
         self.btnApplyTemplate.setEnabled(True)
         self.btnSave.setEnabled(True)
+        self.lstMembers.setEnabled(True)
         self._populate_tree()
+        self._refresh_members()
 
     def _populate_tree(self):
         if not self.controller or not self.current_group:
@@ -189,10 +220,13 @@ class GroupsView(QWidget):
         if not self.current_group:
             return
         template_name = self.cmbTemplates.currentText()
-        try:
-            success = self.controller.apply_template_to_group(
+
+        def task():
+            return self.controller.apply_template_to_group(
                 self.current_group, template_name
             )
+
+        def on_success(success):
             if success:
                 QMessageBox.information(
                     self, "Sucesso", "Template aplicado com sucesso."
@@ -215,10 +249,13 @@ class GroupsView(QWidget):
                 QMessageBox.critical(
                     self, "Erro", "Falha ao aplicar o template ao grupo."
                 )
-        except Exception as e:
+
+        def on_error(e: Exception):
             QMessageBox.critical(
                 self, "Erro", f"Não foi possível aplicar o template: {e}"
             )
+
+        self._execute_async(task, on_success, on_error, "Aplicando template...")
 
     def _save_privileges(self):
         if not self.current_group:
@@ -236,9 +273,52 @@ class GroupsView(QWidget):
                         perms.add(label)
                 if perms:
                     privileges.setdefault(schema, {})[table] = perms
-        if self.controller.apply_group_privileges(self.current_group, privileges):
-            QMessageBox.information(self, "Sucesso", "Privilégios atualizados.")
-        else:
-            QMessageBox.critical(
-                self, "Erro", "Falha ao salvar os privilégios do grupo."
+
+        def task():
+            return self.controller.apply_group_privileges(
+                self.current_group, privileges
             )
+
+        def on_success(success):
+            if success:
+                QMessageBox.information(self, "Sucesso", "Privilégios atualizados.")
+            else:
+                QMessageBox.critical(
+                    self, "Erro", "Falha ao salvar os privilégios do grupo."
+                )
+
+        def on_error(e: Exception):
+            QMessageBox.critical(
+                self, "Erro", f"Falha ao salvar os privilégios: {e}"
+            )
+
+        self._execute_async(task, on_success, on_error, "Salvando privilégios...")
+
+    def _refresh_members(self):
+        self.lstMembers.clear()
+        if not self.controller or not self.current_group:
+            return
+        for user in self.controller.list_group_members(self.current_group):
+            self.lstMembers.addItem(user)
+
+    def _execute_async(self, func, on_success, on_error, label):
+        progress = QProgressDialog(label, None, 0, 0, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setAutoClose(True)
+        progress.show()
+        future = QtConcurrent.run(func)
+        watcher = QFutureWatcher()
+
+        def finished():
+            progress.cancel()
+            try:
+                result = watcher.result()
+            except Exception as e:  # pragma: no cover
+                on_error(e)
+            else:
+                on_success(result)
+            self._watchers.remove(watcher)
+
+        watcher.finished.connect(finished)
+        watcher.setFuture(future)
+        self._watchers.append(watcher)

@@ -367,9 +367,9 @@ class RoleManager:
 
     # Métodos de tabelas e privilégios ------------------------------------
 
-    def list_tables_by_schema(self) -> Dict[str, List[str]]:
+    def list_tables_by_schema(self, **kwargs) -> Dict[str, List[str]]:
         try:
-            return self.dao.list_tables_by_schema()
+            return self.dao.list_tables_by_schema(**kwargs)
         except Exception as e:
             self.logger.error(f"[{self.operador}] Erro ao listar tabelas: {e}")
             return {}
