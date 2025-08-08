@@ -73,3 +73,9 @@ class UsersController(QObject):
             self.data_changed.emit()
         return success
 
+    # --------------------------------------------------------------
+    # Compat: algumas views podem chamar flush(); aqui não há buffer,
+    # as operações já comitam imediatamente. Mantemos no-op.
+    def flush(self):
+        return None
+

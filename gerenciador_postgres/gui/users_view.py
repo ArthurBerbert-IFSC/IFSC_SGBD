@@ -174,9 +174,10 @@ class UsersView(QWidget):
 
         layout.addWidget(self.splitter)
 
+        # Apenas botão Fechar: todas as operações já são aplicadas imediatamente
+        # pelos controllers/managers. Não há um "Salvar" aqui.
         self.buttonBox = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save
-            | QDialogButtonBox.StandardButton.Close
+            QDialogButtonBox.StandardButton.Close
         )
         layout.addWidget(self.buttonBox)
 
@@ -191,8 +192,14 @@ class UsersView(QWidget):
         self.btnChangePassword.clicked.connect(self.on_change_password_clicked)
         self.btnAddGroup.clicked.connect(self.on_add_group_clicked)
         self.btnRemoveGroup.clicked.connect(self.on_remove_group_clicked)
-        self.buttonBox.rejected.connect(self.close)
-        self.buttonBox.accepted.connect(self.on_save_clicked)
+        # Close fecha a janela; conectar diretamente o botão Close
+        close_btn = self.buttonBox.button(QDialogButtonBox.StandardButton.Close)
+        if close_btn is not None:
+            close_btn.clicked.connect(self.close)
+        else:
+            # Fallback defensivo
+            self.buttonBox.rejected.connect(self.close)
+            self.buttonBox.accepted.connect(self.close)
 
     def refresh_lists(self):
         # Preserva seleção e posição de scroll atuais
@@ -488,10 +495,7 @@ class UsersView(QWidget):
             )
         self._update_group_lists(username)
 
+    # Não há on_save_clicked: mantido por compatibilidade se existir ligação externa
     def on_save_clicked(self):
-        if self.controller:
-            try:
-                self.controller.flush()
-            except AttributeError:
-                pass
+        self.close()
 
