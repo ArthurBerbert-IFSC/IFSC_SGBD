@@ -2,6 +2,7 @@ from .db_manager import DBManager
 from .data_models import User, Group
 from typing import Optional, List, Dict, Set
 import logging
+import unicodedata
 from psycopg2 import sql
 
 class RoleManager:
@@ -108,27 +109,66 @@ class RoleManager:
                     username = f"{first}.{last}" if last else first
                 else:
                     username = f"{first}.{last}{tentativa}" if last else f"{first}{tentativa}"
+                # Checagem prévia para evitar exceção de duplicidade e acelerar a próxima tentativa
                 try:
-                    created_username = self.create_user(username, password, valid_until)
+                    if self.dao.find_user_by_name(username):
+                        tentativa += 1
+                        if tentativa > 100:
+                            self.logger.error(
+                                f"[{self.operador}] Muitas tentativas para gerar username baseado em '{first} {last}'. Abortando este usuário."
+                            )
+                            break
+                        continue
+                except Exception as e:
+                    self.logger.warning(f"[{self.operador}] Falha ao checar existência de '{username}': {e}")
+                # Chama criação com proteção extra para garantir que nenhuma exceção escape
+                try:
+                    created_username, error = self._try_create_user(username, password, valid_until)
+                except Exception as e:
+                    created_username, error = None, e
+                if created_username:
                     if group_name:
                         self.add_user_to_group(created_username, group_name)
                     created.append(created_username)
                     break
-                except ValueError as e:
-                    if "já existe" in str(e):
+                else:
+                    # Decide se é duplicidade: tentar outro username; senão abortar este usuário
+                    if self._is_duplicate_error(error):
                         tentativa += 1
+                        if tentativa > 100:
+                            self.logger.error(
+                                f"[{self.operador}] Muitas tentativas para gerar username baseado em '{first} {last}'. Abortando este usuário."
+                            )
+                            break
                         continue
                     else:
                         self.logger.error(
-                            f"[{self.operador}] Falha ao criar usuário '{username}': {e}"
+                            f"[{self.operador}] Falha ao criar usuário '{username}': {error}"
                         )
                         break
-                except Exception as e:
-                    self.logger.error(
-                        f"[{self.operador}] Falha ao criar usuário '{username}': {e}"
-                    )
-                    break
         return created
+
+    # ----------------- Helpers internos -----------------
+    def _is_duplicate_error(self, error: Exception | None) -> bool:
+        if not error:
+            return False
+        msg_low = str(error).lower()
+        try:
+            norm = unicodedata.normalize("NFKD", msg_low).encode("ascii", "ignore").decode("ascii")
+        except Exception:
+            norm = msg_low
+        return (
+            "ja existe" in norm
+            or "already exists" in norm
+            or ("existe" in msg_low and "nao existe" not in msg_low)
+        )
+
+    def _try_create_user(self, username: str, password: str, valid_until: str | None):
+        try:
+            created = self.create_user(username, password, valid_until)
+            return created, None
+        except Exception as e:
+            return None, e
 
     def get_user(self, username: str) -> Optional[User]:
         try:

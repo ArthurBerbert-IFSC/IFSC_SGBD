@@ -94,6 +94,8 @@ class UsersView(QWidget):
         self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
         self.controller = controller
         self.setWindowTitle("Gerenciador de Usuários")
+        # Controle de UX
+        self._select_username_on_refresh = None
         self._setup_ui()
         self._connect_signals()
         if self.controller:
@@ -184,6 +186,14 @@ class UsersView(QWidget):
         self.btnRemoveGroup.clicked.connect(self.on_remove_group_clicked)
 
     def refresh_lists(self):
+        # Preserva seleção e posição de scroll atuais
+        selected_username = None
+        current_item = self.lstEntities.currentItem()
+        if current_item:
+            selected_username = current_item.data(Qt.ItemDataRole.UserRole)
+        current_row = self.lstEntities.currentRow()
+        scroll_val = self.lstEntities.verticalScrollBar().value()
+
         self.lstEntities.clear()
         if not self.controller:
             return
@@ -192,6 +202,26 @@ class UsersView(QWidget):
                 item = QListWidgetItem(f"👤 {user}")
                 item.setData(Qt.ItemDataRole.UserRole, user)
                 self.lstEntities.addItem(item)
+            # Definir alvo de seleção: 1) seleção solicitada; 2) usuário anterior; 3) índice próximo
+            target_username = self._select_username_on_refresh or selected_username
+            selected = False
+            if target_username is not None:
+                for i in range(self.lstEntities.count()):
+                    it = self.lstEntities.item(i)
+                    if it.data(Qt.ItemDataRole.UserRole) == target_username:
+                        self.lstEntities.setCurrentItem(it)
+                        selected = True
+                        break
+            if not selected and self.lstEntities.count() > 0:
+                # Seleciona linha próxima do índice anterior
+                target_row = current_row if 0 <= current_row < self.lstEntities.count() else self.lstEntities.count() - 1
+                self.lstEntities.setCurrentRow(target_row)
+
+            # Restaurar scroll
+            self.lstEntities.verticalScrollBar().setValue(scroll_val)
+
+            # Limpa seleção pendente específica
+            self._select_username_on_refresh = None
         except Exception as e:
             QMessageBox.critical(self, "Erro de Listagem", f"Não foi possível listar usuários: {e}")
 
@@ -274,6 +304,8 @@ class UsersView(QWidget):
         )
         try:
             self.controller.create_user(username, password, valid_until)
+            # Selecionar o usuário recém-criado após o refresh via sinal
+            self._select_username_on_refresh = username
             QMessageBox.information(
                 self, "Sucesso", f"Usuário '{username}' criado com sucesso!"
             )
@@ -293,6 +325,9 @@ class UsersView(QWidget):
             return
         try:
             created = self.controller.create_users_batch(users_data, valid_until, group_name)
+            # Seleciona o último criado, se houver
+            if created:
+                self._select_username_on_refresh = created[-1]
             QMessageBox.information(
                 self, "Sucesso", f"{len(created)} usuários criados com sucesso!"
             )
@@ -306,6 +341,7 @@ class UsersView(QWidget):
         if not current_item:
             return
         username = current_item.data(Qt.ItemDataRole.UserRole)
+        
         reply = QMessageBox.question(
             self,
             "Confirmar Deleção",
@@ -322,6 +358,8 @@ class UsersView(QWidget):
                         "Sucesso",
                         f"Usuário '{username}' deletado com sucesso.",
                     )
+                    # Após refresh, se o mesmo usuário não existir, a seleção vai para um vizinho
+                    # O método refresh_lists usa o índice anterior como fallback
                 else:
                     QMessageBox.critical(
                         self,
@@ -356,6 +394,20 @@ class UsersView(QWidget):
                 )
 
     def _update_group_lists(self, username):
+        # Guardar seleção e posição de scroll atuais
+        sel_user_group = (
+            self.lstUserGroups.currentItem().text()
+            if self.lstUserGroups.currentItem()
+            else None
+        )
+        sel_available_group = (
+            self.lstAvailableGroups.currentItem().text()
+            if self.lstAvailableGroups.currentItem()
+            else None
+        )
+        ug_scroll = self.lstUserGroups.verticalScrollBar().value()
+        av_scroll = self.lstAvailableGroups.verticalScrollBar().value()
+
         self.lstUserGroups.clear()
         self.lstAvailableGroups.clear()
         if self.controller:
@@ -368,6 +420,20 @@ class UsersView(QWidget):
                     self.lstAvailableGroups.addItem(g)
                 self.btnAddGroup.setEnabled(True)
                 self.btnRemoveGroup.setEnabled(True)
+
+                # Restaurar seleção anterior, se possível
+                if sel_user_group is not None:
+                    matches = self.lstUserGroups.findItems(sel_user_group, Qt.MatchFlag.MatchExactly)
+                    if matches:
+                        self.lstUserGroups.setCurrentItem(matches[0])
+                if sel_available_group is not None:
+                    matches = self.lstAvailableGroups.findItems(sel_available_group, Qt.MatchFlag.MatchExactly)
+                    if matches:
+                        self.lstAvailableGroups.setCurrentItem(matches[0])
+
+                # Restaurar posição de scroll
+                self.lstUserGroups.verticalScrollBar().setValue(ug_scroll)
+                self.lstAvailableGroups.verticalScrollBar().setValue(av_scroll)
             except Exception as e:
                 QMessageBox.critical(
                     self, "Erro", f"Não foi possível carregar turmas do usuário.\nMotivo: {e}"
@@ -381,11 +447,7 @@ class UsersView(QWidget):
         username = user_item.data(Qt.ItemDataRole.UserRole)
         group = group_item.text()
         try:
-            if self.controller.add_user_to_group(username, group):
-                QMessageBox.information(
-                    self, "Sucesso", f"Aluno adicionado à turma '{group}'."
-                )
-            else:
+            if not self.controller.add_user_to_group(username, group):
                 QMessageBox.critical(
                     self,
                     "Erro",
@@ -405,11 +467,7 @@ class UsersView(QWidget):
         username = user_item.data(Qt.ItemDataRole.UserRole)
         group = group_item.text()
         try:
-            if self.controller.remove_user_from_group(username, group):
-                QMessageBox.information(
-                    self, "Sucesso", f"Aluno removido da turma '{group}'."
-                )
-            else:
+            if not self.controller.remove_user_from_group(username, group):
                 QMessageBox.critical(
                     self,
                     "Erro",
