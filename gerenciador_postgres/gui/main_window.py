@@ -118,9 +118,11 @@ class MainWindow(QMainWindow):
         """Abre a janela para gerenciamento de grupos e privilégios."""
         from .groups_view import GroupsView
         if self.groups_controller:
-            if not self.groups_view:
-                self.groups_view = GroupsView(controller=self.groups_controller)
-            self.setCentralWidget(self.groups_view)
+            groups_window = GroupsView(controller=self.groups_controller)
+            groups_window.setWindowTitle("Gerenciador de Grupos")
+            sub_window = self.mdi.addSubWindow(groups_window)
+            self.opened_windows.append(sub_window)
+            sub_window.show()
         else:
             QMessageBox.warning(
                 self,
@@ -131,16 +133,20 @@ class MainWindow(QMainWindow):
 
     def on_conectar(self):
         dlg = ConnectionDialog(self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
+        dlg.setModal(False)
+        sub_window = self.mdi.addSubWindow(dlg)
+
+        def handle_accept():
             params = dlg.get_params()
+            sub_window.close()
             try:
                 conn = ConnectionManager().connect(**params)
                 self.db_manager = DBManager(conn)
-                
+
                 # Inicializar audit_manager primeiro
                 self.audit_manager = AuditManager(self.db_manager, self.logger)
                 self.audit_controller = AuditController(self.audit_manager, self.logger)
-                
+
                 # Passar audit_manager para os outros managers
                 self.role_manager = RoleManager(
                     self.db_manager, self.logger,
@@ -149,17 +155,17 @@ class MainWindow(QMainWindow):
                 )
                 self.users_controller = UsersController(self.role_manager)
                 self.groups_controller = GroupsController(self.role_manager)
-                
+
                 self.schema_manager = SchemaManager(
-                    self.db_manager, self.logger, 
-                    operador=params['user'], 
+                    self.db_manager, self.logger,
+                    operador=params['user'],
                     audit_manager=self.audit_manager
                 )
                 self.schema_controller = SchemaController(self.schema_manager, self.logger)
-                
+
                 self.menuGerenciar.setEnabled(True)
                 self.statusbar.showMessage(f"Conectado a {params['database']} como {params['user']}")
-                
+
                 # Registrar login na auditoria
                 self.audit_manager.log_operation(
                     operador=params['user'],
@@ -173,9 +179,8 @@ class MainWindow(QMainWindow):
                     },
                     sucesso=True
                 )
-                
+
                 QMessageBox.information(self, "Conexão bem-sucedida", f"Conectado ao banco {params['database']}.")
-                
             except Exception as e:
                 ConnectionManager().disconnect()
                 self.db_manager = None
@@ -188,6 +193,14 @@ class MainWindow(QMainWindow):
                 self.menuGerenciar.setEnabled(False)
                 self.statusbar.showMessage("Não conectado")
                 QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {e}")
+
+        def handle_reject():
+            sub_window.close()
+
+        dlg.accepted.connect(handle_accept)
+        dlg.rejected.connect(handle_reject)
+        self.opened_windows.append(sub_window)
+        sub_window.show()
 
     def on_desconectar(self):
         # Registrar logout na auditoria antes de desconectar
@@ -212,7 +225,8 @@ class MainWindow(QMainWindow):
         self.audit_manager = None
         self.audit_controller = None
         self.groups_view = None
-        self.setCentralWidget(self.label)
+    # Restaura o MDI como central
+        self.setCentralWidget(self.mdi)
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")

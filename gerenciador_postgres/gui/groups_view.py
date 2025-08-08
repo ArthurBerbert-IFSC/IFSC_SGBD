@@ -16,10 +16,25 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QProgressDialog,
 )
-from PyQt6.QtCore import Qt, QFutureWatcher
-from PyQt6 import QtConcurrent
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from pathlib import Path
+
+
+class _TaskRunner(QThread):
+    succeeded = pyqtSignal(object)
+    failed = pyqtSignal(Exception)
+
+    def __init__(self, func, parent=None):
+        super().__init__(parent)
+        self._func = func
+
+    def run(self):
+        try:
+            result = self._func()
+            self.succeeded.emit(result)
+        except Exception as e:  # pragma: no cover
+            self.failed.emit(e)
 
 
 class GroupsView(QWidget):
@@ -32,7 +47,7 @@ class GroupsView(QWidget):
         self.controller = controller
         self.current_group = None
         self.templates = {}
-        self._watchers: list[QFutureWatcher] = []
+        self._threads = []  # type: list[QThread]
         self._setup_ui()
         self._connect_signals()
         if self.controller:
@@ -306,19 +321,28 @@ class GroupsView(QWidget):
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setAutoClose(True)
         progress.show()
-        future = QtConcurrent.run(func)
-        watcher = QFutureWatcher()
 
-        def finished():
+        thread = _TaskRunner(func, self)
+
+        def handle_success(result):
             progress.cancel()
             try:
-                result = watcher.result()
-            except Exception as e:  # pragma: no cover
-                on_error(e)
-            else:
                 on_success(result)
-            self._watchers.remove(watcher)
+            finally:
+                if thread in self._threads:
+                    self._threads.remove(thread)
+                thread.deleteLater()
 
-        watcher.finished.connect(finished)
-        watcher.setFuture(future)
-        self._watchers.append(watcher)
+        def handle_error(e: Exception):
+            progress.cancel()
+            try:
+                on_error(e)
+            finally:
+                if thread in self._threads:
+                    self._threads.remove(thread)
+                thread.deleteLater()
+
+        thread.succeeded.connect(handle_success)
+        thread.failed.connect(handle_error)
+        self._threads.append(thread)
+        thread.start()

@@ -85,7 +85,49 @@ class DBManager:
 
     def delete_group(self, group_name: str):  # <-- NOVO MÉTODO ADICIONADO
         with self.conn.cursor() as cur:
-            cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(group_name)))
+            # 1) Reassign ownership de objetos (defensivo; grupos geralmente não possuem objetos)
+            try:
+                cur.execute(
+                    sql.SQL("REASSIGN OWNED BY {} TO CURRENT_USER").format(
+                        sql.Identifier(group_name)
+                    )
+                )
+            except Exception:
+                # Prossegue mesmo que não haja objetos
+                pass
+
+            # 2) Remover privilégios concedidos ao grupo no banco atual
+            try:
+                cur.execute(
+                    sql.SQL("DROP OWNED BY {}" ).format(sql.Identifier(group_name))
+                )
+            except Exception:
+                # Alguns bancos/versões podem restringir; seguimos com o melhor esforço
+                pass
+
+            # 3) Revogar o grupo de quaisquer membros restantes (defensivo)
+            cur.execute(
+                """
+                SELECT u.rolname
+                FROM pg_auth_members m
+                JOIN pg_roles u ON m.member = u.oid
+                JOIN pg_roles g ON m.roleid = g.oid
+                WHERE g.rolname = %s
+                """,
+                (group_name,),
+            )
+            for (member_name,) in cur.fetchall():
+                try:
+                    cur.execute(
+                        sql.SQL("REVOKE {} FROM {}" ).format(
+                            sql.Identifier(group_name), sql.Identifier(member_name)
+                        )
+                    )
+                except Exception:
+                    pass
+
+            # 4) Finalmente, excluir o role do grupo
+            cur.execute(sql.SQL("DROP ROLE {}" ).format(sql.Identifier(group_name)))
 
     def add_user_to_group(self, username: str, group_name: str):
         with self.conn.cursor() as cur:
