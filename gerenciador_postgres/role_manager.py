@@ -374,6 +374,15 @@ class RoleManager:
             self.logger.error(f"[{self.operador}] Erro ao listar tabelas: {e}")
             return {}
 
+    def get_group_privileges(self, group_name: str) -> Dict[str, Dict[str, Set[str]]]:
+        try:
+            return self.dao.get_group_privileges(group_name)
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Erro ao obter privilégios do grupo '{group_name}': {e}"
+            )
+            return {}
+
     def set_group_privileges(self, group_name: str, privileges: Dict[str, Dict[str, Set[str]]]) -> bool:
         try:
             self.dao.apply_group_privileges(group_name, privileges)
