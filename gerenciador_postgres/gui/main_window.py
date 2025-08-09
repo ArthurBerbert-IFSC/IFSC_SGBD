@@ -263,14 +263,15 @@ class MainWindow(QMainWindow):
         from .audit_view import AuditView
         if self.audit_manager and self.audit_controller:
             audit_window = AuditView(
-                audit_manager=self.audit_manager, 
+                audit_manager=self.audit_manager,
                 logger=self.logger
             )
-            self.opened_windows.append(audit_window)
             audit_window.setWindowTitle("Auditoria do Sistema")
-            audit_window.show()
+            sub_window = self.mdi.addSubWindow(audit_window)
+            self.opened_windows.append(sub_window)
+            sub_window.show()
         else:
             QMessageBox.warning(
-                self, "Não Conectado", 
+                self, "Não Conectado",
                 "Você precisa estar conectado a um banco de dados para acessar a auditoria."
             )
