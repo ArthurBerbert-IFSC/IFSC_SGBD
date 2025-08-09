@@ -68,7 +68,11 @@ class RoleManager:
             raise
 
     def create_users_batch(
-        self, users_info: list, valid_until: str | None = None, group_name: str | None = None
+        self,
+        users_info: list,
+        valid_until: str | None = None,
+        group_name: str | None = None,
+        renew: bool = False,
     ):
         """Cria múltiplos usuários gerando usernames a partir do nome completo.
 
@@ -80,6 +84,10 @@ class RoleManager:
             Data de expiração opcional aplicada a todos os usuários.
         group_name : str | None
             Turma à qual os usuários serão adicionados.
+        renew : bool
+            Se ``True``, usuários já existentes terão sua validade
+            atualizada para ``valid_until`` ao invés de gerar um novo
+            username.
         """
 
         if group_name:
@@ -112,19 +120,24 @@ class RoleManager:
                     username = f"{first}.{last}{tentativa}" if last else f"{first}{tentativa}"
                 # Checagem prévia para evitar exceção de duplicidade e acelerar a próxima tentativa
                 try:
-                    if self.dao.find_user_by_name(username):
-                        tentativa += 1
-                        if tentativa > 100:
-                            self.logger.error(
-                                f"[{self.operador}] Muitas tentativas para gerar username baseado em '{first} {last}'. Abortando este usuário."
+                    user_exists = self.dao.find_user_by_name(username)
+                    if user_exists:
+                        if renew:
+                            success = self.update_user(username, valid_until=valid_until)
+                            created_username = username if success else None
+                            error = None if success else Exception(
+                                f"Falha ao renovar usuário existente '{username}'"
                             )
-                            break
-                        continue
-                except Exception as e:
-                    self.logger.warning(f"[{self.operador}] Falha ao checar existência de '{username}': {e}")
-                # Chama criação com proteção extra para garantir que nenhuma exceção escape
-                try:
-                    created_username, error = self._try_create_user(username, password, valid_until)
+                        else:
+                            tentativa += 1
+                            if tentativa > 100:
+                                self.logger.error(
+                                    f"[{self.operador}] Muitas tentativas para gerar username baseado em '{first} {last}'. Abortando este usuário."
+                                )
+                                break
+                            continue
+                    else:
+                        created_username, error = self._try_create_user(username, password, valid_until)
                 except Exception as e:
                     created_username, error = None, e
                 if created_username:
@@ -196,6 +209,10 @@ class RoleManager:
         except Exception as e:
             self.logger.error(f"[{self.operador}] Falha ao atualizar usuário '{username}': {e}")
             return False
+
+    def renew_user_validity(self, username: str, new_date: str) -> bool:
+        """Renova a validade de um usuário existente."""
+        return self.update_user(username, valid_until=new_date)
 
     def delete_user(self, username: str) -> bool:
         dados_antes = None

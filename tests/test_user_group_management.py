@@ -34,6 +34,10 @@ class DummyDAO:
             'valid_until': valid_until,
         }
 
+    def update_user(self, username, **fields):
+        if username in self.users:
+            self.users[username].update(fields)
+
     @contextmanager
     def transaction(self):
         try:
@@ -88,6 +92,19 @@ class UserGroupManagementTests(unittest.TestCase):
         self.assertEqual(set(created), {"jose", "jose.angelo"})
         self.assertEqual(self.dao.users["jose"]["password"], "111")
         self.assertEqual(self.dao.users["jose.angelo"]["valid_until"], "2024-06-30")
+
+    def test_renew_user_validity(self):
+        self.uc.create_user('alice', 'pw', '2025-12-31')
+        self.assertTrue(self.uc.renew_user_validity('alice', '2026-01-01'))
+        self.assertEqual(self.dao.users['alice']['valid_until'], '2026-01-01')
+
+    def test_create_users_batch_with_renew(self):
+        # Usuário já existente
+        self.uc.create_user('jose', '111', '2023-01-01')
+        data = [("111", "Jose")]  # Deve renovar o usuário existente
+        created = self.uc.create_users_batch(data, "2024-06-30", renew=True)
+        self.assertEqual(created, ["jose"])
+        self.assertEqual(self.dao.users['jose']['valid_until'], '2024-06-30')
 
 
 if __name__ == "__main__":
