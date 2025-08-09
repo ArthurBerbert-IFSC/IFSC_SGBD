@@ -109,12 +109,21 @@ class UsersView(QWidget):
         self.btnBatchUsers = QPushButton("Inserir em Lote")
         self.btnDelete = QPushButton("Excluir Selecionado")
         self.btnChangePassword = QPushButton("Alterar Senha")
+        # Widgets para renovação de validade
+        self.renewDateEdit = QDateEdit()
+        self.renewDateEdit.setCalendarPopup(True)
+        self.renewDateEdit.setDate(QDate.currentDate())
+        self.btnRenew = QPushButton("Renovar")
+        self.btnRenew.setEnabled(False)
+        self.renewDateEdit.setEnabled(False)
         self.btnDelete.setEnabled(False)
         self.btnChangePassword.setEnabled(False)
         self.toolbar.addWidget(self.btnNewUser)
         self.toolbar.addWidget(self.btnBatchUsers)
         self.toolbar.addWidget(self.btnDelete)
         self.toolbar.addWidget(self.btnChangePassword)
+        self.toolbar.addWidget(self.renewDateEdit)
+        self.toolbar.addWidget(self.btnRenew)
         layout.addWidget(self.toolbar)
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.topPanel = QWidget()
@@ -190,6 +199,7 @@ class UsersView(QWidget):
         self.btnBatchUsers.clicked.connect(self.on_new_user_batch_clicked)
         self.btnDelete.clicked.connect(self.on_delete_user_clicked)
         self.btnChangePassword.clicked.connect(self.on_change_password_clicked)
+        self.btnRenew.clicked.connect(self.on_renew_clicked)
         self.btnAddGroup.clicked.connect(self.on_add_group_clicked)
         self.btnRemoveGroup.clicked.connect(self.on_remove_group_clicked)
         # Close fecha a janela; conectar diretamente o botão Close
@@ -256,6 +266,8 @@ class UsersView(QWidget):
         self.lstAvailableGroups.clear()
         self.btnAddGroup.setEnabled(False)
         self.btnRemoveGroup.setEnabled(False)
+        self.btnRenew.setEnabled(False)
+        self.renewDateEdit.setEnabled(False)
 
         if not current:
             self.propLayout.addWidget(QLabel("Selecione um usuário para ver detalhes."))
@@ -275,6 +287,14 @@ class UsersView(QWidget):
             self.propLayout.addWidget(QLabel(f"Nome: {username}"))
         self.btnChangePassword.setEnabled(True)
         self.btnDelete.setEnabled(True)
+        self.btnRenew.setEnabled(True)
+        self.renewDateEdit.setEnabled(True)
+
+        if user_details and getattr(user_details, "valid_until", None):
+            dt = user_details.valid_until
+            self.renewDateEdit.setDate(QDate(dt.year, dt.month, dt.day))
+        else:
+            self.renewDateEdit.setDate(QDate.currentDate())
 
         self._update_group_lists(username)
 
@@ -408,6 +428,24 @@ class UsersView(QWidget):
                 QMessageBox.critical(
                     self, "Erro", f"Não foi possível alterar a senha.\nMotivo: {e}"
                 )
+
+    def on_renew_clicked(self):
+        current_item = self.lstEntities.currentItem()
+        if not current_item:
+            return
+        username = current_item.data(Qt.ItemDataRole.UserRole)
+        new_date = self.renewDateEdit.date().toString("yyyy-MM-dd")
+        try:
+            success = self.controller.renew_user_validity(username, new_date)
+            if success:
+                self._select_username_on_refresh = username
+                QMessageBox.information(self, "Sucesso", "Validade atualizada!")
+            else:
+                QMessageBox.critical(self, "Erro", "Falha ao renovar validade.")
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Erro", f"Não foi possível renovar a validade.\nMotivo: {e}"
+            )
 
     def _update_group_lists(self, username):
         # Guardar seleção e posição de scroll atuais

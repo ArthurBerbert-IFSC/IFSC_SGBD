@@ -25,7 +25,11 @@ class UsersController(QObject):
         return self.role_manager.get_user(username)
 
     def create_users_batch(
-        self, users_data: list, valid_until: str | None = None, group_name: str | None = None
+        self,
+        users_data: list,
+        valid_until: str | None = None,
+        group_name: str | None = None,
+        renew: bool = False,
     ):
         """Cria múltiplos usuários de uma vez.
 
@@ -39,9 +43,17 @@ class UsersController(QObject):
             Turma à qual os usuários serão adicionados ou ``None``.
         """
 
-        results = self.role_manager.create_users_batch(users_data, valid_until, group_name)
+        results = self.role_manager.create_users_batch(
+            users_data, valid_until, group_name, renew
+        )
         self.data_changed.emit()
         return results
+
+    def renew_user_validity(self, username: str, new_date: str) -> bool:
+        success = self.role_manager.renew_user_validity(username, new_date)
+        if success:
+            self.data_changed.emit()
+        return success
 
     def delete_user(self, username: str) -> bool:
         success = self.role_manager.delete_user(username)
