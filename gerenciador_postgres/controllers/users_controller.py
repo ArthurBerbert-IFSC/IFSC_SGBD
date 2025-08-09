@@ -73,6 +73,12 @@ class UsersController(QObject):
             self.data_changed.emit()
         return success
 
+    def transfer_user_group(self, username: str, old_group: str, new_group: str) -> bool:
+        success = self.role_manager.transfer_user_group(username, old_group, new_group)
+        if success:
+            self.data_changed.emit()
+        return success
+
     # --------------------------------------------------------------
     # Compat: algumas views podem chamar flush(); aqui não há buffer,
     # as operações já comitam imediatamente. Mantemos no-op.

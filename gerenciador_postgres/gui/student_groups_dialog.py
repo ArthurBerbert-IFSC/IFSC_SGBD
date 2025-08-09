@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QLabel,
     QMessageBox,
+    QComboBox,
 )
 
 
@@ -14,13 +15,24 @@ class StudentGroupsDialog(QDialog):
         super().__init__(parent)
         self.controller = controller
         self.username = username
-        self.setWindowTitle(f"Gerir Turmas - {username}")
+        self.setWindowTitle("Gerir Turmas")
         self._setup_ui()
         self._connect_signals()
-        self.refresh_lists()
+        self.refresh_students()
+        if username:
+            idx = self.cmbStudents.findText(username)
+            if idx >= 0:
+                self.cmbStudents.setCurrentIndex(idx)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
+
+        student_layout = QHBoxLayout()
+        student_layout.addWidget(QLabel("Aluno"))
+        self.cmbStudents = QComboBox()
+        student_layout.addWidget(self.cmbStudents)
+        layout.addLayout(student_layout)
+
         lists_layout = QHBoxLayout()
 
         # Student groups
@@ -34,9 +46,11 @@ class StudentGroupsDialog(QDialog):
         middle_layout = QVBoxLayout()
         self.btnAdd = QPushButton("Adicionar >>")
         self.btnRemove = QPushButton("<< Remover")
+        self.btnTransfer = QPushButton("Transferir")
         middle_layout.addStretch()
         middle_layout.addWidget(self.btnAdd)
         middle_layout.addWidget(self.btnRemove)
+        middle_layout.addWidget(self.btnTransfer)
         middle_layout.addStretch()
         lists_layout.addLayout(middle_layout)
 
@@ -53,11 +67,22 @@ class StudentGroupsDialog(QDialog):
     def _connect_signals(self):
         self.btnAdd.clicked.connect(self._on_add_clicked)
         self.btnRemove.clicked.connect(self._on_remove_clicked)
+        self.btnTransfer.clicked.connect(self._on_transfer_clicked)
+        self.cmbStudents.currentTextChanged.connect(self.refresh_lists)
+
+    def refresh_students(self):
+        if not self.controller:
+            return
+        self.cmbStudents.clear()
+        for user in sorted(self.controller.list_users()):
+            self.cmbStudents.addItem(user)
+        self.refresh_lists()
 
     # ------------------------------------------------------------------
     def refresh_lists(self):
         if not self.controller:
             return
+        self.username = self.cmbStudents.currentText()
         student_groups = set(self.controller.list_user_groups(self.username))
         all_groups = set(self.controller.list_groups())
 
@@ -92,5 +117,26 @@ class StudentGroupsDialog(QDialog):
         else:
             QMessageBox.critical(
                 self, "Erro", f"Não foi possível remover o aluno da turma '{group}'."
+            )
+        self.refresh_lists()
+
+    def _on_transfer_clicked(self):
+        item_old = self.lstStudentGroups.currentItem()
+        item_new = self.lstAvailableGroups.currentItem()
+        if not item_old or not item_new:
+            return
+        old_group = item_old.text()
+        new_group = item_new.text()
+        if self.controller.transfer_user_group(self.username, old_group, new_group):
+            QMessageBox.information(
+                self,
+                "Sucesso",
+                f"Aluno transferido de '{old_group}' para '{new_group}'.",
+            )
+        else:
+            QMessageBox.critical(
+                self,
+                "Erro",
+                f"Não foi possível transferir o aluno de '{old_group}' para '{new_group}'.",
             )
         self.refresh_lists()
