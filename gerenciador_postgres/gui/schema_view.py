@@ -121,7 +121,23 @@ class SchemaView(QWidget):
         if not item:
             return
         name = item.text()
-        new_owner, ok = QInputDialog.getText(self, "Alterar Owner", f"Novo owner para '{name}':")
+        roles = []
+        if self.controller:
+            try:
+                roles = self.controller.list_roles()
+            except Exception as e:
+                if self.logger:
+                    self.logger.error(f"Falha ao listar roles: {e}")
+
+        if roles:
+            new_owner, ok = QInputDialog.getItem(
+                self, "Alterar Owner", "Novo owner:", roles, 0, False
+            )
+        else:
+            new_owner, ok = QInputDialog.getText(
+                self, "Alterar Owner", f"Novo owner para '{name}':"
+            )
+
         if not ok or not new_owner:
             return
         try:

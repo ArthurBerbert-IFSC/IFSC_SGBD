@@ -251,9 +251,10 @@ class MainWindow(QMainWindow):
         from .schema_view import SchemaView
         if self.schema_controller:
             schema_window = SchemaView(controller=self.schema_controller, logger=self.logger)
-            self.opened_windows.append(schema_window)
             schema_window.setWindowTitle("Gerenciador de Schemas")
-            schema_window.show()
+            sub_window = self.mdi.addSubWindow(schema_window)
+            self.opened_windows.append(sub_window)
+            sub_window.show()
         else:
             QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar schemas.")
     
