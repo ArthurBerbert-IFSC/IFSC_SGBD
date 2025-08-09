@@ -70,6 +70,11 @@ class UserGroupManagementTests(unittest.TestCase):
         self.assertTrue(self.uc.remove_user_from_group("alice", "grp_a"))
         self.assertEqual(self.uc.list_user_groups("alice"), [])
 
+    def test_transfer_group(self):
+        self.uc.add_user_to_group("alice", "grp_a")
+        self.assertTrue(self.uc.transfer_user_group("alice", "grp_a", "grp_b"))
+        self.assertEqual(self.uc.list_user_groups("alice"), ["grp_b"])
+
     def test_create_user_with_expiration(self):
         self.uc.create_user('alice', 'pw', '2025-12-31')
         self.assertEqual(self.dao.users['alice']['valid_until'], '2025-12-31')

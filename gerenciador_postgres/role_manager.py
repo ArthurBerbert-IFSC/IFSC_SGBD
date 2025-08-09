@@ -339,6 +339,41 @@ class RoleManager:
             self.logger.error(f"[{self.operador}] Falha ao remover '{username}' do grupo '{group_name}': {e}")
             return False
 
+    def transfer_user_group(self, username: str, old_group: str, new_group: str) -> bool:
+        detalhes = {"from_group": old_group, "to_group": new_group}
+        try:
+            with self.dao.transaction():
+                self.dao.remove_user_from_group(username, old_group)
+                self.dao.add_user_to_group(username, new_group)
+            self.logger.info(
+                f"[{self.operador}] Transferiu usuário '{username}' do grupo '{old_group}' para '{new_group}'"
+            )
+            if self.audit_manager:
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao="TRANSFER_USER_GROUP",
+                    objeto_tipo="USER",
+                    objeto_nome=username,
+                    detalhes=detalhes,
+                    sucesso=True,
+                )
+            return True
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Falha ao transferir '{username}' de '{old_group}' para '{new_group}': {e}"
+            )
+            if self.audit_manager:
+                detalhes["error"] = str(e)
+                self.audit_manager.log_operation(
+                    operador=self.operador,
+                    operacao="TRANSFER_USER_GROUP",
+                    objeto_tipo="USER",
+                    objeto_nome=username,
+                    detalhes=detalhes,
+                    sucesso=False,
+                )
+            return False
+
     def list_group_members(self, group_name: str) -> List[str]:
         try:
             return self.dao.list_group_members(group_name)
