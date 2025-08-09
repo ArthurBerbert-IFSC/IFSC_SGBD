@@ -1,3 +1,9 @@
 log_level: INFO
 log_path: D:\GitHub\IFSC_SGBD\logs\app.log
 group_prefix: "grp_"
+databases:
+  - name: "local"
+    host: "localhost"
+    dbname: "postgres"
+    user: "postgres"
+    port: 5432
