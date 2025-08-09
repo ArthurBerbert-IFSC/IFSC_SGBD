@@ -4,7 +4,8 @@ from .path_config import CONFIG_DIR, BASE_DIR
 CONFIG_FILE = CONFIG_DIR / 'config.yml'
 DEFAULT_CONFIG = {
     'log_path': str(BASE_DIR / 'logs' / 'app.log'),
-    'log_level': 'INFO'
+    'log_level': 'INFO',
+    'group_prefix': 'grp_'
 }
 
 def load_config():

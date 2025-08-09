@@ -12,3 +12,4 @@ def test_load_config_creates_file(tmp_path, monkeypatch):
     assert config_file.exists()
     assert data["log_level"] == "INFO"
     assert "log_path" in data
+    assert data["group_prefix"] == "grp_"
