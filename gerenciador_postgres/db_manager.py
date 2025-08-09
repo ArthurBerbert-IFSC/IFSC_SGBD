@@ -1,6 +1,7 @@
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extensions import connection
+from contextlib import contextmanager
 from .data_models import User, Group
 from typing import Optional, List, Dict, Set
 
@@ -12,6 +13,20 @@ class DBManager:
         if not conn or not hasattr(conn, 'cursor'):
             raise ValueError('Conexão inválida para DBManager')
         self.conn = conn
+
+    @contextmanager
+    def transaction(self):
+        """Contexto para controle de transações.
+
+        Efetua ``commit`` ao término bem-sucedido do bloco e ``rollback``
+        automaticamente em caso de exceções.
+        """
+        try:
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def find_user_by_name(self, username: str) -> Optional[User]:
         with self.conn.cursor() as cur:
