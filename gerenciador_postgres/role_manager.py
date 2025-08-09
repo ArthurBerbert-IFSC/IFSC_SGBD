@@ -444,22 +444,81 @@ class RoleManager:
             )
             return False
 
+    def grant_database_privileges(self, group_name: str, privileges: Set[str]) -> bool:
+        try:
+            with self.dao.transaction():
+                self.dao.grant_database_privileges(group_name, privileges)
+            self.logger.info(
+                f"[{self.operador}] Atualizou privilégios de banco do grupo '{group_name}'"
+            )
+            return True
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Falha ao atualizar privilégios de banco do grupo '{group_name}': {e}"
+            )
+            return False
+
+    def grant_schema_privileges(self, group_name: str, schema: str, privileges: Set[str]) -> bool:
+        try:
+            with self.dao.transaction():
+                self.dao.grant_schema_privileges(group_name, schema, privileges)
+            self.logger.info(
+                f"[{self.operador}] Atualizou privilégios do schema '{schema}' para o grupo '{group_name}'"
+            )
+            return True
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Falha ao atualizar privilégios do schema '{schema}' para o grupo '{group_name}': {e}"
+            )
+            return False
+
     def apply_template_to_group(self, group_name: str, template: str) -> bool:
-        """Aplica um template de permissões a todas as tabelas para o grupo."""
+        """Aplica um template hierárquico de permissões (banco/schema/tabelas)."""
         try:
             from config.permission_templates import PERMISSION_TEMPLATES
 
-            perms = PERMISSION_TEMPLATES.get(template)
-            if perms is None:
+            tpl = PERMISSION_TEMPLATES.get(template)
+            if tpl is None:
                 raise ValueError(f"Template '{template}' não encontrado.")
 
-            tables = self.list_tables_by_schema()
-            privileges: Dict[str, Dict[str, Set[str]]] = {}
-            for schema, tbls in tables.items():
-                for table in tbls:
-                    privileges.setdefault(schema, {})[table] = set(perms)
+            db_perms = tpl.get("database", {})
+            schema_perms = tpl.get("schemas", {})
+            table_perms = tpl.get("tables", {})
 
-            return self.set_group_privileges(group_name, privileges)
+            with self.dao.transaction():
+                dbname = self.dao.conn.get_dsn_parameters().get("dbname")
+                if "*" in db_perms:
+                    self.dao.grant_database_privileges(group_name, set(db_perms["*"]))
+                elif dbname in db_perms:
+                    self.dao.grant_database_privileges(group_name, set(db_perms[dbname]))
+
+                for schema, perms in schema_perms.items():
+                    self.dao.grant_schema_privileges(group_name, schema, set(perms))
+
+                if table_perms:
+                    tables = self.list_tables_by_schema()
+                    privileges: Dict[str, Dict[str, Set[str]]] = {}
+                    for schema, tbls in tables.items():
+                        if schema in table_perms:
+                            schema_def = table_perms[schema]
+                            if isinstance(schema_def, dict):
+                                for tbl, perms in schema_def.items():
+                                    privileges.setdefault(schema, {})[tbl] = set(perms)
+                            else:
+                                perms_set = set(schema_def)
+                                for tbl in tbls:
+                                    privileges.setdefault(schema, {})[tbl] = perms_set
+                        elif "*" in table_perms:
+                            perms_set = set(table_perms["*"])
+                            for tbl in tbls:
+                                privileges.setdefault(schema, {})[tbl] = perms_set
+                    if privileges:
+                        self.dao.apply_group_privileges(group_name, privileges)
+
+            self.logger.info(
+                f"[{self.operador}] Aplicou template '{template}' ao grupo '{group_name}'"
+            )
+            return True
         except Exception as e:
             self.logger.error(
                 f"[{self.operador}] Falha ao aplicar template '{template}' ao grupo '{group_name}': {e}"

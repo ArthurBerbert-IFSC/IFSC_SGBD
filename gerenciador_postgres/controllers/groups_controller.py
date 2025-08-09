@@ -60,3 +60,18 @@ class GroupsController(QObject):
         if success:
             self.data_changed.emit()
         return success
+
+    def grant_database_privileges(self, group_name: str, privileges):
+        success = self.role_manager.grant_database_privileges(group_name, privileges)
+        if success:
+            self.data_changed.emit()
+        return success
+
+    def grant_schema_privileges(self, group_name: str, schema: str, privileges):
+        success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
+        if success:
+            self.data_changed.emit()
+        return success
+
+    def get_current_database(self):
+        return self.role_manager.dao.conn.get_dsn_parameters().get("dbname")
