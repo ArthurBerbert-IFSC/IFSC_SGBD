@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea
-from PyQt6.QtWidgets import QStatusBar, QMessageBox, QDialog
+from PyQt6.QtWidgets import QStatusBar, QMessageBox
 from PyQt6.QtGui import QAction, QIcon
 from pathlib import Path
 from .connection_dialog import ConnectionDialog
@@ -8,6 +8,7 @@ from ..role_manager import RoleManager
 from ..schema_manager import SchemaManager
 from ..audit_manager import AuditManager
 from ..connection_manager import ConnectionManager
+from ..config_manager import load_config
 from ..controllers import (
     UsersController,
     GroupsController,
@@ -137,10 +138,16 @@ class MainWindow(QMainWindow):
         sub_window = self.mdi.addSubWindow(dlg)
 
         def handle_accept():
-            params = dlg.get_params()
+            profile = dlg.get_profile()
             sub_window.close()
+            config = load_config()
+            profiles = {db['name']: db for db in config.get('databases', [])}
+            params = profiles.get(profile)
+            if not params:
+                QMessageBox.critical(self, "Erro", f"Perfil '{profile}' não encontrado na configuração.")
+                return
             try:
-                conn = ConnectionManager().connect(**params)
+                conn = ConnectionManager().connect_to(profile)
                 self.db_manager = DBManager(conn)
 
                 # Inicializar audit_manager primeiro
@@ -164,7 +171,9 @@ class MainWindow(QMainWindow):
                 self.schema_controller = SchemaController(self.schema_manager, self.logger)
 
                 self.menuGerenciar.setEnabled(True)
-                self.statusbar.showMessage(f"Conectado a {params['database']} como {params['user']}")
+                self.statusbar.showMessage(
+                    f"Conectado a {params['dbname']} como {params['user']}"
+                )
 
                 # Registrar login na auditoria
                 self.audit_manager.log_operation(
@@ -173,16 +182,17 @@ class MainWindow(QMainWindow):
                     objeto_tipo='SYSTEM',
                     objeto_nome='database_connection',
                     detalhes={
-                        'database': params['database'],
+                        'database': params['dbname'],
                         'host': params['host'],
-                        'port': params['port']
+                        'port': params.get('port', 5432)
                     },
                     sucesso=True
                 )
 
-                QMessageBox.information(self, "Conexão bem-sucedida", f"Conectado ao banco {params['database']}.")
+                QMessageBox.information(
+                    self, "Conexão bem-sucedida", f"Conectado ao banco {params['dbname']}.")
             except Exception as e:
-                ConnectionManager().disconnect()
+                ConnectionManager().disconnect(profile)
                 self.db_manager = None
                 self.role_manager = None
                 self.users_controller = None
