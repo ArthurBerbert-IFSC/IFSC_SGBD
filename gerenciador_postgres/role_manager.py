@@ -96,7 +96,9 @@ class RoleManager:
         created: List[str] = []
         for matricula, nome_completo in users_info:
             password = matricula
-            partes = nome_completo.strip().split()
+            nome_normalizado = unicodedata.normalize('NFKD', nome_completo)
+            nome_ascii = nome_normalizado.encode('ascii', 'ignore').decode('ascii')
+            partes = nome_ascii.strip().split()
             if not partes:
                 continue
             first = partes[0].lower()
