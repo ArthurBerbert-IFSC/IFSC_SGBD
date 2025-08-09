@@ -20,9 +20,16 @@ Aplicação em Python com interface gráfica (PyQt6) para facilitar a administra
 2. (Opcional) Crie e ative um ambiente virtual.
 3. Instale as dependências:
    ```bash
-   pip install -r requirements.txt
-   pip install pytest
-   ```
+    pip install -r requirements.txt
+    pip install pytest
+    ```
+
+## Configuração
+O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possível definir:
+
+- `log_level`: nível de detalhamento dos logs.
+- `log_path`: caminho do arquivo de log.
+- `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"grp_"`).
 
 ## Execução
 Para iniciar a interface gráfica do gerenciador, execute:

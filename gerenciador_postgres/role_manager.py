@@ -4,6 +4,7 @@ from typing import Optional, List, Dict, Set
 import logging
 import unicodedata
 from psycopg2 import sql
+from .config_manager import load_config
 
 class RoleManager:
     """Camada de serviço: orquestra operações, valida regras e controla transações."""
@@ -281,8 +282,10 @@ class RoleManager:
     # Métodos de grupo
     def create_group(self, group_name: str) -> str:
         try:
-            if not group_name.startswith('grp_'):
-                raise ValueError("Nome de grupo deve começar com 'grp_'.")
+            config = load_config()
+            prefix = config.get("group_prefix", "grp_")
+            if not group_name.startswith(prefix):
+                raise ValueError(f"Nome de grupo deve começar com '{prefix}'.")
             if group_name in self.dao.list_groups():
                 raise ValueError(f"Grupo '{group_name}' já existe.")
             self.dao.create_group(group_name)
