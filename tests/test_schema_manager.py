@@ -1,8 +1,9 @@
 
 import logging
-import unittest
-import sys
 import pathlib
+import sys
+import unittest
+from contextlib import contextmanager
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -58,6 +59,15 @@ class DummyDAO:
 
     def list_schemas(self):
         return []
+
+    @contextmanager
+    def transaction(self):
+        try:
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
 
 class TestableSchemaManager(SchemaManager):

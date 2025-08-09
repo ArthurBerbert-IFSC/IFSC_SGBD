@@ -1,5 +1,6 @@
 import logging
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
 from gerenciador_postgres.role_manager import RoleManager
@@ -16,13 +17,26 @@ class DummyDAO:
     def create_group(self, name):
         self.groups.add(name)
 
+    @contextmanager
+    def transaction(self):
+        try:
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
 
 class DummyConn:
+    def __init__(self):
+        self.committed = False
+        self.rolled_back = False
+
     def commit(self):
-        pass
+        self.committed = True
 
     def rollback(self):
-        pass
+        self.rolled_back = True
 
 
 class RoleManagerGroupPrefixTests(unittest.TestCase):

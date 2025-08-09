@@ -22,9 +22,8 @@ class RoleManager:
         try:
             if self.dao.find_user_by_name(username):
                 raise ValueError(f"Usuário '{username}' já existe.")
-
-            self.dao.insert_user(username, password, valid_until)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.insert_user(username, password, valid_until)
 
             dados_depois = {
                 'username': username,
@@ -51,7 +50,6 @@ class RoleManager:
             return username
             
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao criar usuário '{username}': {e}")
             
             # Registrar falha na auditoria
@@ -191,12 +189,11 @@ class RoleManager:
         try:
             if not self.dao.find_user_by_name(username):
                 raise ValueError(f"Usuário '{username}' não existe.")
-            self.dao.update_user(username, **updates)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.update_user(username, **updates)
             self.logger.info(f"[{self.operador}] Atualizou usuário: {username} {updates}")
             return True
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao atualizar usuário '{username}': {e}")
             return False
 
@@ -216,15 +213,15 @@ class RoleManager:
                 }
             
             # Limpeza de objetos antes do DROP ROLE (opcional mas boa prática)
-            with self.dao.conn.cursor() as cur:
-                cur.execute(
-                    sql.SQL("REASSIGN OWNED BY {} TO CURRENT_USER").format(
-                        sql.Identifier(username)
+            with self.dao.transaction():
+                with self.dao.conn.cursor() as cur:
+                    cur.execute(
+                        sql.SQL("REASSIGN OWNED BY {} TO CURRENT_USER").format(
+                            sql.Identifier(username)
+                        )
                     )
-                )
-            
-            self.dao.delete_user(username)
-            self.dao.conn.commit()
+
+                self.dao.delete_user(username)
             sucesso = True
             
             self.logger.info(f"[{self.operador}] Excluiu usuário: {username}")
@@ -243,7 +240,6 @@ class RoleManager:
             return True
             
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao excluir usuário '{username}': {e}")
             
             # Registrar falha na auditoria
@@ -264,18 +260,17 @@ class RoleManager:
         try:
             if not self.dao.find_user_by_name(username):
                 raise ValueError(f"Usuário '{username}' não existe.")
-            with self.dao.conn.cursor() as cur:
-                cur.execute(
-                    sql.SQL("ALTER ROLE {} WITH PASSWORD %s").format(
-                        sql.Identifier(username)
-                    ),
-                    (new_password,),
-                )
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                with self.dao.conn.cursor() as cur:
+                    cur.execute(
+                        sql.SQL("ALTER ROLE {} WITH PASSWORD %s").format(
+                            sql.Identifier(username)
+                        ),
+                        (new_password,),
+                    )
             self.logger.info(f"[{self.operador}] Alterou senha do usuário: {username}")
             return True
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao alterar senha de '{username}': {e}")
             return False
 
@@ -288,23 +283,21 @@ class RoleManager:
                 raise ValueError(f"Nome de grupo deve começar com '{prefix}'.")
             if group_name in self.dao.list_groups():
                 raise ValueError(f"Grupo '{group_name}' já existe.")
-            self.dao.create_group(group_name)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.create_group(group_name)
             self.logger.info(f"[{self.operador}] Criou grupo: {group_name}")
             return group_name
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao criar grupo '{group_name}': {e}")
             raise
 
     def delete_group(self, group_name: str) -> bool: # <-- NOVO MÉTODO ADICIONADO
         try:
-            self.dao.delete_group(group_name)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.delete_group(group_name)
             self.logger.info(f"[{self.operador}] Excluiu grupo: {group_name}")
             return True
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao excluir grupo '{group_name}': {e}")
             return False
 
@@ -314,14 +307,13 @@ class RoleManager:
             for user in members:
                 if not self.delete_user(user):
                     raise RuntimeError(f"Falha ao excluir usuário {user}")
-            self.dao.delete_group(group_name)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.delete_group(group_name)
             self.logger.info(
                 f"[{self.operador}] Excluiu grupo '{group_name}' e seus membros: {members}"
             )
             return True
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(
                 f"[{self.operador}] Falha ao excluir grupo '{group_name}' e seus membros: {e}"
             )
@@ -329,23 +321,21 @@ class RoleManager:
 
     def add_user_to_group(self, username: str, group_name: str) -> bool:
         try:
-            self.dao.add_user_to_group(username, group_name)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.add_user_to_group(username, group_name)
             self.logger.info(f"[{self.operador}] Adicionou usuário '{username}' ao grupo '{group_name}'")
             return True
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao adicionar '{username}' ao grupo '{group_name}': {e}")
             return False
 
     def remove_user_from_group(self, username: str, group_name: str) -> bool:
         try:
-            self.dao.remove_user_from_group(username, group_name)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.remove_user_from_group(username, group_name)
             self.logger.info(f"[{self.operador}] Removeu usuário '{username}' do grupo '{group_name}'")
             return True
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao remover '{username}' do grupo '{group_name}': {e}")
             return False
 
@@ -390,14 +380,13 @@ class RoleManager:
 
     def set_group_privileges(self, group_name: str, privileges: Dict[str, Dict[str, Set[str]]]) -> bool:
         try:
-            self.dao.apply_group_privileges(group_name, privileges)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.apply_group_privileges(group_name, privileges)
             self.logger.info(
                 f"[{self.operador}] Atualizou privilégios do grupo '{group_name}'"
             )
             return True
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(
                 f"[{self.operador}] Falha ao atualizar privilégios do grupo '{group_name}': {e}"
             )

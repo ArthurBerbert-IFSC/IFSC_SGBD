@@ -1,8 +1,6 @@
 import logging
 import unittest
-
-import logging
-import unittest
+from contextlib import contextmanager
 
 from gerenciador_postgres.role_manager import RoleManager
 from config.permission_templates import PERMISSION_TEMPLATES
@@ -19,16 +17,26 @@ class DummyDAO:
     def apply_group_privileges(self, group, privileges):
         self.applied = (group, privileges)
 
+    @contextmanager
+    def transaction(self):
+        try:
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
 
 class DummyConn:
     def __init__(self):
         self.committed = False
+        self.rolled_back = False
 
     def commit(self):
         self.committed = True
 
     def rollback(self):
-        pass
+        self.rolled_back = True
 
 
 class RoleManagerTemplateTests(unittest.TestCase):

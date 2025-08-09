@@ -55,33 +55,32 @@ class SchemaManager:
             raise PermissionError('Apenas Professores ou superusuários podem criar schemas.')
         
         try:
-            with self.dao.conn.cursor() as cur:
-                cur.execute(
-                    "SELECT pg_has_role(%s, %s, 'member')",
-                    (self.operador, 'Professores'),
-                )
-                has_permission = cur.fetchone()[0]
-            if not has_permission:
-                self.dao.conn.rollback()
-                self.logger.error(
-                    f"[{self.operador}] Permissão negada para criar schema '{name}'"
-                )
-                raise PermissionError(
-                    "Usuário não pertence ao grupo 'Professores'"
-                )
-
-            self.dao.create_schema(name, owner)
-            if hasattr(self.dao, 'enable_postgis'):
-                try:
-                    self.dao.enable_postgis(name)
-                except Exception as e:
-                    self.logger.warning(
-                        f"[{self.operador}] Falha ao habilitar PostGIS no schema '{name}': {e}"
+            with self.dao.transaction():
+                with self.dao.conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT pg_has_role(%s, %s, 'member')",
+                        (self.operador, 'Professores'),
                     )
-            
-            self.dao.conn.commit()
-            sucesso = True
-            dados_depois = {'schema_name': name, 'owner': owner}
+                    has_permission = cur.fetchone()[0]
+                if not has_permission:
+                    self.logger.error(
+                        f"[{self.operador}] Permissão negada para criar schema '{name}'"
+                    )
+                    raise PermissionError(
+                        "Usuário não pertence ao grupo 'Professores'"
+                    )
+
+                self.dao.create_schema(name, owner)
+                if hasattr(self.dao, 'enable_postgis'):
+                    try:
+                        self.dao.enable_postgis(name)
+                    except Exception as e:
+                        self.logger.warning(
+                            f"[{self.operador}] Falha ao habilitar PostGIS no schema '{name}': {e}"
+                        )
+
+                dados_depois = {'schema_name': name, 'owner': owner}
+                sucesso = True
             
             self.logger.info(f"[{self.operador}] Criou schema: {name}")
             
@@ -110,7 +109,6 @@ class SchemaManager:
                 )
             raise
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao criar schema '{name}': {e}")
             
             # Registrar falha na auditoria
@@ -135,23 +133,21 @@ class SchemaManager:
             )
             raise PermissionError('Apenas o proprietário ou um superusuário pode remover schemas.')
         try:
-            self.dao.drop_schema(name, cascade)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.drop_schema(name, cascade)
             self.logger.info(f"[{self.operador}] Removeu schema: {name}")
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(f"[{self.operador}] Falha ao remover schema '{name}': {e}")
             raise
 
     def change_owner(self, name: str, new_owner: str):
         try:
-            self.dao.alter_schema_owner(name, new_owner)
-            self.dao.conn.commit()
+            with self.dao.transaction():
+                self.dao.alter_schema_owner(name, new_owner)
             self.logger.info(
                 f"[{self.operador}] Alterou proprietário do schema '{name}' para '{new_owner}'"
             )
         except Exception as e:
-            self.dao.conn.rollback()
             self.logger.error(
                 f"[{self.operador}] Falha ao alterar proprietário do schema '{name}': {e}"
             )

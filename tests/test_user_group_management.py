@@ -1,5 +1,6 @@
 import logging
 import unittest
+from contextlib import contextmanager
 
 from gerenciador_postgres.role_manager import RoleManager
 from gerenciador_postgres.controllers.users_controller import UsersController
@@ -33,13 +34,26 @@ class DummyDAO:
             'valid_until': valid_until,
         }
 
+    @contextmanager
+    def transaction(self):
+        try:
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
 
 class DummyConn:
+    def __init__(self):
+        self.committed = False
+        self.rolled_back = False
+
     def commit(self):
-        pass
+        self.committed = True
 
     def rollback(self):
-        pass
+        self.rolled_back = True
 
 
 class UserGroupManagementTests(unittest.TestCase):
