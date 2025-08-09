@@ -1,5 +1,6 @@
 import logging
 import unittest
+import logging
 from contextlib import contextmanager
 
 from gerenciador_postgres.role_manager import RoleManager
@@ -16,6 +17,12 @@ class DummyDAO:
 
     def apply_group_privileges(self, group, privileges):
         self.applied = (group, privileges)
+
+    def grant_database_privileges(self, group, privileges):
+        self.db_privs = (group, privileges)
+
+    def grant_schema_privileges(self, group, schema, privileges):
+        self.schema_privs = (group, schema, privileges)
 
     @contextmanager
     def transaction(self):
@@ -38,6 +45,9 @@ class DummyConn:
     def rollback(self):
         self.rolled_back = True
 
+    def get_dsn_parameters(self):
+        return {"dbname": "testdb"}
+
 
 class RoleManagerTemplateTests(unittest.TestCase):
     def setUp(self):
@@ -47,11 +57,11 @@ class RoleManagerTemplateTests(unittest.TestCase):
 
     def test_apply_template_to_group(self):
         template = next(iter(PERMISSION_TEMPLATES))
-        perms = PERMISSION_TEMPLATES[template]
+        perms = set(PERMISSION_TEMPLATES[template]["tables"]["*"])
         result = self.rm.apply_template_to_group("grp_demo", template)
         self.assertTrue(result)
         group, privileges = self.dao.applied
-        expected = {"public": {"t1": set(perms), "t2": set(perms)}}
+        expected = {"public": {"t1": perms, "t2": perms}}
         self.assertEqual(group, "grp_demo")
         self.assertEqual(privileges, expected)
         self.assertTrue(self.dao.conn.committed)

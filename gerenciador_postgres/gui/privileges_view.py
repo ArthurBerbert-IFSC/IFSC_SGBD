@@ -55,14 +55,24 @@ class PrivilegesView(QWidget):
 
         layout.addLayout(topLayout)
 
-        # Permissões granulares
-        self.treePrivileges = QTreeWidget()
-        self.treePrivileges.setHeaderLabels(
+        # Privilégios de banco
+        self.treeDbPrivileges = QTreeWidget()
+        self.treeDbPrivileges.setHeaderLabels(["Banco", "CONNECT", "CREATE", "TEMP"])
+        layout.addWidget(self.treeDbPrivileges)
+
+        # Privilégios de schema
+        self.treeSchemaPrivileges = QTreeWidget()
+        self.treeSchemaPrivileges.setHeaderLabels(["Schema", "USAGE", "CREATE"])
+        layout.addWidget(self.treeSchemaPrivileges)
+
+        # Privilégios de tabela
+        self.treeTablePrivileges = QTreeWidget()
+        self.treeTablePrivileges.setHeaderLabels(
             ["Schema/Tabela", "SELECT", "INSERT", "UPDATE", "DELETE"]
         )
-        layout.addWidget(self.treePrivileges)
+        layout.addWidget(self.treeTablePrivileges)
 
-        self.btnSave = QPushButton("Salvar Permissões Granulares")
+        self.btnSave = QPushButton("Salvar Permissões")
         layout.addWidget(self.btnSave)
 
         self.setLayout(layout)
@@ -100,10 +110,32 @@ class PrivilegesView(QWidget):
         if not self.controller:
             return
         data = self.controller.get_schema_tables()
-        self.treePrivileges.clear()
+
+        # Banco
+        self.treeDbPrivileges.clear()
+        db_name = (
+            self.controller.get_current_database()
+            if hasattr(self.controller, "get_current_database")
+            else "database"
+        )
+        db_item = QTreeWidgetItem([db_name, "", "", ""])
+        db_item.setFlags(db_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        for col in range(1, 4):
+            db_item.setCheckState(col, Qt.CheckState.Unchecked)
+        self.treeDbPrivileges.addTopLevelItem(db_item)
+
+        # Schemas e tabelas
+        self.treeSchemaPrivileges.clear()
+        self.treeTablePrivileges.clear()
         for schema, tables in data.items():
-            schema_item = QTreeWidgetItem([schema])
-            self.treePrivileges.addTopLevelItem(schema_item)
+            schema_item = QTreeWidgetItem([schema, "", ""])
+            schema_item.setFlags(schema_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            for col in range(1, 3):
+                schema_item.setCheckState(col, Qt.CheckState.Unchecked)
+            self.treeSchemaPrivileges.addTopLevelItem(schema_item)
+
+            schema_tables_item = QTreeWidgetItem([schema])
+            self.treeTablePrivileges.addTopLevelItem(schema_tables_item)
             for table in tables:
                 table_item = QTreeWidgetItem([table, "", "", "", ""])
                 table_item.setFlags(
@@ -113,8 +145,11 @@ class PrivilegesView(QWidget):
                 )
                 for col in range(1, 5):
                     table_item.setCheckState(col, Qt.CheckState.Unchecked)
-                schema_item.addChild(table_item)
-        self.treePrivileges.expandAll()
+                schema_tables_item.addChild(table_item)
+
+        self.treeDbPrivileges.expandAll()
+        self.treeSchemaPrivileges.expandAll()
+        self.treeTablePrivileges.expandAll()
 
     # ------------------------------------------------------------------
     # Ações
@@ -125,16 +160,59 @@ class PrivilegesView(QWidget):
             return
         role = self.cmbRole.currentText()
         template = self.cmbTemplates.currentText()
-        perms = self.templates.get(template, set())
+        tpl = self.templates.get(template, {})
         try:
             success = self.controller.apply_template_to_group(role, template)
             if success:
-                # Atualiza árvore para refletir o template
                 self._populate_tree()
-                for i in range(self.treePrivileges.topLevelItemCount()):
-                    schema_item = self.treePrivileges.topLevelItem(i)
+
+                db_item = self.treeDbPrivileges.topLevelItem(0)
+                dbname = (
+                    self.controller.get_current_database()
+                    if hasattr(self.controller, "get_current_database")
+                    else "database"
+                )
+                db_perms = tpl.get("database", {}).get(
+                    dbname, tpl.get("database", {}).get("*", [])
+                )
+                for col, label in enumerate(["CONNECT", "CREATE", "TEMP"], start=1):
+                    state = (
+                        Qt.CheckState.Checked
+                        if label in db_perms
+                        else Qt.CheckState.Unchecked
+                    )
+                    db_item.setCheckState(col, state)
+
+                schema_tpl = tpl.get("schemas", {})
+                for i in range(self.treeSchemaPrivileges.topLevelItemCount()):
+                    schema_item = self.treeSchemaPrivileges.topLevelItem(i)
+                    schema = schema_item.text(0)
+                    perms = schema_tpl.get(schema, [])
+                    for col, label in enumerate(["USAGE", "CREATE"], start=1):
+                        state = (
+                            Qt.CheckState.Checked
+                            if label in perms
+                            else Qt.CheckState.Unchecked
+                        )
+                        schema_item.setCheckState(col, state)
+
+                tables_tpl = tpl.get("tables", {})
+                for i in range(self.treeTablePrivileges.topLevelItemCount()):
+                    schema_item = self.treeTablePrivileges.topLevelItem(i)
+                    schema = schema_item.text(0)
                     for j in range(schema_item.childCount()):
                         table_item = schema_item.child(j)
+                        table_name = table_item.text(0)
+                        if schema in tables_tpl:
+                            schema_def = tables_tpl[schema]
+                        elif "*" in tables_tpl:
+                            schema_def = tables_tpl["*"]
+                        else:
+                            schema_def = []
+                        if isinstance(schema_def, dict):
+                            perms = schema_def.get(table_name, [])
+                        else:
+                            perms = schema_def
                         for col, label in enumerate(
                             ["SELECT", "INSERT", "UPDATE", "DELETE"], start=1
                         ):
@@ -144,6 +222,7 @@ class PrivilegesView(QWidget):
                                 else Qt.CheckState.Unchecked
                             )
                             table_item.setCheckState(col, state)
+
                 QMessageBox.information(
                     self, "Sucesso", "Template aplicado com sucesso."
                 )
@@ -161,9 +240,28 @@ class PrivilegesView(QWidget):
         if not self.controller:
             return
         role = self.cmbRole.currentText()
-        privileges: dict[str, dict[str, set[str]]] = {}
-        for i in range(self.treePrivileges.topLevelItemCount()):
-            schema_item = self.treePrivileges.topLevelItem(i)
+
+        db_privs = set()
+        db_item = self.treeDbPrivileges.topLevelItem(0)
+        if db_item:
+            for col, label in enumerate(["CONNECT", "CREATE", "TEMP"], start=1):
+                if db_item.checkState(col) == Qt.CheckState.Checked:
+                    db_privs.add(label)
+
+        schema_privs: dict[str, set[str]] = {}
+        for i in range(self.treeSchemaPrivileges.topLevelItemCount()):
+            schema_item = self.treeSchemaPrivileges.topLevelItem(i)
+            schema = schema_item.text(0)
+            perms = set()
+            for col, label in enumerate(["USAGE", "CREATE"], start=1):
+                if schema_item.checkState(col) == Qt.CheckState.Checked:
+                    perms.add(label)
+            if perms:
+                schema_privs[schema] = perms
+
+        table_privileges: dict[str, dict[str, set[str]]] = {}
+        for i in range(self.treeTablePrivileges.topLevelItemCount()):
+            schema_item = self.treeTablePrivileges.topLevelItem(i)
             schema = schema_item.text(0)
             for j in range(schema_item.childCount()):
                 table_item = schema_item.child(j)
@@ -175,10 +273,16 @@ class PrivilegesView(QWidget):
                     if table_item.checkState(col) == Qt.CheckState.Checked:
                         perms.add(label)
                 if perms:
-                    privileges.setdefault(schema, {})[table] = perms
+                    table_privileges.setdefault(schema, {})[table] = perms
+
         try:
-            success = self.controller.apply_group_privileges(role, privileges)
-            if success:
+            ok = True
+            if db_privs:
+                ok &= self.controller.grant_database_privileges(role, db_privs)
+            for schema, perms in schema_privs.items():
+                ok &= self.controller.grant_schema_privileges(role, schema, perms)
+            ok &= self.controller.apply_group_privileges(role, table_privileges)
+            if ok:
                 QMessageBox.information(
                     self, "Sucesso", "Permissões salvas com sucesso."
                 )

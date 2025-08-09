@@ -290,6 +290,46 @@ class DBManager:
                             )
                         )
 
+    def grant_database_privileges(self, group: str, privileges: Set[str]):
+        """Concede privilégios de banco ao grupo especificado.
+
+        Revoga primeiro todos os privilégios padrão e em seguida concede
+        aqueles informados em ``privileges``.
+        """
+        dbname = self.conn.get_dsn_parameters().get("dbname")
+        with self.conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("REVOKE ALL PRIVILEGES ON DATABASE {} FROM {}" ).format(
+                    sql.Identifier(dbname), sql.Identifier(group)
+                )
+            )
+            if privileges:
+                cur.execute(
+                    sql.SQL("GRANT {} ON DATABASE {} TO {}" ).format(
+                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                        sql.Identifier(dbname),
+                        sql.Identifier(group),
+                    )
+                )
+
+    def grant_schema_privileges(self, group: str, schema: str, privileges: Set[str]):
+        """Concede privilégios de schema ao grupo informado."""
+        identifier = sql.Identifier(schema)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {}" ).format(
+                    identifier, sql.Identifier(group)
+                )
+            )
+            if privileges:
+                cur.execute(
+                    sql.SQL("GRANT {} ON SCHEMA {} TO {}" ).format(
+                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                        identifier,
+                        sql.Identifier(group),
+                    )
+                )
+
     # Métodos de schema
     def create_schema(self, schema_name: str, owner: str | None = None):
         with self.conn.cursor() as cur:

@@ -1,9 +1,23 @@
 """Central permission template definitions."""
 
-# Mapping template name to set of privileges
+# Mapping template name to hierarchical privileges
+# Structure:
+# {
+#   'database': {'db_name' or '*': [privileges]},
+#   'schemas': {'schema_name': [privileges]},
+#   'tables': {'schema_name' or '*': [privileges] or {'table': [privileges]}}
+# }
 PERMISSION_TEMPLATES = {
-    "Leitor": {"SELECT"},
-    "Editor": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    "Leitor": {
+        "database": {"*": ["CONNECT"]},
+        "schemas": {"public": ["USAGE"]},
+        "tables": {"*": ["SELECT"]},
+    },
+    "Editor": {
+        "database": {"*": ["CONNECT"]},
+        "schemas": {"public": ["USAGE", "CREATE"]},
+        "tables": {"*": ["SELECT", "INSERT", "UPDATE", "DELETE"]},
+    },
 }
 
 # Default template applied when creating new groups/turmas
