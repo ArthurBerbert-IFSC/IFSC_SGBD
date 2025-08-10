@@ -506,11 +506,62 @@ class DBManager:
             return [row[0] for row in cur.fetchall()]
 
     def enable_postgis(self, schema_name: str):
-        """Garante que a extensão PostGIS esteja disponível no schema informado."""
+        """Garante que a extensão PostGIS esteja disponível no schema informado.
+
+        - Verifica se a extensão já existe e, em caso afirmativo, obtém o schema
+          onde está instalada.
+        - Evita recriar a extensão caso ela já exista.
+        - Configura ``search_path`` do *role* e do banco para incluir o schema da
+          extensão.
+        """
+
         with self.conn.cursor() as cur:
+            # Verifica se a extensão já está instalada e em qual schema
             cur.execute(
-                sql.SQL("CREATE EXTENSION IF NOT EXISTS postgis SCHEMA {}").format(
-                    sql.Identifier(schema_name)
-                )
+                """
+                SELECT e.extname, n.nspname
+                FROM pg_extension e
+                JOIN pg_namespace n ON e.extnamespace = n.oid
+                WHERE e.extname = 'postgis'
+                """
             )
+            row = cur.fetchone()
+
+            if row:
+                ext_schema = row[1]
+            else:
+                # Cria a extensão caso ainda não exista
+                cur.execute(
+                    sql.SQL("CREATE EXTENSION IF NOT EXISTS postgis SCHEMA {}").format(
+                        sql.Identifier(schema_name)
+                    )
+                )
+                ext_schema = schema_name
+
+            # Configura search_path do role e do banco para incluir o schema da extensão
+            cur.execute("SELECT current_setting('search_path')")
+            current_path = cur.fetchone()[0]
+            paths = [p.strip() for p in current_path.split(',') if p]
+            if ext_schema not in paths:
+                new_path = f"{current_path},{ext_schema}" if current_path else ext_schema
+
+                params = self.conn.get_dsn_parameters()
+                role = params.get('user')
+                dbname = params.get('dbname')
+
+                if role:
+                    cur.execute(
+                        sql.SQL("ALTER ROLE {} SET search_path = %s").format(
+                            sql.Identifier(role)
+                        ),
+                        (new_path,)
+                    )
+
+                if dbname:
+                    cur.execute(
+                        sql.SQL("ALTER DATABASE {} SET search_path = %s").format(
+                            sql.Identifier(dbname)
+                        ),
+                        (new_path,)
+                    )
 
