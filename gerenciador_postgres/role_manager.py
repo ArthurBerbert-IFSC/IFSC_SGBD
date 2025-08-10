@@ -472,6 +472,23 @@ class RoleManager:
             )
             return False
 
+    def alter_default_privileges(
+        self, group_name: str, schema: str, obj_type: str, privileges: Set[str]
+    ) -> bool:
+        """Configura ``ALTER DEFAULT PRIVILEGES`` para novos objetos."""
+        try:
+            with self.dao.transaction():
+                self.dao.alter_default_privileges(group_name, schema, obj_type, privileges)
+            self.logger.info(
+                f"[{self.operador}] Atualizou default privileges de '{obj_type}' no schema '{schema}' para o grupo '{group_name}'"
+            )
+            return True
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Falha ao atualizar default privileges de '{obj_type}' no schema '{schema}' para o grupo '{group_name}': {e}"
+            )
+            return False
+
     def apply_template_to_group(self, group_name: str, template: str) -> bool:
         """Aplica um template hierárquico de permissões (banco/schema/tabelas)."""
         try:
@@ -484,6 +501,7 @@ class RoleManager:
             db_perms = tpl.get("database", {})
             schema_perms = tpl.get("schemas", {})
             table_perms = tpl.get("tables", {})
+            future_perms = tpl.get("future", {})
 
             with self.dao.transaction():
                 dbname = self.dao.conn.get_dsn_parameters().get("dbname")
@@ -514,6 +532,12 @@ class RoleManager:
                                 privileges.setdefault(schema, {})[tbl] = perms_set
                     if privileges:
                         self.dao.apply_group_privileges(group_name, privileges)
+
+                for schema, obj_perms in future_perms.items():
+                    for obj_type, perms in obj_perms.items():
+                        self.dao.alter_default_privileges(
+                            group_name, schema, obj_type, set(perms)
+                        )
 
             self.logger.info(
                 f"[{self.operador}] Aplicou template '{template}' ao grupo '{group_name}'"

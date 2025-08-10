@@ -11,6 +11,7 @@ class DummyDAO:
     def __init__(self):
         self.conn = DummyConn()
         self.applied = None
+        self.default_privs = []
 
     def list_tables_by_schema(self):
         return {"public": ["t1", "t2"]}
@@ -23,6 +24,9 @@ class DummyDAO:
 
     def grant_schema_privileges(self, group, schema, privileges):
         self.schema_privs = (group, schema, privileges)
+
+    def alter_default_privileges(self, group, schema, obj_type, privileges):
+        self.default_privs.append((group, schema, obj_type, privileges))
 
     @contextmanager
     def transaction(self):
@@ -64,6 +68,9 @@ class RoleManagerTemplateTests(unittest.TestCase):
         expected = {"public": {"t1": perms, "t2": perms}}
         self.assertEqual(group, "grp_demo")
         self.assertEqual(privileges, expected)
+        # Default privileges
+        fut = PERMISSION_TEMPLATES[template]["future"]["public"]["tables"]
+        self.assertIn(("grp_demo", "public", "tables", set(fut)), self.dao.default_privs)
         self.assertTrue(self.dao.conn.committed)
 
 
