@@ -6,6 +6,16 @@ from .data_models import User, Group
 from typing import Optional, List, Dict, Set, Callable
 
 
+PRIVILEGE_WHITELIST = {
+    "DATABASE": {"CREATE", "CONNECT", "TEMPORARY"},
+    "SCHEMA": {"CREATE", "USAGE"},
+    "TABLE": {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"},
+    "SEQUENCE": {"USAGE", "SELECT", "UPDATE"},
+    "FUNCTION": {"EXECUTE"},
+    "TYPE": {"USAGE"},
+}
+
+
 class DBManager:
     """Camada de acesso a dados para gerenciamento de roles e schemas."""
 
@@ -284,23 +294,49 @@ class DBManager:
                 result.setdefault(schema, {}).setdefault(table, set()).add(priv)
             return result
 
-    def apply_group_privileges(self, group: str, privileges: Dict[str, Dict[str, Set[str]]]):
-        """Aplica GRANT/REVOKE de acordo com o dicionário de permissões informado."""
+    def apply_group_privileges(
+        self,
+        group: str,
+        privileges: Dict[str, Dict[str, Set[str]]],
+        obj_type: str = "TABLE",
+    ):
+        """Aplica GRANT/REVOKE para tabelas ou sequências.
+
+        Parameters
+        ----------
+        group : str
+            Role a receber os privilégios.
+        privileges : Dict[str, Dict[str, Set[str]]]
+            Estrutura ``{schema: {obj: {priv1, priv2}}}``.
+        obj_type : str, optional
+            ``"TABLE"`` (padrão) ou ``"SEQUENCE"``.
+        """
+
+        obj_type = obj_type.upper()
+        allowed = PRIVILEGE_WHITELIST.get(obj_type)
+        if allowed is None:
+            raise ValueError(f"Tipo de objeto '{obj_type}' não suportado")
+        keyword = sql.SQL(obj_type)
+
         with self.conn.cursor() as cur:
-            for schema, tables in privileges.items():
-                for table, perms in tables.items():
-                    identifier = sql.Identifier(schema, table)
+            for schema, objects in privileges.items():
+                for name, perms in objects.items():
+                    invalid = set(perms) - allowed
+                    if invalid:
+                        raise ValueError(
+                            f"Privilégios inválidos para {obj_type}: {', '.join(sorted(invalid))}"
+                        )
+                    identifier = sql.Identifier(schema, name)
                     cur.execute(
                         sql.SQL(
-                            "REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLE {} FROM {}"
-                        ).format(
-                            identifier, sql.Identifier(group)
-                        )
+                            "REVOKE ALL PRIVILEGES ON {} {} FROM {}"
+                        ).format(keyword, identifier, sql.Identifier(group))
                     )
                     if perms:
                         cur.execute(
-                            sql.SQL("GRANT {} ON TABLE {} TO {}").format(
+                            sql.SQL("GRANT {} ON {} {} TO {}").format(
                                 sql.SQL(", ").join(sql.SQL(p) for p in sorted(perms)),
+                                keyword,
                                 identifier,
                                 sql.Identifier(group),
                             )
@@ -312,6 +348,12 @@ class DBManager:
         Revoga primeiro todos os privilégios padrão e em seguida concede
         aqueles informados em ``privileges``.
         """
+        invalid = set(privileges) - PRIVILEGE_WHITELIST["DATABASE"]
+        if invalid:
+            raise ValueError(
+                f"Privilégios inválidos para DATABASE: {', '.join(sorted(invalid))}"
+            )
+
         dbname = self.conn.get_dsn_parameters().get("dbname")
         with self.conn.cursor() as cur:
             cur.execute(
@@ -330,6 +372,12 @@ class DBManager:
 
     def grant_schema_privileges(self, group: str, schema: str, privileges: Set[str]):
         """Concede privilégios de schema ao grupo informado."""
+        invalid = set(privileges) - PRIVILEGE_WHITELIST["SCHEMA"]
+        if invalid:
+            raise ValueError(
+                f"Privilégios inválidos para SCHEMA: {', '.join(sorted(invalid))}"
+            )
+
         identifier = sql.Identifier(schema)
         with self.conn.cursor() as cur:
             cur.execute(
@@ -372,6 +420,13 @@ class DBManager:
         if obj_type not in type_map:
             raise ValueError(
                 "obj_type deve ser 'tables', 'sequences', 'functions' ou 'types'"
+            )
+
+        whitelist_key = obj_type.rstrip("s").upper()
+        invalid = set(privileges) - PRIVILEGE_WHITELIST[whitelist_key]
+        if invalid:
+            raise ValueError(
+                f"Privilégios inválidos para {whitelist_key}: {', '.join(sorted(invalid))}"
             )
 
         identifier = sql.Identifier(schema)

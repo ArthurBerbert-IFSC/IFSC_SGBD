@@ -49,8 +49,8 @@ class GroupsController(QObject):
     def list_privilege_templates(self):
         return PERMISSION_TEMPLATES
 
-    def apply_group_privileges(self, group_name: str, privileges):
-        success = self.role_manager.set_group_privileges(group_name, privileges)
+    def apply_group_privileges(self, group_name: str, privileges, obj_type: str = "TABLE"):
+        success = self.role_manager.set_group_privileges(group_name, privileges, obj_type=obj_type)
         if success:
             self.data_changed.emit()
         return success

@@ -18,10 +18,29 @@ PERMISSION_TEMPLATES = {
     "Editor": {
         "database": {"*": ["CONNECT"]},
         "schemas": {"public": ["USAGE", "CREATE"]},
-        "tables": {"*": ["SELECT", "INSERT", "UPDATE", "DELETE"]},
+        "tables": {
+            "*": [
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "TRUNCATE",
+                "REFERENCES",
+                "TRIGGER",
+            ]
+        },
+        "sequences": {"*": ["USAGE", "SELECT", "UPDATE"]},
         "future": {
             "public": {
-                "tables": ["SELECT", "INSERT", "UPDATE", "DELETE"],
+                "tables": [
+                    "SELECT",
+                    "INSERT",
+                    "UPDATE",
+                    "DELETE",
+                    "TRUNCATE",
+                    "REFERENCES",
+                    "TRIGGER",
+                ],
                 "sequences": ["USAGE", "SELECT", "UPDATE"],
                 "functions": ["EXECUTE"],
                 "types": ["USAGE"],
