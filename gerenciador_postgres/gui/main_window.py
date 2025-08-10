@@ -147,8 +147,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Erro", f"Perfil '{profile}' não encontrado na configuração.")
                 return
             try:
-                conn = ConnectionManager().connect_to(profile)
-                self.db_manager = DBManager(conn)
+                ConnectionManager().connect_to(profile)
+                self.db_manager = DBManager(lambda: ConnectionManager().connect_to(profile))
 
                 # Inicializar audit_manager primeiro
                 self.audit_manager = AuditManager(self.db_manager, self.logger)

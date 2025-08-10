@@ -3,16 +3,31 @@ from psycopg2 import sql
 from psycopg2.extensions import connection
 from contextlib import contextmanager
 from .data_models import User, Group
-from typing import Optional, List, Dict, Set
+from typing import Optional, List, Dict, Set, Callable
 
 
 class DBManager:
     """Camada de acesso a dados para gerenciamento de roles e schemas."""
 
-    def __init__(self, conn: connection):
-        if not conn or not hasattr(conn, 'cursor'):
-            raise ValueError('Conexão inválida para DBManager')
-        self.conn = conn
+    def __init__(self, conn: connection | Callable[[], connection]):
+        """Inicializa o ``DBManager``.
+
+        O parâmetro ``conn`` pode ser um objeto de conexão já aberto ou uma
+        função/callable que retorne uma conexão. Este último formato permite
+        que cada *thread* obtenha sua própria conexão sob demanda.
+        """
+
+        if callable(conn):
+            self._conn_provider = conn
+        else:
+            if not conn or not hasattr(conn, "cursor"):
+                raise ValueError("Conexão inválida para DBManager")
+            self._conn_provider = lambda conn=conn: conn
+
+    # ------------------------------------------------------------------
+    @property
+    def conn(self) -> connection:
+        return self._conn_provider()
 
     @contextmanager
     def transaction(self):
@@ -21,11 +36,12 @@ class DBManager:
         Efetua ``commit`` ao término bem-sucedido do bloco e ``rollback``
         automaticamente em caso de exceções.
         """
+        conn = self.conn
         try:
             yield
-            self.conn.commit()
+            conn.commit()
         except Exception:
-            self.conn.rollback()
+            conn.rollback()
             raise
 
     def find_user_by_name(self, username: str) -> Optional[User]:
