@@ -431,10 +431,15 @@ class RoleManager:
             )
             return {}
 
-    def set_group_privileges(self, group_name: str, privileges: Dict[str, Dict[str, Set[str]]]) -> bool:
+    def set_group_privileges(
+        self,
+        group_name: str,
+        privileges: Dict[str, Dict[str, Set[str]]],
+        obj_type: str = "TABLE",
+    ) -> bool:
         try:
             with self.dao.transaction():
-                self.dao.apply_group_privileges(group_name, privileges)
+                self.dao.apply_group_privileges(group_name, privileges, obj_type=obj_type)
             self.logger.info(
                 f"[{self.operador}] Atualizou privilégios do grupo '{group_name}'"
             )
@@ -502,6 +507,7 @@ class RoleManager:
             db_perms = tpl.get("database", {})
             schema_perms = tpl.get("schemas", {})
             table_perms = tpl.get("tables", {})
+            sequence_perms = tpl.get("sequences", {})
             future_perms = tpl.get("future", {})
 
             with self.dao.transaction():
@@ -533,6 +539,28 @@ class RoleManager:
                                 privileges.setdefault(schema, {})[tbl] = perms_set
                     if privileges:
                         self.dao.apply_group_privileges(group_name, privileges)
+
+                if sequence_perms:
+                    sequences = self.list_tables_by_schema(include_types=("S",))
+                    seq_privs: Dict[str, Dict[str, Set[str]]] = {}
+                    for schema, seqs in sequences.items():
+                        if schema in sequence_perms:
+                            schema_def = sequence_perms[schema]
+                            if isinstance(schema_def, dict):
+                                for seq, perms in schema_def.items():
+                                    seq_privs.setdefault(schema, {})[seq] = set(perms)
+                            else:
+                                perms_set = set(schema_def)
+                                for seq in seqs:
+                                    seq_privs.setdefault(schema, {})[seq] = perms_set
+                        elif "*" in sequence_perms:
+                            perms_set = set(sequence_perms["*"])
+                            for seq in seqs:
+                                seq_privs.setdefault(schema, {})[seq] = perms_set
+                    if seq_privs:
+                        self.dao.apply_group_privileges(
+                            group_name, seq_privs, obj_type="SEQUENCE"
+                        )
 
                 for schema, obj_perms in future_perms.items():
                     for obj_type, perms in obj_perms.items():

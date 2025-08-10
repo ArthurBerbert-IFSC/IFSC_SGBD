@@ -1,6 +1,5 @@
 import logging
 import unittest
-import logging
 from contextlib import contextmanager
 
 from gerenciador_postgres.role_manager import RoleManager
@@ -13,11 +12,11 @@ class DummyDAO:
         self.applied = None
         self.default_privs = []
 
-    def list_tables_by_schema(self):
+    def list_tables_by_schema(self, **kwargs):
         return {"public": ["t1", "t2"]}
 
-    def apply_group_privileges(self, group, privileges):
-        self.applied = (group, privileges)
+    def apply_group_privileges(self, group, privileges, obj_type="TABLE"):
+        self.applied = (group, privileges, obj_type)
 
     def grant_database_privileges(self, group, privileges):
         self.db_privs = (group, privileges)
@@ -64,10 +63,11 @@ class RoleManagerTemplateTests(unittest.TestCase):
         perms = set(PERMISSION_TEMPLATES[template]["tables"]["*"])
         result = self.rm.apply_template_to_group("grp_demo", template)
         self.assertTrue(result)
-        group, privileges = self.dao.applied
+        group, privileges, obj_type = self.dao.applied
         expected = {"public": {"t1": perms, "t2": perms}}
         self.assertEqual(group, "grp_demo")
         self.assertEqual(privileges, expected)
+        self.assertEqual(obj_type, "TABLE")
         # Default privileges
         fut = PERMISSION_TEMPLATES[template]["future"]["public"]["tables"]
         self.assertIn(("grp_demo", "public", "tables", set(fut)), self.dao.default_privs)
