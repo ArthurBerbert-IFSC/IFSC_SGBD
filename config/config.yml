@@ -1,17 +1,17 @@
-log_level: INFO
-log_path: logs/app.log
-group_prefix: "grp_"
-schema_creation_group: "Professores"
 databases:
-  - name: "local"
-    host: "localhost"
-    dbname: "postgres"
-    user: "postgres"
-    password: "postgres"
-    port: 5432
-  - name: "remoto"
-    host: "db.example.com"
-    dbname: "producao"
-    user: "admin"
-    password: "s3cr3t"
-    port: 5432
+- dbname: postgres
+  host: localhost
+  name: local
+  password: postgres
+  port: 5432
+  user: postgres
+- dbname: Campus_Maruo_Ramos_db
+  host: 172.16.0.228
+  name: remoto
+  password: GeoIFSC2025
+  port: 5432
+  user: postgres
+group_prefix: grp_
+log_level: INFO
+log_path: D:\GitHub\IFSC_SGBD\logs\app.log
+schema_creation_group: Professores
