@@ -1,13 +1,19 @@
 databases:
-- dbname: postgres
-  host: localhost
-  name: local
-  password: postgres
+- dbname: Campus_Maruo_Ramos_db
+  host: 172.16.0.228
+  name: remoto
+  password: GeoIFSC2025
   port: 5432
   user: postgres
 - dbname: Campus_Maruo_Ramos_db
   host: 172.16.0.228
-  name: remoto
+  name: Ge
+  password: GeoIFSC2025
+  port: 5432
+  user: postgres
+- dbname: Campus_Mauro_Ramos_db
+  host: 172.16.0.228
+  name: Geral
   password: GeoIFSC2025
   port: 5432
   user: postgres
