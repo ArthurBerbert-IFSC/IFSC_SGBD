@@ -1,5 +1,6 @@
 import logging
 from .db_manager import DBManager
+from .config_manager import load_config
 
 
 class SchemaManager:
@@ -10,6 +11,7 @@ class SchemaManager:
         self.logger = logger
         self.operador = operador
         self.audit_manager = audit_manager
+        self.allowed_group = load_config().get('schema_creation_group', 'Professores')
 
     # --- Helpers de permissão -------------------------------------------------
     def _current_user(self) -> str:
@@ -48,18 +50,20 @@ class SchemaManager:
         dados_depois = None
         sucesso = False
         
-        if not (self._is_superuser(user) or self._has_role(user, 'Professores')):
+        if not (self._is_superuser(user) or self._has_role(user, self.allowed_group)):
             self.logger.error(
                 f"[{self.operador}] Usuário '{user}' não tem permissão para criar schema"
             )
-            raise PermissionError('Apenas Professores ou superusuários podem criar schemas.')
+            raise PermissionError(
+                f"Apenas {self.allowed_group} ou superusuários podem criar schemas."
+            )
         
         try:
             with self.dao.transaction():
                 with self.dao.conn.cursor() as cur:
                     cur.execute(
                         "SELECT pg_has_role(%s, %s, 'member')",
-                        (self.operador, 'Professores'),
+                        (self.operador, self.allowed_group),
                     )
                     has_permission = cur.fetchone()[0]
                 if not has_permission:
@@ -67,7 +71,7 @@ class SchemaManager:
                         f"[{self.operador}] Permissão negada para criar schema '{name}'"
                     )
                     raise PermissionError(
-                        "Usuário não pertence ao grupo 'Professores'"
+                        f"Usuário não pertence ao grupo '{self.allowed_group}'"
                     )
 
                 self.dao.create_schema(name, owner)

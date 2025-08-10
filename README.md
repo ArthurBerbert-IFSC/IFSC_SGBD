@@ -30,6 +30,9 @@ O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possív
 - `log_level`: nível de detalhamento dos logs.
 - `log_path`: caminho do arquivo de log.
 - `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"grp_"`).
+- `schema_creation_group`: nome do grupo autorizado a criar schemas (padrão `"Professores"`).
+
+Para permitir que outro grupo crie schemas, edite o valor de `schema_creation_group` em `config/config.yml` e reinicie a aplicação.
 
 ## Execução
 Para iniciar a interface gráfica do gerenciador, execute:

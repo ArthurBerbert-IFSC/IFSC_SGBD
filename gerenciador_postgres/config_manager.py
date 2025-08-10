@@ -6,7 +6,8 @@ CONFIG_FILE = CONFIG_DIR / 'config.yml'
 DEFAULT_CONFIG = {
     'log_path': str(BASE_DIR / 'logs' / 'app.log'),
     'log_level': 'INFO',
-    'group_prefix': 'grp_'
+    'group_prefix': 'grp_',
+    'schema_creation_group': 'Professores'
 }
 
 logger = logging.getLogger(__name__)
