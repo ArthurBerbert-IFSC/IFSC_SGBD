@@ -71,18 +71,19 @@ class DummyDAO:
 
 
 class TestableSchemaManager(SchemaManager):
-    def __init__(self, dao, logger, perms):
+    def __init__(self, dao, logger, perms, allowed_group='Professores'):
         super().__init__(dao, logger)
+        self.allowed_group = allowed_group
         self._user = perms.get('user', 'alice')
         self._is_super = perms.get('super', False)
-        self._in_prof = perms.get('professor', False)
+        self._in_group = perms.get('in_group', False)
         self._owner = perms.get('owner', None)
 
     def _current_user(self):
         return self._user
 
     def _has_role(self, username, role):
-        return self._in_prof if role == 'Professores' else False
+        return self._in_group if role == self.allowed_group else False
 
     def _is_superuser(self, username):
         return self._is_super
@@ -99,13 +100,13 @@ class SchemaManagerPermissionTests(unittest.TestCase):
         self.logger = logger
 
     def test_create_schema_authorized(self):
-        mgr = TestableSchemaManager(self.dao, self.logger, {'professor': True})
+        mgr = TestableSchemaManager(self.dao, self.logger, {'in_group': True})
         mgr.create_schema('novo')
         self.assertEqual(self.dao.created, [('novo', None)])
         self.assertTrue(self.dao.conn.committed)
 
     def test_create_schema_unauthorized(self):
-        mgr = TestableSchemaManager(self.dao, self.logger, {'professor': False})
+        mgr = TestableSchemaManager(self.dao, self.logger, {'in_group': False})
         with self.assertRaises(PermissionError):
             mgr.create_schema('novo')
         self.assertEqual(self.dao.created, [])
