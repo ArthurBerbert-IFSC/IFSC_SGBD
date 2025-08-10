@@ -273,7 +273,7 @@ class RoleManager:
             
             return False
 
-    def change_password(self, username: str, new_password: str) -> bool:
+    def change_password(self, username: str, password: str) -> bool:
         try:
             if not self.dao.find_user_by_name(username):
                 raise ValueError(f"Usuário '{username}' não existe.")
@@ -283,7 +283,7 @@ class RoleManager:
                         sql.SQL("ALTER ROLE {} WITH PASSWORD %s").format(
                             sql.Identifier(username)
                         ),
-                        (new_password,),
+                        (password,),
                     )
             self.logger.info(f"[{self.operador}] Alterou senha do usuário: {username}")
             return True

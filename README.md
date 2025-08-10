@@ -34,6 +34,11 @@ O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possív
 
 Para permitir que outro grupo crie schemas, edite o valor de `schema_creation_group` em `config/config.yml` e reinicie a aplicação.
 
+Senhas de banco de dados **não** devem ser armazenadas no arquivo de configuração. 
+O `ConnectionManager` buscará a senha a partir da variável de ambiente 
+`<NOME_DO_PERFIL>_PASSWORD` (por exemplo, `LOCAL_PASSWORD`) ou do serviço 
+`keyring` configurado para o usuário correspondente.
+
 ## Execução
 Para iniciar a interface gráfica do gerenciador, execute:
 ```bash
