@@ -28,11 +28,15 @@ Aplicação em Python com interface gráfica (PyQt6) para facilitar a administra
 O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possível definir:
 
 - `log_level`: nível de detalhamento dos logs.
-- `log_path`: caminho do arquivo de log.
+- `log_path`: caminho do arquivo de log (relativo a `BASE_DIR`).
 - `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"grp_"`).
 - `schema_creation_group`: nome do grupo autorizado a criar schemas (padrão `"Professores"`).
 
 Para permitir que outro grupo crie schemas, edite o valor de `schema_creation_group` em `config/config.yml` e reinicie a aplicação.
+
+O caminho informado em `log_path` é convertido para absoluto a partir de `BASE_DIR`, permitindo o uso de caminhos relativos.
+
+Para sobrepor completamente as configurações, defina a variável de ambiente `IFSC_SGBD_CONFIG_FILE` apontando para um arquivo YAML alternativo ou edite o arquivo `config/config.yml` local.
 
 Senhas de banco de dados **não** devem ser armazenadas no arquivo de configuração. 
 O `ConnectionManager` buscará a senha a partir da variável de ambiente 

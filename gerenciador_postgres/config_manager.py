@@ -1,8 +1,18 @@
 import logging
+import os
+from pathlib import Path
 import yaml
-from .path_config import CONFIG_DIR, BASE_DIR
+from .path_config import BASE_DIR, CONFIG_DIR as DEFAULT_CONFIG_DIR
+CONFIG_FILE_ENV = os.getenv("IFSC_SGBD_CONFIG_FILE")
+if CONFIG_FILE_ENV:
+    CONFIG_FILE = Path(CONFIG_FILE_ENV)
+    if not CONFIG_FILE.is_absolute():
+        CONFIG_FILE = BASE_DIR / CONFIG_FILE
+    CONFIG_DIR = CONFIG_FILE.parent
+else:
+    CONFIG_DIR = DEFAULT_CONFIG_DIR
+    CONFIG_FILE = CONFIG_DIR / 'config.yml'
 
-CONFIG_FILE = CONFIG_DIR / 'config.yml'
 DEFAULT_CONFIG = {
     'log_path': str(BASE_DIR / 'logs' / 'app.log'),
     'log_level': 'INFO',
@@ -26,7 +36,14 @@ def load_config():
             with open(CONFIG_FILE, 'w', encoding='utf-8') as fw:
                 yaml.safe_dump(DEFAULT_CONFIG, fw, allow_unicode=True)
             return DEFAULT_CONFIG.copy()
-    return {**DEFAULT_CONFIG, **data}
+    result = {**DEFAULT_CONFIG, **data}
+    log_path = result.get('log_path')
+    if log_path:
+        log_path_path = Path(log_path)
+        if not log_path_path.is_absolute():
+            log_path_path = BASE_DIR / log_path_path
+        result['log_path'] = str(log_path_path)
+    return result
 
 def save_config(data):
     CONFIG_DIR.mkdir(exist_ok=True)

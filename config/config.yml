@@ -1,5 +1,5 @@
 log_level: INFO
-log_path: D:\GitHub\IFSC_SGBD\logs\app.log
+log_path: logs/app.log
 group_prefix: "grp_"
 schema_creation_group: "Professores"
 databases:
