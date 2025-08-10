@@ -81,47 +81,48 @@ class SchemaManager:
 
                 dados_depois = {'schema_name': name, 'owner': owner}
                 sucesso = True
-            
+
+                if self.audit_manager:
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao='CREATE_SCHEMA',
+                        objeto_tipo='SCHEMA',
+                        objeto_nome=name,
+                        detalhes={'owner': owner, 'postgis_enabled': True},
+                        dados_depois=dados_depois,
+                        sucesso=sucesso
+                    )
+
             self.logger.info(f"[{self.operador}] Criou schema: {name}")
-            
-            # Registrar auditoria
-            if self.audit_manager:
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao='CREATE_SCHEMA',
-                    objeto_tipo='SCHEMA',
-                    objeto_nome=name,
-                    detalhes={'owner': owner, 'postgis_enabled': True},
-                    dados_depois=dados_depois,
-                    sucesso=sucesso
-                )
                 
         except PermissionError:
             # Registrar falha de permissão na auditoria
             if self.audit_manager:
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao='CREATE_SCHEMA',
-                    objeto_tipo='SCHEMA',
-                    objeto_nome=name,
-                    detalhes={'error': 'Permission denied', 'owner': owner},
-                    sucesso=False
-                )
+                with self.dao.transaction():
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao='CREATE_SCHEMA',
+                        objeto_tipo='SCHEMA',
+                        objeto_nome=name,
+                        detalhes={'error': 'Permission denied', 'owner': owner},
+                        sucesso=False
+                    )
             raise
         except Exception as e:
             self.logger.error(f"[{self.operador}] Falha ao criar schema '{name}': {e}")
-            
+
             # Registrar falha na auditoria
             if self.audit_manager:
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao='CREATE_SCHEMA',
-                    objeto_tipo='SCHEMA',
-                    objeto_nome=name,
-                    detalhes={'error': str(e), 'owner': owner},
-                    sucesso=False
-                )
-            
+                with self.dao.transaction():
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao='CREATE_SCHEMA',
+                        objeto_tipo='SCHEMA',
+                        objeto_nome=name,
+                        detalhes={'error': str(e), 'owner': owner},
+                        sucesso=False
+                    )
+
             raise
 
     def delete_schema(self, name: str, cascade: bool = False):

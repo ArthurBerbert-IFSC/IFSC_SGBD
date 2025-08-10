@@ -62,32 +62,49 @@ class MockConnection:
 class TestAuditManager(unittest.TestCase):
     def setUp(self):
         self.mock_conn = MockConnection()
-        self.mock_db_manager = MagicMock(spec=DBManager)
-        self.mock_db_manager.conn = self.mock_conn
-        
+        self.db_manager = DBManager(self.mock_conn)
+
         self.mock_logger = MagicMock()
-        
+
         # Patch para evitar criação real da tabela
         with patch.object(AuditManager, '_ensure_audit_table'):
-            self.audit_manager = AuditManager(self.mock_db_manager, self.mock_logger)
-    
+            self.audit_manager = AuditManager(self.db_manager, self.mock_logger)
+
     def test_log_operation_success(self):
         """Testa o registro de uma operação bem-sucedida."""
-        self.audit_manager.log_operation(
-            operador='arthur',
-            operacao='CREATE_USER',
-            objeto_tipo='USER',
-            objeto_nome='joao',
-            detalhes={'password_set': True},
-            sucesso=True
-        )
-        
+        with self.db_manager.transaction():
+            self.audit_manager.log_operation(
+                operador='arthur',
+                operacao='CREATE_USER',
+                objeto_tipo='USER',
+                objeto_nome='joao',
+                detalhes={'password_set': True},
+                sucesso=True
+            )
+
         # Verificar se a query foi executada
         queries = self.mock_conn.cursor_mock.executed_queries
         self.assertTrue(len(queries) > 0)
-        
-        # Verificar se commit foi chamado
+
+        # Verificar se commit foi chamado pelo contexto de transação
         self.assertTrue(self.mock_conn.committed)
+
+    def test_log_operation_rollback(self):
+        """Garante rollback da auditoria se a transação principal falhar."""
+        with self.assertRaises(ValueError):
+            with self.db_manager.transaction():
+                self.audit_manager.log_operation(
+                    operador='arthur',
+                    operacao='CREATE_USER',
+                    objeto_tipo='USER',
+                    objeto_nome='joao',
+                    detalhes={'password_set': True},
+                    sucesso=True
+                )
+                raise ValueError('fail')
+
+        self.assertTrue(self.mock_conn.rolled_back)
+        self.assertFalse(self.mock_conn.committed)
     
     def test_get_audit_stats(self):
         """Testa a obtenção de estatísticas de auditoria."""
@@ -105,10 +122,10 @@ class TestAuditManager(unittest.TestCase):
     def test_cleanup_old_logs(self):
         """Testa a limpeza de logs antigos."""
         deleted_count = self.audit_manager.cleanup_old_logs(90)
-        
+
         # Verificar se retornou o número correto de linhas deletadas
         self.assertEqual(deleted_count, 5)  # rowcount do mock
-        
+
         # Verificar se commit foi chamado
         self.assertTrue(self.mock_conn.committed)
 

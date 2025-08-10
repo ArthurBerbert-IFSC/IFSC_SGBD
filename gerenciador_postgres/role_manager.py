@@ -25,28 +25,27 @@ class RoleManager:
             with self.dao.transaction():
                 self.dao.insert_user(username, password, valid_until)
 
-            dados_depois = {
-                'username': username,
-                'can_login': True,
-                'valid_until': valid_until,
-            }
-            sucesso = True
+                dados_depois = {
+                    'username': username,
+                    'can_login': True,
+                    'valid_until': valid_until,
+                }
+                sucesso = True
+
+                if self.audit_manager:
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao='CREATE_USER',
+                        objeto_tipo='USER',
+                        objeto_nome=username,
+                        detalhes={'password_set': True, 'valid_until': valid_until},
+                        dados_antes=dados_antes,
+                        dados_depois=dados_depois,
+                        sucesso=sucesso
+                    )
 
             self.logger.info(f"[{self.operador}] Criou usuário: {username}")
-            
-            # Registrar auditoria
-            if self.audit_manager:
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao='CREATE_USER',
-                    objeto_tipo='USER',
-                    objeto_nome=username,
-                    detalhes={'password_set': True, 'valid_until': valid_until},
-                    dados_antes=dados_antes,
-                    dados_depois=dados_depois,
-                    sucesso=sucesso
-                )
-            
+
             return username
             
         except Exception as e:
@@ -54,16 +53,17 @@ class RoleManager:
             
             # Registrar falha na auditoria
             if self.audit_manager:
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao='CREATE_USER',
-                    objeto_tipo='USER',
-                    objeto_nome=username,
-                    detalhes={'error': str(e)},
-                    dados_antes=dados_antes,
-                    dados_depois=dados_depois,
-                    sucesso=False
-                )
+                with self.dao.transaction():
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao='CREATE_USER',
+                        objeto_tipo='USER',
+                        objeto_nome=username,
+                        detalhes={'error': str(e)},
+                        dados_antes=dados_antes,
+                        dados_depois=dados_depois,
+                        sucesso=False
+                    )
             
             raise
 
@@ -239,21 +239,20 @@ class RoleManager:
                     )
 
                 self.dao.delete_user(username)
-            sucesso = True
-            
+
+                sucesso = True
+                if self.audit_manager:
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao='DELETE_USER',
+                        objeto_tipo='USER',
+                        objeto_nome=username,
+                        dados_antes=dados_antes,
+                        sucesso=sucesso
+                    )
+
             self.logger.info(f"[{self.operador}] Excluiu usuário: {username}")
-            
-            # Registrar auditoria
-            if self.audit_manager:
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao='DELETE_USER',
-                    objeto_tipo='USER',
-                    objeto_nome=username,
-                    dados_antes=dados_antes,
-                    sucesso=sucesso
-                )
-            
+
             return True
             
         except Exception as e:
@@ -261,15 +260,16 @@ class RoleManager:
             
             # Registrar falha na auditoria
             if self.audit_manager:
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao='DELETE_USER',
-                    objeto_tipo='USER',
-                    objeto_nome=username,
-                    detalhes={'error': str(e)},
-                    dados_antes=dados_antes,
-                    sucesso=False
-                )
+                with self.dao.transaction():
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao='DELETE_USER',
+                        objeto_tipo='USER',
+                        objeto_nome=username,
+                        detalhes={'error': str(e)},
+                        dados_antes=dados_antes,
+                        sucesso=False
+                    )
             
             return False
 
@@ -362,18 +362,18 @@ class RoleManager:
             with self.dao.transaction():
                 self.dao.remove_user_from_group(username, old_group)
                 self.dao.add_user_to_group(username, new_group)
+                if self.audit_manager:
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao="TRANSFER_USER_GROUP",
+                        objeto_tipo="USER",
+                        objeto_nome=username,
+                        detalhes=detalhes,
+                        sucesso=True,
+                    )
             self.logger.info(
                 f"[{self.operador}] Transferiu usuário '{username}' do grupo '{old_group}' para '{new_group}'"
             )
-            if self.audit_manager:
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao="TRANSFER_USER_GROUP",
-                    objeto_tipo="USER",
-                    objeto_nome=username,
-                    detalhes=detalhes,
-                    sucesso=True,
-                )
             return True
         except Exception as e:
             self.logger.error(
@@ -381,14 +381,15 @@ class RoleManager:
             )
             if self.audit_manager:
                 detalhes["error"] = str(e)
-                self.audit_manager.log_operation(
-                    operador=self.operador,
-                    operacao="TRANSFER_USER_GROUP",
-                    objeto_tipo="USER",
-                    objeto_nome=username,
-                    detalhes=detalhes,
-                    sucesso=False,
-                )
+                with self.dao.transaction():
+                    self.audit_manager.log_operation(
+                        operador=self.operador,
+                        operacao="TRANSFER_USER_GROUP",
+                        objeto_tipo="USER",
+                        objeto_nome=username,
+                        detalhes=detalhes,
+                        sucesso=False,
+                    )
             return False
 
     def list_group_members(self, group_name: str) -> List[str]:

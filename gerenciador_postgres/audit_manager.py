@@ -69,8 +69,8 @@ class AuditManager:
         try:
             with self.dao.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO audit_log 
-                    (operador, operacao, objeto_tipo, objeto_nome, detalhes, 
+                    INSERT INTO audit_log
+                    (operador, operacao, objeto_tipo, objeto_nome, detalhes,
                      dados_antes, dados_depois, sucesso, ip_address)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
@@ -80,10 +80,11 @@ class AuditManager:
                     Json(dados_depois) if dados_depois else None,
                     sucesso, ip_address
                 ))
-            
-            # Commit separado para auditoria (não deve afetar transação principal)
-            self.dao.conn.commit()
-            
+
+            # O commit deve ser controlado externamente pelo contexto de
+            # transação principal. Dessa forma, em caso de falha na operação
+            # principal, o registro de auditoria também será revertido.
+
         except Exception as e:
             self.logger.error(f"Erro ao registrar auditoria: {e}")
             # Não propagar erro de auditoria para não afetar operação principal
