@@ -223,8 +223,10 @@ class MainWindow(QMainWindow):
                     objeto_nome='database_connection',
                     sucesso=True
                 )
-            except:
-                pass  # Ignorar erros de auditoria no logout
+            except Exception as e:
+                self.logger.warning(
+                    "Erro ao registrar logout na auditoria: %s", e
+                )  # Ignorado para não interromper o processo de desconexão
         
         ConnectionManager().disconnect()
         self.db_manager = None
