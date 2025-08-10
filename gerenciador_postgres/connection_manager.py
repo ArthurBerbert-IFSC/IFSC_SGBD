@@ -10,8 +10,10 @@ que objetos de conexão sejam compartilhados entre ``QThread``s ou outras
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import psycopg2
+import keyring
 from psycopg2 import OperationalError
 from psycopg2.extensions import connection
 from psycopg2.pool import SimpleConnectionPool
@@ -75,8 +77,18 @@ class ConnectionManager:
             "user": profile["user"],
             "port": profile.get("port", 5432),
         }
-        if "password" in profile:
-            params["password"] = profile["password"]
+
+        password = profile.get("password")
+        if password is None:
+            env_var = f"{profile_name.upper()}_PASSWORD"
+            password = os.getenv(env_var)
+        if password is None:
+            try:
+                password = keyring.get_password("IFSC_SGBD", profile["user"])
+            except Exception:
+                password = None
+        if password:
+            params["password"] = password
 
         pool = self._pools.get(profile_name)
         if pool is None:

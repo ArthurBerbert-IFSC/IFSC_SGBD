@@ -31,6 +31,11 @@ O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possív
 - `log_path`: caminho do arquivo de log.
 - `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"grp_"`).
 
+Senhas de banco de dados **não** devem ser armazenadas no arquivo de configuração. 
+O `ConnectionManager` buscará a senha a partir da variável de ambiente 
+`<NOME_DO_PERFIL>_PASSWORD` (por exemplo, `LOCAL_PASSWORD`) ou do serviço 
+`keyring` configurado para o usuário correspondente.
+
 ## Execução
 Para iniciar a interface gráfica do gerenciador, execute:
 ```bash

@@ -61,8 +61,8 @@ class UsersController(QObject):
             self.data_changed.emit()
         return success
 
-    def change_password(self, username: str, new_password: str) -> bool:
-        return self.role_manager.change_password(username, new_password)
+    def change_password(self, username: str, password: str) -> bool:
+        return self.role_manager.change_password(username, password)
 
     # ------------------------------------------------------------------
     # Operações relativas a grupos para um usuário

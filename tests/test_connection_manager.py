@@ -103,3 +103,34 @@ def test_per_thread_connections(monkeypatch):
 
     assert len(results) == 2
     assert results[0] is not results[1]
+
+
+def test_connect_to_env_password(monkeypatch):
+    cm = ConnectionManager()
+
+    config = {"databases": [{"name": "p", "host": "h", "user": "u", "dbname": "d"}]}
+    monkeypatch.setattr(
+        "gerenciador_postgres.connection_manager.load_config", lambda: config
+    )
+    monkeypatch.setenv("P_PASSWORD", "secret")
+
+    captured = {}
+
+    class DummyPool:
+        def __init__(self, *args, **kwargs):
+            captured.update(kwargs)
+
+        def getconn(self):
+            return MagicMock()
+
+        def putconn(self, conn):
+            pass
+
+    monkeypatch.setattr(
+        "gerenciador_postgres.connection_manager.SimpleConnectionPool",
+        lambda *a, **k: DummyPool(*a, **k),
+    )
+
+    cm.connect_to("p")
+    assert captured["password"] == "secret"
+    cm.disconnect("p")
