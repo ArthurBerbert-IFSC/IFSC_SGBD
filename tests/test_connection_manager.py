@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import threading
 from unittest.mock import MagicMock
 import pytest
 from psycopg2 import OperationalError
@@ -22,7 +23,7 @@ def test_get_connection_active():
     cm = ConnectionManager()
     mock_conn = MagicMock()
     mock_conn.closed = 0
-    cm._conn = mock_conn
+    cm._thread_local.current_conn = mock_conn
     assert cm.get_connection() is mock_conn
 
 
@@ -30,7 +31,7 @@ def test_get_connection_inactive():
     cm = ConnectionManager()
     mock_conn = MagicMock()
     mock_conn.closed = 1
-    cm._conn = mock_conn
+    cm._thread_local.current_conn = mock_conn
     with pytest.raises(ConnectionError):
         cm.get_connection()
 
@@ -57,10 +58,48 @@ def test_context_manager_auto_disconnect():
     cm = ConnectionManager()
     mock_conn = MagicMock()
     mock_conn.closed = 0
-    cm._conn = mock_conn
+    cm._thread_local.current_conn = mock_conn
 
     with cm as conn:
         assert conn is mock_conn
 
     mock_conn.close.assert_called_once()
-    assert cm._conn is None
+    assert getattr(cm._thread_local, "current_conn", None) is None
+
+
+def test_per_thread_connections(monkeypatch):
+    cm = ConnectionManager()
+
+    config = {"databases": [{"name": "p", "host": "h", "user": "u", "dbname": "d"}]}
+    monkeypatch.setattr(
+        "gerenciador_postgres.connection_manager.load_config", lambda: config
+    )
+
+    conns = [MagicMock(), MagicMock()]
+
+    class DummyPool:
+        def getconn(self):
+            return conns.pop(0)
+
+        def putconn(self, conn):
+            pass
+
+    monkeypatch.setattr(
+        "gerenciador_postgres.connection_manager.SimpleConnectionPool", lambda *a, **k: DummyPool()
+    )
+
+    results = []
+
+    def worker():
+        conn = cm.connect_to("p")
+        results.append(conn)
+        cm.disconnect("p")
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(results) == 2
+    assert results[0] is not results[1]
