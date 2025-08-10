@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea
-from PyQt6.QtWidgets import QStatusBar, QMessageBox
+from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from pathlib import Path
 from .connection_dialog import ConnectionDialog
@@ -15,6 +16,21 @@ from ..controllers import (
     AuditController,
 )
 from ..logger import setup_logger
+
+
+class ConnectThread(QThread):
+    finished = pyqtSignal(object)
+
+    def __init__(self, params):
+        super().__init__()
+        self.params = params
+
+    def run(self):
+        try:
+            ConnectionManager().connect(**self.params)
+            self.finished.emit(None)
+        except Exception as e:
+            self.finished.emit(e)
 
 
 class MainWindow(QMainWindow):
@@ -139,63 +155,78 @@ class MainWindow(QMainWindow):
         def handle_accept():
             params = dlg.get_connection_params()
             sub_window.close()
-            try:
-                ConnectionManager().connect(**params)
-                self.db_manager = DBManager(lambda: ConnectionManager().connect(**params))
 
-                # Inicializar audit_manager primeiro
-                self.audit_manager = AuditManager(self.db_manager, self.logger)
-                self.audit_controller = AuditController(self.audit_manager, self.logger)
+            self._progress = QProgressDialog(
+                "Conectando ao banco de dados...", None, 0, 0, self
+            )
+            self._progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+            self._progress.setCancelButton(None)
+            self._progress.setMinimumDuration(0)
+            self._progress.show()
 
-                # Passar audit_manager para os outros managers
-                self.role_manager = RoleManager(
-                    self.db_manager, self.logger,
-                    operador=params['user'],
-                    audit_manager=self.audit_manager
-                )
-                self.users_controller = UsersController(self.role_manager)
-                self.groups_controller = GroupsController(self.role_manager)
+            self._connect_thread = ConnectThread(params)
 
-                self.schema_manager = SchemaManager(
-                    self.db_manager, self.logger,
-                    operador=params['user'],
-                    audit_manager=self.audit_manager
-                )
-                self.schema_controller = SchemaController(self.schema_manager, self.logger)
+            def finalize(error):
+                self._progress.close()
+                if error is None:
+                    self.db_manager = DBManager(lambda: ConnectionManager().connect(**params))
 
-                self.menuGerenciar.setEnabled(True)
-                self.statusbar.showMessage(
-                    f"Conectado a {params['dbname']} como {params['user']}"
-                )
+                    # Inicializar audit_manager primeiro
+                    self.audit_manager = AuditManager(self.db_manager, self.logger)
+                    self.audit_controller = AuditController(self.audit_manager, self.logger)
 
-                # Registrar login na auditoria
-                self.audit_manager.log_operation(
-                    operador=params['user'],
-                    operacao='LOGIN',
-                    objeto_tipo='SYSTEM',
-                    objeto_nome='database_connection',
-                    detalhes={
-                        'database': params['dbname'],
-                        'host': params['host'],
-                        'port': params.get('port', 5432)
-                    },
-                    sucesso=True
-                )
+                    # Passar audit_manager para os outros managers
+                    self.role_manager = RoleManager(
+                        self.db_manager, self.logger,
+                        operador=params['user'],
+                        audit_manager=self.audit_manager
+                    )
+                    self.users_controller = UsersController(self.role_manager)
+                    self.groups_controller = GroupsController(self.role_manager)
 
-                QMessageBox.information(
-                    self, "Conexão bem-sucedida", f"Conectado ao banco {params['dbname']}.")
-            except Exception as e:
-                ConnectionManager().disconnect()
-                self.db_manager = None
-                self.role_manager = None
-                self.users_controller = None
-                self.schema_manager = None
-                self.schema_controller = None
-                self.audit_manager = None
-                self.audit_controller = None
-                self.menuGerenciar.setEnabled(False)
-                self.statusbar.showMessage("Não conectado")
-                QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {e}")
+                    self.schema_manager = SchemaManager(
+                        self.db_manager, self.logger,
+                        operador=params['user'],
+                        audit_manager=self.audit_manager
+                    )
+                    self.schema_controller = SchemaController(self.schema_manager, self.logger)
+
+                    self.menuGerenciar.setEnabled(True)
+                    self.statusbar.showMessage(
+                        f"Conectado a {params['dbname']} como {params['user']}"
+                    )
+
+                    # Registrar login na auditoria
+                    self.audit_manager.log_operation(
+                        operador=params['user'],
+                        operacao='LOGIN',
+                        objeto_tipo='SYSTEM',
+                        objeto_nome='database_connection',
+                        detalhes={
+                            'database': params['dbname'],
+                            'host': params['host'],
+                            'port': params.get('port', 5432)
+                        },
+                        sucesso=True
+                    )
+
+                    QMessageBox.information(
+                        self, "Conexão bem-sucedida", f"Conectado ao banco {params['dbname']}.")
+                else:
+                    ConnectionManager().disconnect()
+                    self.db_manager = None
+                    self.role_manager = None
+                    self.users_controller = None
+                    self.schema_manager = None
+                    self.schema_controller = None
+                    self.audit_manager = None
+                    self.audit_controller = None
+                    self.menuGerenciar.setEnabled(False)
+                    self.statusbar.showMessage("Não conectado")
+                    QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
+
+            self._connect_thread.finished.connect(finalize)
+            self._connect_thread.start()
 
         def handle_reject():
             sub_window.close()
