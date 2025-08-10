@@ -4,6 +4,9 @@ from psycopg2.extensions import connection
 from contextlib import contextmanager
 from .data_models import User, Group
 from typing import Optional, List, Dict, Set, Callable
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 PRIVILEGE_WHITELIST = {
@@ -133,18 +136,24 @@ class DBManager:
                         sql.Identifier(group_name)
                     )
                 )
-            except Exception:
-                # Prossegue mesmo que não haja objetos
-                pass
+            except psycopg2.Error as e:
+                # Prossegue mesmo que o grupo não possua objetos próprios
+                logger.debug(
+                    "Sem objetos para reatribuir do grupo %s: %s", group_name, e
+                )
 
             # 2) Remover privilégios concedidos ao grupo no banco atual
             try:
                 cur.execute(
                     sql.SQL("DROP OWNED BY {}" ).format(sql.Identifier(group_name))
                 )
-            except Exception:
+            except psycopg2.Error as e:
                 # Alguns bancos/versões podem restringir; seguimos com o melhor esforço
-                pass
+                logger.debug(
+                    "Não foi possível remover privilégios do grupo %s: %s",
+                    group_name,
+                    e,
+                )
 
             # 3) Revogar o grupo de quaisquer membros restantes (defensivo)
             cur.execute(
@@ -164,8 +173,13 @@ class DBManager:
                             sql.Identifier(group_name), sql.Identifier(member_name)
                         )
                     )
-                except Exception:
-                    pass
+                except psycopg2.Error as e:
+                    logger.warning(
+                        "Falha ao revogar membro %s do grupo %s: %s",
+                        member_name,
+                        group_name,
+                        e,
+                    )
 
             # 4) Finalmente, excluir o role do grupo
             cur.execute(sql.SQL("DROP ROLE {}" ).format(sql.Identifier(group_name)))
