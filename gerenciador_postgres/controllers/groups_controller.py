@@ -73,5 +73,11 @@ class GroupsController(QObject):
             self.data_changed.emit()
         return success
 
+    def alter_default_privileges(self, group_name: str, schema: str, obj_type: str, privileges):
+        success = self.role_manager.alter_default_privileges(group_name, schema, obj_type, privileges)
+        if success:
+            self.data_changed.emit()
+        return success
+
     def get_current_database(self):
         return self.role_manager.dao.conn.get_dsn_parameters().get("dbname")

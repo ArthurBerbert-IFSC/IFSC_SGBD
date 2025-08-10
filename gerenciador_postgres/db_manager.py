@@ -346,6 +346,55 @@ class DBManager:
                     )
                 )
 
+    def alter_default_privileges(
+        self, group: str, schema: str, obj_type: str, privileges: Set[str]
+    ):
+        """Atualiza ``ALTER DEFAULT PRIVILEGES`` para novos objetos.
+
+        Parameters
+        ----------
+        group : str
+            Role a receber os privilégios padrão.
+        schema : str
+            Schema onde os objetos serão criados.
+        obj_type : str
+            Tipo de objeto (``tables``, ``sequences``, ``functions`` ou ``types``).
+        privileges : Set[str]
+            Conjunto de privilégios a conceder. Se vazio, remove todos.
+        """
+
+        type_map = {
+            "tables": sql.SQL("TABLES"),
+            "sequences": sql.SQL("SEQUENCES"),
+            "functions": sql.SQL("FUNCTIONS"),
+            "types": sql.SQL("TYPES"),
+        }
+        if obj_type not in type_map:
+            raise ValueError(
+                "obj_type deve ser 'tables', 'sequences', 'functions' ou 'types'"
+            )
+
+        identifier = sql.Identifier(schema)
+        obj_keyword = type_map[obj_type]
+        with self.conn.cursor() as cur:
+            # Remove privilégios anteriores
+            cur.execute(
+                sql.SQL(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA {} REVOKE ALL ON {} FROM {}"
+                ).format(identifier, obj_keyword, sql.Identifier(group))
+            )
+            if privileges:
+                cur.execute(
+                    sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT {} ON {} TO {}"
+                    ).format(
+                        identifier,
+                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                        obj_keyword,
+                        sql.Identifier(group),
+                    )
+                )
+
     # Métodos de schema
     def create_schema(self, schema_name: str, owner: str | None = None):
         with self.conn.cursor() as cur:
