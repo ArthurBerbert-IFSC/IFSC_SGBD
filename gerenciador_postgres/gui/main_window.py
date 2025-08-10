@@ -8,7 +8,6 @@ from ..role_manager import RoleManager
 from ..schema_manager import SchemaManager
 from ..audit_manager import AuditManager
 from ..connection_manager import ConnectionManager
-from ..config_manager import load_config
 from ..controllers import (
     UsersController,
     GroupsController,
@@ -138,17 +137,11 @@ class MainWindow(QMainWindow):
         sub_window = self.mdi.addSubWindow(dlg)
 
         def handle_accept():
-            profile = dlg.get_profile()
+            params = dlg.get_connection_params()
             sub_window.close()
-            config = load_config()
-            profiles = {db['name']: db for db in config.get('databases', [])}
-            params = profiles.get(profile)
-            if not params:
-                QMessageBox.critical(self, "Erro", f"Perfil '{profile}' não encontrado na configuração.")
-                return
             try:
-                ConnectionManager().connect_to(profile)
-                self.db_manager = DBManager(lambda: ConnectionManager().connect_to(profile))
+                ConnectionManager().connect(**params)
+                self.db_manager = DBManager(lambda: ConnectionManager().connect(**params))
 
                 # Inicializar audit_manager primeiro
                 self.audit_manager = AuditManager(self.db_manager, self.logger)
@@ -192,7 +185,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(
                     self, "Conexão bem-sucedida", f"Conectado ao banco {params['dbname']}.")
             except Exception as e:
-                ConnectionManager().disconnect(profile)
+                ConnectionManager().disconnect()
                 self.db_manager = None
                 self.role_manager = None
                 self.users_controller = None
