@@ -3,7 +3,8 @@ from __future__ import annotations
 import platform
 from pathlib import Path
 
-from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR
+from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR, Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QGridLayout,
     QGroupBox,
@@ -36,6 +37,14 @@ class InitialPanel(QWidget):
         layout.setSpacing(10)
         self.setLayout(layout)
 
+        assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        banner = QLabel(self)
+        pixmap = QPixmap(str(assets_dir / "principal.jpeg"))
+        if not pixmap.isNull():
+            banner.setPixmap(pixmap.scaledToHeight(120, Qt.TransformationMode.SmoothTransformation))
+        banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(banner, 0, 0, 1, 2)
+
         self.app_box = QGroupBox("Aplicativo", self)
         self.env_box = QGroupBox("Ambiente", self)
         self.db_box = QGroupBox("Banco de Dados", self)
@@ -43,11 +52,14 @@ class InitialPanel(QWidget):
 
         for box in (self.app_box, self.env_box, self.db_box, self.check_box):
             box.setLayout(QVBoxLayout())
+            box.setStyleSheet(
+                "QGroupBox {background-color: #f9f9f9; border: 1px solid #d3d3d3; border-radius: 5px;}"
+            )
 
-        layout.addWidget(self.app_box, 0, 0)
-        layout.addWidget(self.env_box, 0, 1)
-        layout.addWidget(self.db_box, 1, 0)
-        layout.addWidget(self.check_box, 1, 1)
+        layout.addWidget(self.app_box, 1, 0)
+        layout.addWidget(self.env_box, 1, 1)
+        layout.addWidget(self.db_box, 2, 0)
+        layout.addWidget(self.check_box, 2, 1)
         layout.setColumnStretch(0, 1)
         layout.setColumnStretch(1, 1)
 
