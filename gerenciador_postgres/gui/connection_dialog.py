@@ -13,10 +13,13 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QPushButton,
     QInputDialog,
+    QCheckBox,
 )
 from pathlib import Path
 import logging
+import keyring
 from ..config_manager import load_config, save_config
+from ..connection_manager import resolve_password
 
 
 class _TaskRunner(QThread):
@@ -36,6 +39,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.setModal(True)
         self.resize(400, 200)
         self.profiles = {}
+        self._keyring_warning_shown = False
         self._setup_ui()
         self._load_profiles()
 
@@ -87,7 +91,16 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.btnTogglePassword = QPushButton("Mostrar")
         self.btnTogglePassword.setText("Mostrar")
         pwd_layout.addWidget(self.btnTogglePassword)
+        self.chkSavePassword = QCheckBox("Salvar senha (keyring)")
+        pwd_layout.addWidget(self.chkSavePassword)
+        self.btnDeleteSaved = QPushButton("Apagar senha salva")
+        self.btnDeleteSaved.setEnabled(False)
+        pwd_layout.addWidget(self.btnDeleteSaved)
         layout.addLayout(pwd_layout)
+
+        self.lblStored = QLabel("Senha armazenada no sistema")
+        self.lblStored.setVisible(False)
+        layout.addWidget(self.lblStored)
 
         self.btnTest = QPushButton("Testar conexão")
         layout.addWidget(self.btnTest)
@@ -105,6 +118,8 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.btnDelete.clicked.connect(self.delete_current_profile)
         self.btnTogglePassword.clicked.connect(self.toggle_password_visibility)
         self.btnTest.clicked.connect(self.test_connection)
+        self.btnDeleteSaved.clicked.connect(self.delete_saved_password)
+        self.txtUser.textChanged.connect(self.update_password_indicator)
 
     def _load_profiles(self):
         config = load_config()
@@ -113,6 +128,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.cmbProfiles.clear()
         self.cmbProfiles.addItems(self.profiles.keys())
         self.cmbProfiles.setCurrentText(current)
+        self.update_password_indicator()
 
     def load_selected_profile(self):
         name = self.cmbProfiles.currentText()
@@ -126,6 +142,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.txtUser.setText(profile.get("user", ""))
         self.spnPort.setValue(profile.get("port", 5432))
         self.txtPassword.setText("")
+        self.update_password_indicator()
 
     def save_current_profile(self):
         profile = {
@@ -152,6 +169,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self._load_profiles()
         self.cmbProfiles.setCurrentText(name)
         QMessageBox.information(self, "Perfil salvo", f"Perfil '{name}' salvo com sucesso.")
+        self._maybe_save_password()
 
     def delete_current_profile(self):
         name = self.cmbProfiles.currentText().strip()
@@ -192,7 +210,82 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
             conn = mgr.connect(**self.get_connection_params())
             conn.close()
             QMessageBox.information(self, "Sucesso", "Conexão estabelecida")
+            self._maybe_save_password()
         except Exception as e:
             QMessageBox.warning(self, "Falha", str(e))
+
+    # ------------------------------------------------------------------
+    def _show_keyring_unavailable(self):
+        if not self._keyring_warning_shown:
+            QMessageBox.warning(
+                self,
+                "Aviso",
+                "Armazenamento seguro indisponível neste sistema. Use variável de ambiente ou digite a senha ao conectar.",
+            )
+            self._keyring_warning_shown = True
+        self.chkSavePassword.setEnabled(False)
+        self.btnDeleteSaved.setEnabled(False)
+        self.lblStored.setVisible(False)
+
+    # ------------------------------------------------------------------
+    def update_password_indicator(self):
+        profile = self.cmbProfiles.currentText()
+        user = self.txtUser.text()
+        if not profile or not user:
+            self.lblStored.setVisible(False)
+            self.btnDeleteSaved.setEnabled(False)
+            return
+        stored = resolve_password(profile, user)
+        self.lblStored.setVisible(stored is not None)
+        try:
+            has_ring = keyring.get_password("IFSC_SGBD", user) is not None
+        except Exception:
+            self._show_keyring_unavailable()
+            return
+        self.btnDeleteSaved.setEnabled(has_ring)
+
+    # ------------------------------------------------------------------
+    def _maybe_save_password(self):
+        if not self.chkSavePassword.isChecked():
+            return
+        password = self.txtPassword.text()
+        user = self.txtUser.text()
+        if not password or not user:
+            return
+        try:
+            keyring.set_password("IFSC_SGBD", user, password)
+            QMessageBox.information(
+                self, "Sucesso", "Senha armazenada com segurança no sistema."
+            )
+            self.update_password_indicator()
+        except Exception:
+            self._show_keyring_unavailable()
+
+    # ------------------------------------------------------------------
+    def delete_saved_password(self):
+        user = self.txtUser.text()
+        if not user:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Confirmar",
+            f"Remover senha armazenada do usuário {user}?",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            keyring.delete_password("IFSC_SGBD", user)
+            QMessageBox.information(
+                self,
+                "Sucesso",
+                f"Senha removida do armazenamento do sistema para o usuário {user}.",
+            )
+        except keyring.errors.PasswordDeleteError:
+            QMessageBox.warning(
+                self, "Aviso", "Nenhuma senha salva para este usuário."
+            )
+        except Exception:
+            self._show_keyring_unavailable()
+        self.update_password_indicator()
 
     # A conexão é realizada pela MainWindow; este diálogo apenas coleta parâmetros.
