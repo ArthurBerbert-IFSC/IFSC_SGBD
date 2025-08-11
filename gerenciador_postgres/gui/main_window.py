@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self.actionUsuarios = QAction("Usuários", self)
         self.actionGrupos = QAction("Grupos", self)
         self.actionAmbientes = QAction("Ambientes (Schemas)", self)
+        self.actionSqlConsole = QAction("Console SQL", self)
 
         # Ações do menu Ajuda
         self.actionAjuda = QAction("Ajuda", self)
@@ -94,6 +95,7 @@ class MainWindow(QMainWindow):
         self.actionUsuarios.triggered.connect(self.on_usuarios)
         self.actionGrupos.triggered.connect(self.on_grupos)
         self.actionAmbientes.triggered.connect(self.on_schemas)
+        self.actionSqlConsole.triggered.connect(self.on_sql_console)
 
         self.actionAjuda.triggered.connect(self.show_help)
         self.actionSobre.triggered.connect(self.show_about)
@@ -110,6 +112,7 @@ class MainWindow(QMainWindow):
         self.menuGerenciar.addAction(self.actionUsuarios)
         self.menuGerenciar.addAction(self.actionGrupos)
         self.menuGerenciar.addAction(self.actionAmbientes)
+        self.menuGerenciar.addAction(self.actionSqlConsole)
         self.menuGerenciar.setEnabled(False) # Começa desabilitado
 
         # Menu Ajuda
@@ -298,4 +301,19 @@ class MainWindow(QMainWindow):
             sub_window.show()
         else:
             QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar schemas.")
+
+    def on_sql_console(self):
+        from .sql_console_view import SQLConsoleView
+        if self.db_manager:
+            self.stacked_widget.setCurrentWidget(self.mdi)
+            console = SQLConsoleView(self.db_manager, self)
+            sub_window = self.mdi.addSubWindow(console)
+            self.opened_windows.append(sub_window)
+            sub_window.show()
+        else:
+            QMessageBox.warning(
+                self,
+                "Não Conectado",
+                "Você precisa estar conectado a um banco de dados para executar SQL.",
+            )
     
