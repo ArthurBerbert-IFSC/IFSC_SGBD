@@ -8,7 +8,7 @@ databases:
 - dbname: Campus_Mauro_Ramos_db
   host: 172.16.0.228
   name: Geral
-  password_env: GERAL_PASSWORD
+  password: GeoIFSC2025
   port: 5432
   user: postgres
 group_prefix: grp_
