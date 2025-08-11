@@ -3,6 +3,7 @@ from .data_models import User, Group
 from typing import Optional, List, Dict, Set
 import logging
 import unicodedata
+import re
 from psycopg2 import sql
 from .config_manager import load_config
 
@@ -15,6 +16,8 @@ class RoleManager:
         self.audit_manager = audit_manager
 
     def create_user(self, username: str, password: str, valid_until: str | None = None) -> str:
+        # Sanitização do username fornecido direto (fluxo criação individual)
+        username = self._sanitize_username(username)
         dados_antes = None
         dados_depois = None
         sucesso = False
@@ -91,6 +94,8 @@ class RoleManager:
         """
 
         if group_name:
+            # Sanitiza nome de grupo recebido (UI já deveria adicionar prefixo, mas garantimos)
+            group_name = self._sanitize_group_name(group_name)
             try:
                 if group_name not in self.list_groups():
                     self.create_group(group_name)
@@ -113,11 +118,12 @@ class RoleManager:
             tentativa = 0
             while True:
                 if tentativa == 0:
-                    username = first
+                    candidate = first
                 elif tentativa == 1:
-                    username = f"{first}.{last}" if last else first
+                    candidate = f"{first}.{last}" if last else first
                 else:
-                    username = f"{first}.{last}{tentativa}" if last else f"{first}{tentativa}"
+                    candidate = f"{first}.{last}{tentativa}" if last else f"{first}{tentativa}"
+                username = self._sanitize_username(candidate)
                 # Checagem prévia para evitar exceção de duplicidade e acelerar a próxima tentativa
                 try:
                     user_exists = self.dao.find_user_by_name(username)
@@ -296,8 +302,8 @@ class RoleManager:
         try:
             config = load_config()
             prefix = config.get("group_prefix", "grp_")
-            if not group_name.startswith(prefix):
-                raise ValueError(f"Nome de grupo deve começar com '{prefix}'.")
+            # Sanitiza e aplica prefixo automaticamente
+            group_name = self._sanitize_group_name(group_name, prefix=prefix)
             if group_name in self.dao.list_groups():
                 raise ValueError(f"Grupo '{group_name}' já existe.")
             with self.dao.transaction():
@@ -577,3 +583,53 @@ class RoleManager:
                 f"[{self.operador}] Falha ao aplicar template '{template}' ao grupo '{group_name}': {e}"
             )
             return False
+
+    # ------------------------------------------------------------------
+    # Sanitização
+    # ------------------------------------------------------------------
+    _RE_VALID = re.compile(r"[^a-z0-9_\.]+")
+
+    def _truncate_identifier(self, name: str, limit: int = 63) -> str:
+        if len(name) <= limit:
+            return name
+        return name[:limit]
+
+    def _basic_normalize(self, text: str) -> str:
+        # Remove acentos e normaliza espaços
+        text = unicodedata.normalize('NFKD', text)
+        text = text.encode('ascii', 'ignore').decode('ascii')
+        text = text.lower().strip()
+        return text
+
+    def _sanitize_username(self, username: str) -> str:
+        username = self._basic_normalize(username)
+        username = username.replace('-', '_').replace(' ', '_')
+        username = self._RE_VALID.sub('_', username)
+        username = re.sub(r'_+', '_', username)
+        username = username.strip('_')
+        if not username:
+            raise ValueError("Username inválido após sanitização.")
+        username = self._truncate_identifier(username)
+        return username
+
+    def _sanitize_group_name(self, group_name: str, prefix: str | None = None) -> str:
+        group_name = self._basic_normalize(group_name)
+        group_name = group_name.replace('-', '_').replace(' ', '_')
+        group_name = self._RE_VALID.sub('_', group_name)
+        group_name = re.sub(r'_+', '_', group_name)
+        group_name = group_name.strip('_')
+        if not group_name:
+            raise ValueError("Nome de grupo inválido após sanitização.")
+        if prefix:
+            if not group_name.startswith(prefix):
+                # Evita duplicar prefixo se usuário digitou algo parecido
+                if group_name.startswith(prefix.rstrip('_')):
+                    # ex: prefix=grp_ e name inicia com 'grp' sem underscore
+                    group_name = group_name[len(prefix.rstrip('_')):]
+                group_name = f"{prefix}{group_name}" if not group_name.startswith(prefix) else group_name
+        else:
+            # fallback padrão
+            if not group_name.startswith('grp_'):
+                group_name = f"grp_{group_name}"
+        group_name = self._truncate_identifier(group_name)
+        return group_name
