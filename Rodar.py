@@ -36,21 +36,23 @@ def setup_logging():
 
 def main():
     logger = setup_logging()
-    
-    try:
-        logger.info("Iniciando aplicação Gerenciador PostgreSQL")
+    logger.info("Iniciando aplicação Gerenciador PostgreSQL")
 
+    # Crie o QApplication ANTES de qualquer QMessageBox
+    app = QApplication(sys.argv)
+    app.setApplicationName("Gerenciador PostgreSQL")
+    app.setApplicationVersion("1.0.0")
+
+    try:
+        # Carregar/validar config já com QApplication existente
         try:
             cfg = load_config()
             validate_config(cfg)
         except ValueError as e:
+            logging.getLogger(__name__).error("Configuração inválida: %s", e)
             QMessageBox.critical(None, "Configuração inválida", str(e))
-            return
+            return 1
 
-        app = QApplication(sys.argv)
-        app.setApplicationName("Gerenciador PostgreSQL")
-        app.setApplicationVersion("1.0.0")
-        
         assets_dir = Path(__file__).resolve().parent / "assets"
         
         # Verificar e definir ícone
@@ -77,9 +79,11 @@ def main():
         if not splash_path.exists() or pixmap is None or (pixmap and pixmap.isNull()):
             try:
                 assets_dir.mkdir(exist_ok=True)
-                subprocess.run([
-                    sys.executable, str(assets_dir / "create_splash.py")
-                ], check=True, timeout=30)
+                subprocess.run(
+                    [sys.executable, str(assets_dir / "create_splash.py")],
+                    check=True,
+                    timeout=30
+                )
                 pixmap = QPixmap(str(splash_path))
                 logger.info("Splash criado com sucesso")
             except Exception as e:
@@ -102,33 +106,33 @@ def main():
             QTimer.singleShot(1500, lambda: splash.finish(window))
 
         logger.info("Aplicação iniciada com sucesso")
-        sys.exit(app.exec())
+        return app.exec()
 
     except ImportError as e:
-        error_msg = f"Erro de importação: {e}\n\nVerifique se as dependências estão instaladas:\npip install PyQt6 psycopg2-binary PyYAML keyring"
+        error_msg = (
+            f"Erro de importação: {e}\n\n"
+            "Verifique se as dependências estão instaladas:\n"
+            "pip install PyQt6 psycopg2-binary PyYAML keyring"
+        )
         logger.error(error_msg)
-        
         try:
             QMessageBox.critical(None, "Erro de Dependências", error_msg)
-        except:
+        except Exception:
             print(error_msg)
-        
-        sys.exit(1)
+        return 1
 
     except Exception as e:
         error_msg = f"Erro crítico na inicialização: {e}"
         logger.critical(error_msg)
-        
         try:
             QMessageBox.critical(None, "Erro Crítico", error_msg)
-        except:
+        except Exception:
             print(error_msg)
-        
-        sys.exit(1)
+        return 1
 
     finally:
         logger.info("Encerrando aplicação")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
