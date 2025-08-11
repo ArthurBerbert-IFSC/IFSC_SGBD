@@ -63,6 +63,8 @@ def _friendly_error(exc: OperationalError) -> OperationalError:
         new_msg = "Sem rota até o host; verificar rede/firewall/VPN"
     elif "could not translate host name" in msg:
         new_msg = "Host inválido ou DNS indisponível"
+    elif "no password supplied" in msg or "fe_sendauth" in msg:
+        new_msg = "Senha não fornecida. Digite a senha ou configure uma variável de ambiente/keyring."
     elif "authentication failed" in msg or "password authentication failed" in msg:
         new_msg = "Usuário/senha inválidos ou método no pg_hba.conf"
     elif "ssl" in msg and "handshake" in msg:
@@ -162,6 +164,19 @@ class ConnectionManager:
         """
         if not logging.getLogger('app').handlers:
             setup_logger()
+
+        # Permite que chamadores passem o nome do perfil para resolução de senha
+        profile_name = params.pop("profile_name", None)
+        user = params.get("user")
+        # Se senha não foi fornecida, tenta resolver por variável de ambiente ou keyring
+        if "password" not in params and profile_name and user:
+            try:
+                resolved = resolve_password(profile_name, user)
+                if resolved:
+                    params["password"] = resolved
+            except Exception:
+                # Silencioso: queda para tentativa direta sem senha (pode falhar e será tratado)
+                pass
 
         timeout = int(params.pop("connect_timeout", load_config().get("connect_timeout", 5)) or 5)
         logger.info(

@@ -23,7 +23,7 @@ class StudentsView(QWidget):
     def __init__(self, parent=None, controller=None):
         super().__init__(parent)
         assets_dir = Path(__file__).resolve().parents[2] / "assets"
-        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
+        self.setWindowIcon(QIcon(str(assets_dir / "usuarios.jpeg")))
         self.controller = controller
         self._setup_ui()
         self._connect_signals()

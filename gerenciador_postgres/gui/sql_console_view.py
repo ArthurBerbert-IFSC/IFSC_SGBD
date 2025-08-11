@@ -18,7 +18,7 @@ class SQLConsoleView(QWidget):
     def __init__(self, db_manager: DBManager, parent: QWidget | None = None):
         super().__init__(parent)
         assets_dir = Path(__file__).resolve().parents[2] / "assets"
-        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
+        self.setWindowIcon(QIcon(str(assets_dir / "auditoria.jpeg")))
         self.setWindowTitle("Console SQL")
         self.db_manager = db_manager
         self._setup_ui()

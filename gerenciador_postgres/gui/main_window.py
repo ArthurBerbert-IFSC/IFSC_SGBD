@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         assets_dir = Path(__file__).resolve().parents[2] / "assets"
-        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
+        self.setWindowIcon(QIcon(str(assets_dir / "principal_2.png")))
         self.setWindowTitle("Gerenciador PostgreSQL")
         self.resize(900, 600)
         self._setup_menu()
@@ -172,12 +172,16 @@ class MainWindow(QMainWindow):
         self._progress.setMinimumDuration(0)
         self._progress.show()
 
+        # Inclui o nome do perfil (se houver) para resolução de senha no ConnectionManager
+        profile_name = dlg.cmbProfiles.currentText().strip() if hasattr(dlg, 'cmbProfiles') else None
+        if profile_name:
+            params["profile_name"] = profile_name
         self._connect_thread = ConnectThread(params)
         self._connect_in_progress = True
         self._connect_timeout_timer = QTimer(self)
         self._connect_timeout_timer.setSingleShot(True)
 
-        def finalize_success(_):
+        def finalize_success(bg_conn):
             if not getattr(self, "_connect_in_progress", False):
                 return
             self._connect_in_progress = False
@@ -186,6 +190,12 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._progress.close()
+            # Fecha a conexão de teste criada no thread em background
+            try:
+                if bg_conn:
+                    bg_conn.close()
+            except Exception:
+                pass
             try:
                 ui_conn = ConnectionManager().connect(**params)
             except Exception as e:

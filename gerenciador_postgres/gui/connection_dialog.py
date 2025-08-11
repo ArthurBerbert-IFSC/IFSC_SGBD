@@ -34,7 +34,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
     def __init__(self, parent=None):
         super().__init__(parent)
         assets_dir = Path(__file__).resolve().parents[2] / "assets"
-        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
+        self.setWindowIcon(QIcon(str(assets_dir / "conexao.jpeg")))
         self.setWindowTitle("Conectar ao Banco de Dados")
         self.setModal(True)
         self.resize(400, 200)
@@ -200,6 +200,8 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
             "user": user,
             "port": self.spnPort.value(),
         }
+        if profile_name:
+            params["profile_name"] = profile_name
         pwd_field = self.txtPassword.text()
         if pwd_field:
             params["password"] = pwd_field
@@ -216,8 +218,12 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
 
         mgr = ConnectionManager()
         try:
-            conn = mgr.connect(**self.get_connection_params())
-            conn.close()
+            params = self.get_connection_params()
+            conn = mgr.connect(**params)
+            try:
+                conn.close()
+            except Exception:
+                pass
             QMessageBox.information(self, "Sucesso", "Conexão estabelecida")
             self._maybe_save_password()
         except Exception as e:
