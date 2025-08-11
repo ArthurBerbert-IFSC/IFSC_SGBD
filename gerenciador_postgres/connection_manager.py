@@ -19,6 +19,7 @@ from psycopg2.extensions import connection
 from psycopg2.pool import SimpleConnectionPool
 
 from .config_manager import load_config
+from .logger import setup_logger
 
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,8 @@ class ConnectionManager:
         *thread* para um determinado perfil obtém uma conexão do pool e as
         próximas chamadas reutilizam a mesma instância.
         """
+        if not logging.getLogger('app').handlers:
+            setup_logger()
 
         config = load_config()
         profiles = {db["name"]: db for db in config.get("databases", [])}
@@ -114,6 +117,8 @@ class ConnectionManager:
         Conecta ao PostgreSQL com suporte a connect_timeout (segundos).
         Ex.: host, port, dbname, user, password, sslmode, connect_timeout.
         """
+        if not logging.getLogger('app').handlers:
+            setup_logger()
 
         timeout = int(params.pop("connect_timeout", 5) or 5)
         logger.info(

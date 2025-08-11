@@ -32,6 +32,9 @@ O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possív
 - `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"grp_"`).
 - `schema_creation_group`: nome do grupo autorizado a criar schemas (padrão `"Professores"`).
 
+Os logs são configurados automaticamente na importação do pacote e podem ser
+personalizados editando `config/config.yml`.
+
 Para permitir que outro grupo crie schemas, edite o valor de `schema_creation_group` em `config/config.yml` e reinicie a aplicação.
 
 O caminho informado em `log_path` é convertido para absoluto a partir de `BASE_DIR`, permitindo o uso de caminhos relativos.

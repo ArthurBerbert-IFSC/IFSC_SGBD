@@ -23,3 +23,8 @@ def setup_logger(name: str = 'app'):
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
     return logger
+
+
+# Configure default logger on module import if not already configured
+if not logging.getLogger('app').handlers:
+    setup_logger()
