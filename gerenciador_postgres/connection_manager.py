@@ -22,6 +22,7 @@ from .config_manager import load_config
 
 
 logger = logging.getLogger(__name__)
+logger.propagate = True
 
 
 class ConnectionManager:
