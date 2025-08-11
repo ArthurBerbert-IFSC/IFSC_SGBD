@@ -116,12 +116,24 @@ class ConnectionManager:
         """
 
         timeout = int(params.pop("connect_timeout", 5) or 5)
-        logger.info("Conectando ao PostgreSQL em %s:%s/%s (timeout=%ss)...",
-                    params.get("host"), params.get("port"), params.get("dbname"), timeout)
-        conn = psycopg2.connect(connect_timeout=timeout, **params)
-        conn.autocommit = False
-        logger.info("Conexão aberta.")
-        return conn
+        logger.info(
+            "Conectando ao PostgreSQL em %s:%s/%s (timeout=%ss)...",
+            params.get("host"),
+            params.get("port"),
+            params.get("dbname"),
+            timeout,
+        )
+        try:
+            conn = psycopg2.connect(connect_timeout=timeout, **params)
+            conn.autocommit = False
+            logger.info("Conexão aberta.")
+            return conn
+        except OperationalError:
+            logger.exception("Erro operacional ao conectar ao banco de dados")
+            raise
+        except Exception:
+            logger.exception("Erro inesperado ao conectar ao banco de dados")
+            raise
 
     # ------------------------------------------------------------------
     def get_connection(self) -> connection:
