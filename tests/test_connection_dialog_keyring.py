@@ -60,3 +60,18 @@ def test_delete_password_called(monkeypatch):
 
     dlg.delete_saved_password()
     assert deleted["args"] == ("IFSC_SGBD", "u")
+
+
+def test_accept_triggers_save(monkeypatch):
+    dlg = _make_dialog()
+
+    called = {}
+
+    def fake_save():
+        called["called"] = True
+
+    dlg._maybe_save_password = fake_save
+    monkeypatch.setattr("PyQt6.QtWidgets.QDialog.accept", lambda self: None)
+
+    ConnectionDialog.accept(dlg)
+    assert called.get("called")
