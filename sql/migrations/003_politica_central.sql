@@ -6,7 +6,7 @@ CREATE SCHEMA IF NOT EXISTS admin;  -- owner: superusuário conectado
 CREATE TABLE IF NOT EXISTS admin.acl_schemas(
   schema_name     text PRIMARY KEY,
   allow_functions boolean NOT NULL DEFAULT false,  -- libera EXECUTE em funções
-  use_colab       boolean NOT NULL DEFAULT true    -- concede DML ao papel _colab
+  use_colab       boolean NOT NULL DEFAULT false   -- concede DML ao papel _colab
 );
 
 -- Exemplo de registro (ajustar por turma):

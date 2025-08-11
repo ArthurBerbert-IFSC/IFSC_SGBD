@@ -151,7 +151,7 @@ class PrivilegePolicyService:
                 """
             )
 
-    def policy_add_schema(self, schema: str, allow_functions: bool = False, use_colab: bool = True) -> None:
+    def policy_add_schema(self, schema: str, allow_functions: bool = False, use_colab: bool = False) -> None:
         with self._tx() as cur:
             cur.execute(
                 """
@@ -215,6 +215,13 @@ class PrivilegePolicyService:
                 cur.execute(f"GRANT {self._qident(roles['gestor'])} TO {self._qident(username)}")
             else:
                 raise ValueError(f"Perfil desconhecido: {perfil}")
+
+    def set_user_profile(self, schema: str, username: str, perfil: str) -> None:
+        roles = self._role_names_for_schema(schema)
+        with self._tx() as cur:
+            for r in roles.values():
+                cur.execute(f"REVOKE {self._qident(r)} FROM {self._qident(username)}")
+        self._grant_profile(schema, username, perfil)
 
     def set_user_expiration(self, username: str, expires_at: Optional[str]) -> None:
         with self._tx() as cur:
