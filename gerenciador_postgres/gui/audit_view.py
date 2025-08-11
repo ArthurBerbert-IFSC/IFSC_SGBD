@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QGroupBox, QCheckBox, QSpinBox, QMessageBox, QProgressDialog,
     QHeaderView, QTabWidget
 )
-from PyQt6.QtCore import Qt, QDateTime, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QDateTime, QThread, pyqtSignal, QTimer, QModelIndex
 from PyQt6.QtGui import QIcon, QFont
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -241,7 +241,15 @@ class AuditView(QWidget):
         self.btn_atualizar.clicked.connect(self._load_logs)
         self.btn_exportar.clicked.connect(self._export_logs)
         self.btn_limpar_antigos.clicked.connect(self._cleanup_old_logs)
-        self.table_logs.currentRowChanged.connect(self._on_log_selected)
+        # CORRETO: conectar pelo QItemSelectionModel do QTableWidget
+        sel = self.table_logs.selectionModel()
+        if sel is not None:
+            # evita conexões duplicadas em reapresentações do widget
+            try:
+                sel.currentRowChanged.disconnect()
+            except Exception:
+                pass
+            sel.currentRowChanged.connect(self._on_log_selected_from_index)
         
         # Auto-refresh a cada 30 segundos
         self.auto_refresh_timer = QTimer()
@@ -341,13 +349,13 @@ class AuditView(QWidget):
             self.table_users.setItem(row, 0, QTableWidgetItem(user))
             self.table_users.setItem(row, 1, QTableWidgetItem(str(count)))
     
-    def _on_log_selected(self, current_row, previous_row):
+    def _on_log_selected(self, row: int):
         """Mostra detalhes do log selecionado."""
-        if current_row < 0 or not hasattr(self, 'logs_data'):
+        if row < 0 or not hasattr(self, 'logs_data'):
             self.txt_detalhes.clear()
             return
-        
-        log = self.logs_data[current_row]
+
+        log = self.logs_data[row]
         
         details = []
         details.append(f"ID: {log['id']}")
@@ -374,6 +382,15 @@ class AuditView(QWidget):
             details.append(json.dumps(log['dados_depois'], indent=2, ensure_ascii=False))
         
         self.txt_detalhes.setText("\n".join(details))
+
+    def _on_log_selected_from_index(self, current: QModelIndex, previous: QModelIndex) -> None:
+        """Adapter para o sinal do QItemSelectionModel."""
+        if not current or not current.isValid():
+            return
+        row = current.row()
+        if row < 0:
+            return
+        self._on_log_selected(row)
     
     def _apply_filters(self):
         """Aplica filtros e recarrega dados."""
