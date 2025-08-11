@@ -7,6 +7,7 @@ import subprocess
 import sys
 import logging
 import os
+from gerenciador_postgres.config_manager import load_config, validate_config
 
 
 def setup_logging():
@@ -32,7 +33,14 @@ def main():
     
     try:
         logger.info("Iniciando aplicação Gerenciador PostgreSQL")
-        
+
+        try:
+            cfg = load_config()
+            validate_config(cfg)
+        except ValueError as e:
+            QMessageBox.critical(None, "Configuração inválida", str(e))
+            return
+
         app = QApplication(sys.argv)
         app.setApplicationName("Gerenciador PostgreSQL")
         app.setApplicationVersion("1.0.0")

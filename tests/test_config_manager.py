@@ -1,6 +1,7 @@
 import logging
 import yaml
 import importlib
+import pytest
 
 
 def load_module():
@@ -23,6 +24,7 @@ def test_load_config_creates_file(tmp_path, monkeypatch):
     assert "log_path" in data
     assert data["group_prefix"] == "grp_"
     assert data["schema_creation_group"] == "Professores"
+    assert data["connect_timeout"] == 5
 
 
 def test_load_config_yaml_error(tmp_path, monkeypatch, caplog):
@@ -63,4 +65,11 @@ def test_relative_log_path_resolved(tmp_path, monkeypatch):
     data = cm.load_config()
     expected = cm.BASE_DIR / "logs" / "test.log"
     assert data["log_path"] == str(expected)
+
+
+def test_validate_config(monkeypatch):
+    cm = load_module()
+    invalid = {"databases": [{"name": "A", "host": "h"}]}
+    with pytest.raises(ValueError):
+        cm.validate_config(invalid)
 

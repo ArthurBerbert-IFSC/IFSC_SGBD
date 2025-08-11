@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QComboBox,
     QPushButton,
-    QCheckBox,
+    QInputDialog,
 )
 from pathlib import Path
 import logging
@@ -45,7 +45,6 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         profile_layout = QHBoxLayout()
         profile_layout.addWidget(QLabel("Perfil:"))
         self.cmbProfiles = QComboBox()
-        self.cmbProfiles.setEditable(True)
         profile_layout.addWidget(self.cmbProfiles)
         self.btnSave = QPushButton("Salvar")
         profile_layout.addWidget(self.btnSave)
@@ -89,8 +88,8 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         pwd_layout.addWidget(self.btnTogglePassword)
         layout.addLayout(pwd_layout)
 
-        self.chkSavePassword = QCheckBox("Salvar senha")
-        layout.addWidget(self.chkSavePassword)
+        self.btnTest = QPushButton("Testar conexão")
+        layout.addWidget(self.btnTest)
 
         self.buttonBox = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -104,6 +103,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.btnSave.clicked.connect(self.save_current_profile)
         self.btnDelete.clicked.connect(self.delete_current_profile)
         self.btnTogglePassword.clicked.connect(self.toggle_password_visibility)
+        self.btnTest.clicked.connect(self.test_connection)
 
     def _load_profiles(self):
         config = load_config()
@@ -124,26 +124,24 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.txtDb.setText(profile.get("dbname", ""))
         self.txtUser.setText(profile.get("user", ""))
         self.spnPort.setValue(profile.get("port", 5432))
-        self.txtPassword.setText(profile.get("password", ""))
+        self.txtPassword.setText("")
 
     def save_current_profile(self):
-        name = self.cmbProfiles.currentText().strip()
-        if not name:
-            QMessageBox.warning(self, "Nome inválido", "Informe um nome de perfil.")
-            return
         profile = {
-            "name": name,
             "host": self.txtHost.text(),
             "dbname": self.txtDb.text(),
             "user": self.txtUser.text(),
             "port": self.spnPort.value(),
         }
-        if self.chkSavePassword.isChecked() and self.txtPassword.text():
-            profile["password"] = self.txtPassword.text()
+        name, ok = QInputDialog.getText(self, "Salvar perfil", "Nome do perfil:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        profile["name"] = name
         config = load_config()
         databases = config.get("databases", [])
         for i, db in enumerate(databases):
-            if db["name"] == name:
+            if db.get("name", "").lower() == name.lower():
                 databases[i] = profile
                 break
         else:
@@ -160,7 +158,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
             QMessageBox.warning(self, "Perfil não encontrado", f"Perfil '{name}' não existe.")
             return
         config = load_config()
-        databases = [db for db in config.get("databases", []) if db["name"] != name]
+        databases = [db for db in config.get("databases", []) if db.get("name", "").lower() != name.lower()]
         config["databases"] = databases
         save_config(config)
         self._load_profiles()
@@ -184,5 +182,16 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         if self.txtPassword.text():
             params["password"] = self.txtPassword.text()
         return params
+
+    def test_connection(self):
+        from ..connection_manager import ConnectionManager
+
+        mgr = ConnectionManager()
+        try:
+            conn = mgr.connect(**self.get_connection_params())
+            conn.close()
+            QMessageBox.information(self, "Sucesso", "Conexão estabelecida")
+        except Exception as e:
+            QMessageBox.warning(self, "Falha", str(e))
 
     # A conexão é realizada pela MainWindow; este diálogo apenas coleta parâmetros.

@@ -31,6 +31,7 @@ O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possív
 - `log_path`: caminho do arquivo de log (relativo a `BASE_DIR`).
 - `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"grp_"`).
 - `schema_creation_group`: nome do grupo autorizado a criar schemas (padrão `"Professores"`).
+- `connect_timeout`: tempo máximo (segundos) para tentar conectar ao banco (padrão `5`).
 
 Os logs são configurados automaticamente na importação do pacote e podem ser
 personalizados editando `config/config.yml`.
@@ -41,10 +42,23 @@ O caminho informado em `log_path` é convertido para absoluto a partir de `BASE_
 
 Para sobrepor completamente as configurações, defina a variável de ambiente `IFSC_SGBD_CONFIG_FILE` apontando para um arquivo YAML alternativo ou edite o arquivo `config/config.yml` local.
 
-Senhas de banco de dados **não** devem ser armazenadas no arquivo de configuração. 
-O `ConnectionManager` buscará a senha a partir da variável de ambiente 
-`<NOME_DO_PERFIL>_PASSWORD` (por exemplo, `LOCAL_PASSWORD`) ou do serviço 
+Senhas de banco de dados **não** devem ser armazenadas no arquivo YAML.
+O `ConnectionManager` buscará a senha na variável de ambiente
+`<NOME_DO_PERFIL>_PASSWORD` (por exemplo, `REMOTO_PASSWORD`) ou no serviço
 `keyring` configurado para o usuário correspondente.
+
+```bash
+# Exemplo com variável de ambiente
+export REMOTO_PASSWORD="minha_senha"
+```
+
+```python
+# Exemplo salvando no keyring
+import keyring
+keyring.set_password("IFSC_SGBD", "postgres", "minha_senha")
+```
+
+É proibido definir a chave `password` em perfis do `config.yml`.
 
 ## Execução
 Para iniciar a interface gráfica do gerenciador, execute:
@@ -66,3 +80,11 @@ Este projeto está licenciado sob os termos da [MIT License](LICENSE).
 
 ## Autoria
 Projeto desenvolvido por Arthur Peixoto Berbert Lima.
+
+## Pré-requisitos no servidor
+
+Para que as conexões remotas funcionem, o DBA deve garantir:
+
+- `listen_addresses='*'` no `postgresql.conf`.
+- Entrada adequada no `pg_hba.conf` para a rede do cliente.
+- Porta `5432/tcp` liberada no firewall.

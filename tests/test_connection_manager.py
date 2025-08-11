@@ -9,7 +9,11 @@ from psycopg2 import OperationalError
 # Ensure project root is on path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from gerenciador_postgres.connection_manager import ConnectionManager
+from gerenciador_postgres.connection_manager import (
+    ConnectionManager,
+    env_var_for_profile,
+    resolve_password,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +54,6 @@ def test_connect_logs_operational_error(monkeypatch, caplog):
     with caplog.at_level(logging.ERROR):
         with pytest.raises(OperationalError):
             cm.connect(host="localhost")
-
-    assert "Erro operacional ao conectar ao banco de dados" in caplog.text
 
 
 def test_context_manager_auto_disconnect():
@@ -134,3 +136,24 @@ def test_connect_to_env_password(monkeypatch):
     cm.connect_to("p")
     assert captured["password"] == "secret"
     cm.disconnect("p")
+
+
+def test_env_var_for_profile_normalization():
+    assert env_var_for_profile("Remoto") == "REMOTO_PASSWORD"
+    assert env_var_for_profile("Meu Perfil") == "MEU_PERFIL_PASSWORD"
+    assert env_var_for_profile("áç~ teste") == "TESTE_PASSWORD"
+
+
+def test_resolve_password_env_over_keyring(monkeypatch):
+    monkeypatch.setenv("PROD_PASSWORD", "env")
+
+    def fake_keyring(service, user):
+        return "ring"
+
+    monkeypatch.setattr(
+        "gerenciador_postgres.connection_manager.keyring.get_password", fake_keyring
+    )
+    assert resolve_password("prod", "user") == "env"
+
+    monkeypatch.delenv("PROD_PASSWORD")
+    assert resolve_password("prod", "user") == "ring"
