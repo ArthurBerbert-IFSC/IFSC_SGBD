@@ -4,7 +4,7 @@ import platform
 from pathlib import Path
 
 from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR, Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QPalette
 from PyQt6.QtWidgets import (
     QGridLayout,
     QGroupBox,
@@ -28,20 +28,24 @@ def _mask(value: str) -> str:
 class InitialPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("InitialPanel")
         self._setup_ui()
         self.refresh()
 
     def _setup_ui(self) -> None:
         layout = QGridLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setHorizontalSpacing(14)
+        layout.setVerticalSpacing(14)
         self.setLayout(layout)
 
         assets_dir = Path(__file__).resolve().parents[2] / "assets"
         banner = QLabel(self)
         pixmap = QPixmap(str(assets_dir / "principal.jpeg"))
         if not pixmap.isNull():
-            banner.setPixmap(pixmap.scaledToHeight(120, Qt.TransformationMode.SmoothTransformation))
+            banner.setPixmap(
+                pixmap.scaledToHeight(140, Qt.TransformationMode.SmoothTransformation)
+            )
         banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(banner, 0, 0, 1, 2)
 
@@ -50,16 +54,11 @@ class InitialPanel(QWidget):
         self.db_box = QGroupBox("Banco de Dados", self)
         self.check_box = QGroupBox("Checklist", self)
 
-        self.setStyleSheet(
-            """
-            QWidget {background-color: #fafafa;}
-            QGroupBox {background-color: #ffffff; border: 1px solid #cccccc; border-radius: 5px;}
-            QGroupBox::title {subcontrol-origin: margin; subcontrol-position: top center; padding: 0 3px; font-weight: bold;}
-            """
-        )
-
         for box in (self.app_box, self.env_box, self.db_box, self.check_box):
-            box.setLayout(QVBoxLayout())
+            v = QVBoxLayout()
+            v.setSpacing(4)
+            v.setContentsMargins(8, 8, 8, 8)
+            box.setLayout(v)
 
         layout.addWidget(self.app_box, 1, 0)
         layout.addWidget(self.env_box, 1, 1)
@@ -67,6 +66,8 @@ class InitialPanel(QWidget):
         layout.addWidget(self.check_box, 2, 1)
         layout.setColumnStretch(0, 1)
         layout.setColumnStretch(1, 1)
+
+        self._apply_theme()
 
     def refresh(self) -> None:
         for box in (self.app_box, self.env_box, self.db_box, self.check_box):
@@ -77,6 +78,34 @@ class InitialPanel(QWidget):
                 if widget:
                     widget.deleteLater()
         self._populate()
+        self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        pal = self.palette()
+        is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+        # Paleta base
+        if is_dark:
+            self.setStyleSheet(
+                """
+                #InitialPanel {background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #232629, stop:1 #1b1d1f); color: #e8e8e8;}
+                #InitialPanel QGroupBox {background-color: #2d3035; border: 1px solid #3d4147; border-radius: 8px;}
+                #InitialPanel QGroupBox::title {subcontrol-origin: margin; subcontrol-position: top center; padding: 4px 10px; font-weight: 600; color: #f2f2f2;}
+                #InitialPanel QLabel {color: #d7d7d7;}
+                #InitialPanel a {color: #58a6ff;}
+                #InitialPanel a:hover {text-decoration: underline;}
+                """
+            )
+        else:
+            self.setStyleSheet(
+                """
+                #InitialPanel {background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f9fafb, stop:1 #eef1f4); color: #222;}
+                #InitialPanel QGroupBox {background-color: #ffffff; border: 1px solid #cfd4da; border-radius: 8px;}
+                #InitialPanel QGroupBox::title {subcontrol-origin: margin; subcontrol-position: top center; padding: 4px 10px; font-weight: 600; color: #222;}
+                #InitialPanel QLabel {color: #222;}
+                #InitialPanel a {color: #185abc;}
+                #InitialPanel a:hover {text-decoration: underline;}
+                """
+            )
 
     def _populate(self) -> None:
         meta = AppMetadata()
