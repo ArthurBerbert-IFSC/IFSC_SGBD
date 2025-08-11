@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea, QStackedWidget
-from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog
+from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog, QDialog
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QIcon
 from pathlib import Path
@@ -154,117 +154,101 @@ class MainWindow(QMainWindow):
                 "Você precisa estar conectado a um banco de dados para gerenciar grupos.",
             )
 
-
     def on_conectar(self):
-        self.stacked_widget.setCurrentWidget(self.mdi)
         dlg = ConnectionDialog(self)
-        dlg.setModal(False)
-        sub_window = self.mdi.addSubWindow(dlg)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
 
-        def handle_accept():
-            params = dlg.get_connection_params()
-            # Garante timeout padrão curto para não travar indefinidamente
-            params.setdefault('connect_timeout', 5)
-            sub_window.close()
+        params = dlg.get_connection_params()
+        params.setdefault('connect_timeout', 5)
 
-            self._progress = QProgressDialog(
-                "Conectando ao banco de dados...", "Cancelar", 0, 0, self
+        self._progress = QProgressDialog(
+            "Conectando ao banco de dados...", "Cancelar", 0, 0, self
+        )
+        self._progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._progress.setMinimumDuration(0)
+        self._progress.show()
+
+        self._connect_thread = ConnectThread(params)
+        self._connect_in_progress = True
+        self._connect_timeout_timer = QTimer(self)
+        self._connect_timeout_timer.setSingleShot(True)
+
+        def finalize_success(_):
+            if not getattr(self, "_connect_in_progress", False):
+                return
+            self._connect_in_progress = False
+            try:
+                self._connect_timeout_timer.stop()
+            except Exception:
+                pass
+            self._progress.close()
+            try:
+                ui_conn = ConnectionManager().connect(**params)
+            except Exception as e:
+                finalize_fail(e)
+                return
+            self.db_manager = DBManager(ui_conn)
+            self.role_manager = RoleManager(
+                self.db_manager, self.logger,
+                operador=params['user']
             )
-            # Evita travamento: usar WindowModal em vez de ApplicationModal
-            self._progress.setWindowModality(Qt.WindowModality.WindowModal)
-            self._progress.setMinimumDuration(0)
-            self._progress.show()
+            self.users_controller = UsersController(self.role_manager)
+            self.groups_controller = GroupsController(self.role_manager)
 
-            self._connect_thread = ConnectThread(params)
-            self._connect_in_progress = True
-            # Timeout de segurança (15s)
-            self._connect_timeout_timer = QTimer(self)
-            self._connect_timeout_timer.setSingleShot(True)
-            self._connect_timeout_timer.timeout.connect(
-                lambda: finalize_fail(TimeoutError("Tempo esgotado ao conectar"))
+            self.schema_manager = SchemaManager(
+                self.db_manager, self.logger,
+                operador=params['user']
             )
-            self._connect_timeout_timer.start(15000)
+            self.schema_controller = SchemaController(self.schema_manager, self.logger)
 
-            def finalize_success(_):
-                if not getattr(self, "_connect_in_progress", False):
-                    # Já cancelado/timeout; descarte conexão recebida
-                    return
-                self._connect_in_progress = False
-                try:
-                    self._connect_timeout_timer.stop()
-                except Exception:
-                    pass
-                self._progress.close()
-                # Faz a conexão real no thread da UI (rápido após teste)
-                try:
-                    ui_conn = ConnectionManager().connect(**params)
-                except Exception as e:
-                    finalize_fail(e)
-                    return
-                self.db_manager = DBManager(ui_conn)
-                self.role_manager = RoleManager(
-                    self.db_manager, self.logger,
-                    operador=params['user']
-                )
-                self.users_controller = UsersController(self.role_manager)
-                self.groups_controller = GroupsController(self.role_manager)
-
-                self.schema_manager = SchemaManager(
-                    self.db_manager, self.logger,
-                    operador=params['user']
-                )
-                self.schema_controller = SchemaController(self.schema_manager, self.logger)
-
-                self.menuGerenciar.setEnabled(True)
-                self.statusbar.showMessage(
-                    f"Conectado a {params['dbname']} como {params['user']}"
-                )
-                self.stacked_widget.setCurrentWidget(self.initial_panel)
-
-                QMessageBox.information(
-                    self,
-                    "Conexão bem-sucedida",
-                    f"Conectado ao banco {params['dbname']}.",
-                )
-
-            def finalize_fail(error: Exception):
-                if not getattr(self, "_connect_in_progress", False):
-                    return
-                self._connect_in_progress = False
-                try:
-                    self._connect_timeout_timer.stop()
-                except Exception:
-                    pass
-                self._progress.close()
-                try:
-                    if hasattr(self, "_connect_thread") and self._connect_thread.isRunning():
-                        self._connect_thread.request_cancel()
-                    ConnectionManager().disconnect()
-                except Exception:
-                    pass
-                self.db_manager = None
-                self.role_manager = None
-                self.users_controller = None
-                self.schema_manager = None
-                self.schema_controller = None
-                self.menuGerenciar.setEnabled(False)
-                self.statusbar.showMessage("Não conectado")
-                self.stacked_widget.setCurrentWidget(self.initial_panel)
-                QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
-
-            self._connect_thread.succeeded.connect(finalize_success)
-            self._connect_thread.failed.connect(finalize_fail)
-            self._progress.canceled.connect(lambda: finalize_fail(Exception("Operação cancelada pelo usuário")))
-            self._connect_thread.start()
-
-        def handle_reject():
-            sub_window.close()
+            self.menuGerenciar.setEnabled(True)
+            self.statusbar.showMessage(
+                f"Conectado a {params['dbname']} como {params['user']}"
+            )
+            self.initial_panel.refresh()
             self.stacked_widget.setCurrentWidget(self.initial_panel)
 
-        dlg.accepted.connect(handle_accept)
-        dlg.rejected.connect(handle_reject)
-        self.opened_windows.append(sub_window)
-        sub_window.show()
+            QMessageBox.information(
+                self,
+                "Conexão bem-sucedida",
+                f"Conectado ao banco {params['dbname']}.",
+            )
+
+        def finalize_fail(error: Exception):
+            if not getattr(self, "_connect_in_progress", False):
+                return
+            self._connect_in_progress = False
+            try:
+                self._connect_timeout_timer.stop()
+            except Exception:
+                pass
+            self._progress.close()
+            try:
+                if hasattr(self, "_connect_thread") and self._connect_thread.isRunning():
+                    self._connect_thread.request_cancel()
+                ConnectionManager().disconnect()
+            except Exception:
+                pass
+            self.db_manager = None
+            self.role_manager = None
+            self.users_controller = None
+            self.schema_manager = None
+            self.schema_controller = None
+            self.menuGerenciar.setEnabled(False)
+            self.statusbar.showMessage("Não conectado")
+            self.initial_panel.refresh()
+            self.stacked_widget.setCurrentWidget(self.initial_panel)
+            QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
+
+        self._connect_thread.succeeded.connect(finalize_success)
+        self._connect_thread.failed.connect(finalize_fail)
+        self._connect_timeout_timer.timeout.connect(
+            lambda: finalize_fail(TimeoutError("Tempo esgotado ao conectar"))
+        )
+        self._connect_timeout_timer.start(15000)
+        self._progress.canceled.connect(lambda: finalize_fail(Exception("Operação cancelada pelo usuário")))
+        self._connect_thread.start()
 
     def on_desconectar(self):
         ConnectionManager().disconnect()
@@ -274,7 +258,8 @@ class MainWindow(QMainWindow):
         self.schema_manager = None
         self.schema_controller = None
         self.groups_view = None
-    # Restaura o MDI como central
+        # Restaura o MDI como central
+        self.initial_panel.refresh()
         self.stacked_widget.setCurrentWidget(self.initial_panel)
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
