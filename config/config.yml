@@ -12,6 +12,6 @@ databases:
   port: 5432
   user: postgres
 group_prefix: grp_
-log_level: INFO
+log_level: DEBUG
 log_path: D:\GitHub\IFSC_SGBD\logs\app.log
 schema_creation_group: Professores

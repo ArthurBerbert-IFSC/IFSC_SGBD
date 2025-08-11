@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import yaml
 from .path_config import BASE_DIR, CONFIG_DIR as DEFAULT_CONFIG_DIR
+
 CONFIG_FILE_ENV = os.getenv("IFSC_SGBD_CONFIG_FILE")
 if CONFIG_FILE_ENV:
     CONFIG_FILE = Path(CONFIG_FILE_ENV)
@@ -11,16 +12,17 @@ if CONFIG_FILE_ENV:
     CONFIG_DIR = CONFIG_FILE.parent
 else:
     CONFIG_DIR = DEFAULT_CONFIG_DIR
-    CONFIG_FILE = CONFIG_DIR / 'config.yml'
+    CONFIG_FILE = CONFIG_DIR / "config.yml"
 
 DEFAULT_CONFIG = {
-    'log_path': str(BASE_DIR / 'logs' / 'app.log'),
-    'log_level': 'INFO',
-    'group_prefix': 'grp_',
-    'schema_creation_group': 'Professores'
+    "log_path": str(BASE_DIR / "logs" / "app.log"),
+    "log_level": "INFO",
+    "group_prefix": "grp_",
+    "schema_creation_group": "Professores",
 }
 
 logger = logging.getLogger(__name__)
+logger.propagate = True
 
 def load_config():
     if not CONFIG_FILE.exists():

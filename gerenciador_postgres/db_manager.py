@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Set, Callable
 import logging
 
 logger = logging.getLogger(__name__)
+logger.propagate = True
 
 
 PRIVILEGE_WHITELIST = {
