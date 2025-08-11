@@ -288,4 +288,10 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
             self._show_keyring_unavailable()
         self.update_password_indicator()
 
+    # ------------------------------------------------------------------
+    def accept(self):
+        """Persiste a senha (quando solicitado) ao confirmar o diálogo."""
+        self._maybe_save_password()
+        super().accept()
+
     # A conexão é realizada pela MainWindow; este diálogo apenas coleta parâmetros.

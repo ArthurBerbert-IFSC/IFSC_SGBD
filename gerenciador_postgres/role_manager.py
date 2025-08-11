@@ -302,6 +302,8 @@ class RoleManager:
         try:
             config = load_config()
             prefix = config.get("group_prefix", "grp_")
+            if not prefix.startswith("grp_"):
+                raise ValueError("Prefixo de grupo inválido")
             # Sanitiza e aplica prefixo automaticamente
             group_name = self._sanitize_group_name(group_name, prefix=prefix)
             if group_name in self.dao.list_groups():
