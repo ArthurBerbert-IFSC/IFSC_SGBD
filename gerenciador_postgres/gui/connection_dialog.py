@@ -192,14 +192,23 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
             self.btnTogglePassword.setText("Mostrar")
 
     def get_connection_params(self) -> dict:
+        profile_name = self.cmbProfiles.currentText().strip()
+        user = self.txtUser.text().strip()
         params = {
             "host": self.txtHost.text(),
             "dbname": self.txtDb.text(),
-            "user": self.txtUser.text(),
+            "user": user,
             "port": self.spnPort.value(),
         }
-        if self.txtPassword.text():
-            params["password"] = self.txtPassword.text()
+        pwd_field = self.txtPassword.text()
+        if pwd_field:
+            params["password"] = pwd_field
+        else:
+            # Tenta recuperar senha salva (env var do perfil ou keyring)
+            if profile_name and user:
+                saved = resolve_password(profile_name, user)
+                if saved:
+                    params["password"] = saved
         return params
 
     def test_connection(self):
@@ -250,10 +259,14 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
             return
         password = self.txtPassword.text()
         user = self.txtUser.text()
+        profile_name = self.cmbProfiles.currentText().strip()
         if not password or not user:
             return
         try:
+            # Armazena senha por usuário (compat) e também por combinação perfil|usuário para evitar conflito entre ambientes
             keyring.set_password("IFSC_SGBD", user, password)
+            if profile_name:
+                keyring.set_password("IFSC_SGBD", f"{profile_name}::{user}", password)
             QMessageBox.information(
                 self, "Sucesso", "Senha armazenada com segurança no sistema."
             )
@@ -263,7 +276,8 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
 
     # ------------------------------------------------------------------
     def delete_saved_password(self):
-        user = self.txtUser.text()
+        user = self.txtUser.text().strip()
+        profile_name = self.cmbProfiles.currentText().strip()
         if not user:
             return
         reply = QMessageBox.question(
@@ -275,6 +289,11 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
             return
         try:
             keyring.delete_password("IFSC_SGBD", user)
+            if profile_name:
+                try:
+                    keyring.delete_password("IFSC_SGBD", f"{profile_name}::{user}")
+                except keyring.errors.PasswordDeleteError:
+                    pass
             QMessageBox.information(
                 self,
                 "Sucesso",

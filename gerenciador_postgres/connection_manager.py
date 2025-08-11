@@ -33,11 +33,21 @@ def env_var_for_profile(profile_name: str) -> str:
 
 
 def resolve_password(profile_name: str, user: str) -> str | None:
+    """Resolve a senha em ordem de precedência:
+    1. Variável de ambiente específica do perfil (ex: REMOTO_PASSWORD)
+    2. Entrada no keyring para a combinação perfil::usuário
+    3. Entrada no keyring somente pelo usuário (modo legacy)
+    """
     env_var = env_var_for_profile(profile_name)
     password = os.getenv(env_var)
-    if password is not None:
+    if password:
         return password
     try:
+        # Prioriza chave específica do perfil
+        prof_key = keyring.get_password("IFSC_SGBD", f"{profile_name}::{user}")
+        if prof_key:
+            return prof_key
+        # Fallback legado
         return keyring.get_password("IFSC_SGBD", user)
     except Exception:
         return None
@@ -75,7 +85,8 @@ class ConnectionManager:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._pools: dict[str, SimpleConnectionPool] = {}
+            # Dicionário de pools por nome de perfil
+            cls._instance._pools = {}
             cls._instance._thread_local = threading.local()
         return cls._instance
 
