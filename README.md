@@ -38,10 +38,36 @@ O caminho informado em `log_path` é convertido para absoluto a partir de `BASE_
 
 Para sobrepor completamente as configurações, defina a variável de ambiente `IFSC_SGBD_CONFIG_FILE` apontando para um arquivo YAML alternativo ou edite o arquivo `config/config.yml` local.
 
-Senhas de banco de dados **não** devem ser armazenadas no arquivo de configuração. 
-O `ConnectionManager` buscará a senha a partir da variável de ambiente 
-`<NOME_DO_PERFIL>_PASSWORD` (por exemplo, `LOCAL_PASSWORD`) ou do serviço 
+Senhas de banco de dados **não** devem ser armazenadas no arquivo de configuração.
+O `ConnectionManager` buscará a senha a partir da variável de ambiente
+`<NOME_DO_PERFIL>_PASSWORD` (por exemplo, `LOCAL_PASSWORD`) ou do serviço
 `keyring` configurado para o usuário correspondente.
+
+Cada entrada em `config/config.yml` pode indicar explicitamente o nome da
+variável de ambiente com o campo `password_env`. Exemplo:
+
+```yaml
+databases:
+  - name: remoto
+    host: 172.16.0.228
+    user: postgres
+    password_env: REMOTO_PASSWORD
+```
+
+Em seguida, defina a variável de ambiente antes de executar a aplicação:
+
+```bash
+export REMOTO_PASSWORD='sua_senha'
+```
+
+Como alternativa, é possível registrar a senha no serviço `keyring`:
+
+```bash
+python - <<'PY'
+import keyring
+keyring.set_password('IFSC_SGBD', 'postgres', 'sua_senha')
+PY
+```
 
 ## Execução
 Para iniciar a interface gráfica do gerenciador, execute:
