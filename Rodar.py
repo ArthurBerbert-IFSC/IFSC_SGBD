@@ -1,9 +1,7 @@
 from gerenciador_postgres.gui.main_window import MainWindow
-from PyQt6.QtWidgets import QApplication, QSplashScreen, QMessageBox
-from PyQt6.QtGui import QPixmap, QIcon
-from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtGui import QIcon
 from pathlib import Path
-import subprocess
 import sys
 import logging
 import os
@@ -14,6 +12,7 @@ if os.getenv("ENV", "").lower() in {"dev", "development"} or os.getenv("DEBUG") 
     except Exception:
         pass
 from gerenciador_postgres.config_manager import load_config, validate_config
+from gerenciador_postgres.app_metadata import AppMetadata
 
 
 def setup_logging():
@@ -41,9 +40,10 @@ def main():
         logger.info("Iniciando aplicação Gerenciador PostgreSQL")
 
         # Crie o QApplication ANTES de qualquer QMessageBox
+        meta = AppMetadata()
         app = QApplication(sys.argv)
-        app.setApplicationName("Gerenciador PostgreSQL")
-        app.setApplicationVersion("1.0.0")
+        app.setApplicationName(meta.name)
+        app.setApplicationVersion(meta.version)
         
         # Carregar/validar config agora que já temos QApplication
         try:
@@ -54,54 +54,14 @@ def main():
             return
         
         assets_dir = Path(__file__).resolve().parent / "assets"
-        
-        # Verificar e definir ícone
+
         icon_path = assets_dir / "icone.png"
         if icon_path.exists():
             app.setWindowIcon(QIcon(str(icon_path)))
-        
-        # Verificar e criar splash de forma mais robusta
-        splash_path = assets_dir / "splash.png"
-        pixmap = None
-        
-        if splash_path.exists():
-            try:
-                pixmap = QPixmap(str(splash_path))
-                if pixmap.isNull():
-                    logger.warning("Splash corrompido, recriando...")
-                    splash_path.unlink()
-            except Exception as e:
-                logger.error(f"Erro ao carregar splash: {e}")
-                if splash_path.exists():
-                    splash_path.unlink()
-
-        # Recriar splash se necessário
-        if not splash_path.exists() or pixmap is None or (pixmap and pixmap.isNull()):
-            try:
-                assets_dir.mkdir(exist_ok=True)
-                subprocess.run([
-                    sys.executable, str(assets_dir / "create_splash.py")
-                ], check=True, timeout=30)
-                pixmap = QPixmap(str(splash_path))
-                logger.info("Splash criado com sucesso")
-            except Exception as e:
-                logger.warning(f"Erro ao criar splash: {e}")
-                pixmap = None
-
-        # Mostrar splash apenas se válido
-        splash = None
-        if pixmap and not pixmap.isNull():
-            splash = QSplashScreen(pixmap)
-            splash.show()
-            app.processEvents()
 
         logger.info("Criando janela principal")
         window = MainWindow()
         window.show()
-
-        # Fechar splash se existir
-        if splash:
-            QTimer.singleShot(1500, lambda: splash.finish(window))
 
         logger.info("Aplicação iniciada com sucesso")
         sys.exit(app.exec())
