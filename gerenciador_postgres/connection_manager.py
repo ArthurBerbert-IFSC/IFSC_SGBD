@@ -115,13 +115,29 @@ class ConnectionManager:
         Ex.: host, port, dbname, user, password, sslmode, connect_timeout.
         """
 
-        timeout = int(params.pop("connect_timeout", 5) or 5)
-        logger.info("Conectando ao PostgreSQL em %s:%s/%s (timeout=%ss)...",
-                    params.get("host"), params.get("port"), params.get("dbname"), timeout)
-        conn = psycopg2.connect(connect_timeout=timeout, **params)
-        conn.autocommit = False
-        logger.info("Conexão aberta.")
-        return conn
+        timeout = params.pop("connect_timeout", None)
+        if timeout is not None:
+            timeout = int(timeout)
+            params["connect_timeout"] = timeout
+
+        logger.info(
+            "Conectando ao PostgreSQL em %s:%s/%s%s...",
+            params.get("host"),
+            params.get("port"),
+            params.get("dbname"),
+            f" (timeout={timeout}s)" if timeout is not None else "",
+        )
+        try:
+            conn = psycopg2.connect(**params)
+            conn.autocommit = False
+            logger.info("Conexão aberta.")
+            return conn
+        except OperationalError:
+            logger.exception("Erro operacional ao conectar ao banco de dados")
+            raise
+        except Exception:
+            logger.exception("Erro inesperado ao conectar ao banco de dados")
+            raise
 
     # ------------------------------------------------------------------
     def get_connection(self) -> connection:
