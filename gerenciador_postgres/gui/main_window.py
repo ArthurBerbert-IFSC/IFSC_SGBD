@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea
+from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea, QStackedWidget
 from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QIcon
@@ -7,15 +7,15 @@ from .connection_dialog import ConnectionDialog
 from ..db_manager import DBManager
 from ..role_manager import RoleManager
 from ..schema_manager import SchemaManager
-from ..audit_manager import AuditManager
 from ..connection_manager import ConnectionManager
 from ..controllers import (
     UsersController,
     GroupsController,
     SchemaController,
-    AuditController,
 )
 from ..logger import setup_logger
+from .initial_panel import InitialPanel
+from ..app_metadata import AppMetadata
 import psycopg2
 
 
@@ -39,40 +39,6 @@ class ConnectThread(QThread):
                 self.failed.emit(Exception("Conexão cancelada"))
                 return
 
-            # Preparar auditoria (DDL leve) nesta mesma conexão
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS audit_log (
-                            id SERIAL PRIMARY KEY,
-                            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            operador VARCHAR(100) NOT NULL,
-                            operacao VARCHAR(50) NOT NULL,
-                            objeto_tipo VARCHAR(50) NOT NULL,
-                            objeto_nome VARCHAR(100) NOT NULL,
-                            detalhes JSONB,
-                            dados_antes JSONB,
-                            dados_depois JSONB,
-                            ip_address INET,
-                            sucesso BOOLEAN DEFAULT TRUE
-                        )
-                        """
-                    )
-                    cur.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)"
-                    )
-                    cur.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_audit_operador ON audit_log(operador)"
-                    )
-                    cur.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_audit_operacao ON audit_log(operacao)"
-                    )
-                conn.commit()
-            except Exception:
-                # Não falhar a conexão se DDL de auditoria não puder rodar agora
-                pass
-
             self.succeeded.emit(conn)
         except Exception as e:
             self.failed.emit(e)
@@ -95,8 +61,6 @@ class MainWindow(QMainWindow):
         self.groups_view = None
         self.schema_manager = None
         self.schema_controller = None
-        self.audit_manager = None
-        self.audit_controller = None
         self.logger = setup_logger()
         self.opened_windows = []
 
@@ -118,7 +82,6 @@ class MainWindow(QMainWindow):
         self.actionUsuarios = QAction("Usuários", self)
         self.actionGrupos = QAction("Grupos", self)
         self.actionAmbientes = QAction("Ambientes (Schemas)", self)
-        self.actionAuditoria = QAction("Auditoria", self)
 
         # Ações do menu Ajuda
         self.actionAjuda = QAction("Ajuda", self)
@@ -131,7 +94,6 @@ class MainWindow(QMainWindow):
         self.actionUsuarios.triggered.connect(self.on_usuarios)
         self.actionGrupos.triggered.connect(self.on_grupos)
         self.actionAmbientes.triggered.connect(self.on_schemas)
-        self.actionAuditoria.triggered.connect(self.on_auditoria)
 
         self.actionAjuda.triggered.connect(self.show_help)
         self.actionSobre.triggered.connect(self.show_about)
@@ -148,7 +110,6 @@ class MainWindow(QMainWindow):
         self.menuGerenciar.addAction(self.actionUsuarios)
         self.menuGerenciar.addAction(self.actionGrupos)
         self.menuGerenciar.addAction(self.actionAmbientes)
-        self.menuGerenciar.addAction(self.actionAuditoria)
         self.menuGerenciar.setEnabled(False) # Começa desabilitado
 
         # Menu Ajuda
@@ -163,6 +124,7 @@ class MainWindow(QMainWindow):
     def on_usuarios(self):
         from .users_view import UsersView
         if self.users_controller:
+            self.stacked_widget.setCurrentWidget(self.mdi)
             users_window = UsersView(controller=self.users_controller)
             users_window.setWindowTitle("Gerenciador de Usuários")
             sub_window = self.mdi.addSubWindow(users_window)
@@ -179,6 +141,7 @@ class MainWindow(QMainWindow):
         """Abre a janela para gerenciamento de grupos e privilégios."""
         from .groups_view import GroupsView
         if self.groups_controller:
+            self.stacked_widget.setCurrentWidget(self.mdi)
             groups_window = GroupsView(controller=self.groups_controller)
             groups_window.setWindowTitle("Gerenciador de Grupos")
             sub_window = self.mdi.addSubWindow(groups_window)
@@ -193,6 +156,7 @@ class MainWindow(QMainWindow):
 
 
     def on_conectar(self):
+        self.stacked_widget.setCurrentWidget(self.mdi)
         dlg = ConnectionDialog(self)
         dlg.setModal(False)
         sub_window = self.mdi.addSubWindow(dlg)
@@ -238,24 +202,16 @@ class MainWindow(QMainWindow):
                     finalize_fail(e)
                     return
                 self.db_manager = DBManager(ui_conn)
-
-                # Inicializar audit_manager primeiro
-                self.audit_manager = AuditManager(self.db_manager, self.logger)
-                self.audit_controller = AuditController(self.audit_manager, self.logger)
-
-                # Passar audit_manager para os outros managers
                 self.role_manager = RoleManager(
                     self.db_manager, self.logger,
-                    operador=params['user'],
-                    audit_manager=self.audit_manager
+                    operador=params['user']
                 )
                 self.users_controller = UsersController(self.role_manager)
                 self.groups_controller = GroupsController(self.role_manager)
 
                 self.schema_manager = SchemaManager(
                     self.db_manager, self.logger,
-                    operador=params['user'],
-                    audit_manager=self.audit_manager
+                    operador=params['user']
                 )
                 self.schema_controller = SchemaController(self.schema_manager, self.logger)
 
@@ -263,20 +219,7 @@ class MainWindow(QMainWindow):
                 self.statusbar.showMessage(
                     f"Conectado a {params['dbname']} como {params['user']}"
                 )
-
-                # Registrar login na auditoria
-                self.audit_manager.log_operation(
-                    operador=params['user'],
-                    operacao='LOGIN',
-                    objeto_tipo='SYSTEM',
-                    objeto_nome='database_connection',
-                    detalhes={
-                        'database': params['dbname'],
-                        'host': params['host'],
-                        'port': params.get('port', 5432)
-                    },
-                    sucesso=True
-                )
+                self.stacked_widget.setCurrentWidget(self.mdi)
 
                 QMessageBox.information(
                     self, "Conexão bem-sucedida", f"Conectado ao banco {params['dbname']}.")
@@ -301,10 +244,9 @@ class MainWindow(QMainWindow):
                 self.users_controller = None
                 self.schema_manager = None
                 self.schema_controller = None
-                self.audit_manager = None
-                self.audit_controller = None
                 self.menuGerenciar.setEnabled(False)
                 self.statusbar.showMessage("Não conectado")
+                self.stacked_widget.setCurrentWidget(self.initial_panel)
                 QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
 
             self._connect_thread.succeeded.connect(finalize_success)
@@ -321,32 +263,15 @@ class MainWindow(QMainWindow):
         sub_window.show()
 
     def on_desconectar(self):
-        # Registrar logout na auditoria antes de desconectar
-        if self.audit_manager:
-            try:
-                self.audit_manager.log_operation(
-                    operador='sistema',  # Usar sistema já que o usuário está se desconectando
-                    operacao='LOGOUT',
-                    objeto_tipo='SYSTEM',
-                    objeto_nome='database_connection',
-                    sucesso=True
-                )
-            except Exception as e:
-                self.logger.warning(
-                    "Erro ao registrar logout na auditoria: %s", e
-                )  # Ignorado para não interromper o processo de desconexão
-        
         ConnectionManager().disconnect()
         self.db_manager = None
         self.role_manager = None
         self.users_controller = None
         self.schema_manager = None
         self.schema_controller = None
-        self.audit_manager = None
-        self.audit_controller = None
         self.groups_view = None
     # Restaura o MDI como central
-        self.setCentralWidget(self.mdi)
+        self.stacked_widget.setCurrentWidget(self.initial_panel)
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
@@ -357,19 +282,26 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def show_about(self):
+        meta = AppMetadata()
         QMessageBox.about(
             self,
-            "Sobre o Gerenciador PostgreSQL",
-            "Gerenciador PostgreSQL\nVersão 1.0\nAutor: Arthur Peixoto Berbert Lima",
+            f"Sobre {meta.name}",
+            f"{meta.name}\nVersão {meta.version}\nLicença {meta.license}\n{meta.maintainer} <{meta.contact_email}>",
         )
 
     def _setup_central(self):
+        self.stacked_widget = QStackedWidget(self)
+        self.setCentralWidget(self.stacked_widget)
+        self.initial_panel = InitialPanel()
         self.mdi = QMdiArea(self)
-        self.setCentralWidget(self.mdi)
+        self.stacked_widget.addWidget(self.initial_panel)
+        self.stacked_widget.addWidget(self.mdi)
+        self.stacked_widget.setCurrentWidget(self.initial_panel)
 
     def on_schemas(self):
         from .schema_view import SchemaView
         if self.schema_controller:
+            self.stacked_widget.setCurrentWidget(self.mdi)
             schema_window = SchemaView(controller=self.schema_controller, logger=self.logger)
             schema_window.setWindowTitle("Gerenciador de Schemas")
             sub_window = self.mdi.addSubWindow(schema_window)
@@ -378,20 +310,3 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar schemas.")
     
-    def on_auditoria(self):
-        """Abre a janela de auditoria."""
-        from .audit_view import AuditView
-        if self.audit_manager and self.audit_controller:
-            audit_window = AuditView(
-                audit_manager=self.audit_manager,
-                logger=self.logger
-            )
-            audit_window.setWindowTitle("Auditoria do Sistema")
-            sub_window = self.mdi.addSubWindow(audit_window)
-            self.opened_windows.append(sub_window)
-            sub_window.show()
-        else:
-            QMessageBox.warning(
-                self, "Não Conectado",
-                "Você precisa estar conectado a um banco de dados para acessar a auditoria."
-            )
