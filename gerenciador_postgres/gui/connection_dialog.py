@@ -91,7 +91,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.btnTogglePassword = QPushButton("Mostrar")
         self.btnTogglePassword.setText("Mostrar")
         pwd_layout.addWidget(self.btnTogglePassword)
-        self.chkSavePassword = QCheckBox("Salvar senha (keyring)")
+        self.chkSavePassword = QCheckBox("Salvar senha")
         pwd_layout.addWidget(self.chkSavePassword)
         self.btnDeleteSaved = QPushButton("Apagar senha salva")
         self.btnDeleteSaved.setEnabled(False)
@@ -243,15 +243,31 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         if not profile or not user:
             self.lblStored.setVisible(False)
             self.btnDeleteSaved.setEnabled(False)
+            self.txtPassword.setPlaceholderText("")
             return
         stored = resolve_password(profile, user)
-        self.lblStored.setVisible(stored is not None)
+        has_stored = stored is not None
+        self.lblStored.setVisible(has_stored)
         try:
             has_ring = keyring.get_password("IFSC_SGBD", user) is not None
         except Exception:
             self._show_keyring_unavailable()
             return
         self.btnDeleteSaved.setEnabled(has_ring)
+
+        if has_stored:
+            # Atualiza label e estilos informativos
+            self.lblStored.setText("🔒 Senha salva – deixe o campo em branco para reutilizar ou digite para trocar.")
+            self.lblStored.setStyleSheet("color: #1b6e1b; font-style: italic;")
+            if not self.txtPassword.text():
+                self.txtPassword.setPlaceholderText("(senha salva será usada)")
+                self.txtPassword.setToolTip("Há uma senha salva para este perfil/usuário. Se deixar em branco ela será usada.")
+            else:
+                self.txtPassword.setToolTip("Você está sobrescrevendo a senha salva.")
+        else:
+            self.lblStored.setText("")
+            self.txtPassword.setPlaceholderText("")
+            self.txtPassword.setToolTip("")
 
     # ------------------------------------------------------------------
     def _maybe_save_password(self):
