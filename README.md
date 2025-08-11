@@ -10,6 +10,7 @@ Aplicação em Python com interface gráfica (PyQt6) para facilitar a administra
 - PyYAML
 - pytest (para executar os testes)
 - keyring
+- python-dotenv (opcional para desenvolvimento)
 
 ## Instalação
 1. Clone o repositório:
@@ -66,6 +67,15 @@ Para iniciar a interface gráfica do gerenciador, execute:
 python Rodar.py
 ```
 
+## Perfis na GUI
+
+- Selecionar perfil existente pela combo.
+- Salvar perfil: botão "Salvar" abre diálogo, solicita nome e grava sem senha.
+- Apagar perfil: botão "Apagar" remove do YAML.
+- Testar conexão: botão dedicado "Testar conexão".
+
+Senhas nunca são salvas; use variável de ambiente `<PERFIL>_PASSWORD` ou o keyring (`IFSC_SGBD`, conta = usuário).
+
 ## Testes
 Os testes automatizados estão no diretório `tests/`. Execute-os com:
 ```bash
@@ -88,3 +98,30 @@ Para que as conexões remotas funcionem, o DBA deve garantir:
 - `listen_addresses='*'` no `postgresql.conf`.
 - Entrada adequada no `pg_hba.conf` para a rede do cliente.
 - Porta `5432/tcp` liberada no firewall.
+
+## Validação rápida
+
+1. **PG/psql (no servidor):**
+   ```
+   SHOW server_version;
+   SELECT PostGIS_Version();
+   ```
+
+2. **Cliente (sem GUI):**
+   ```
+   # por perfil
+   PERFIL_REMOTO_PASSWORD=suasenha python scripts/test_connection.py --profile Remoto
+   # ad-hoc
+   python scripts/test_connection.py --host 192.168.x.y --port 5432 --dbname db --user usr
+   ```
+
+3. **Cenários de falha (para checar mensagens):**
+   - Host inválido;
+   - Porta bloqueada;
+   - Usuário/senha incorretos.
+
+4. **GUI:**
+   - Selecionar perfil; Testar conexão;
+   - Editar campos → Salvar (novo nome) → reaparecer na combo;
+   - Apagar perfil recém-criado;
+   - Verificar logs/app.log sendo escrito.

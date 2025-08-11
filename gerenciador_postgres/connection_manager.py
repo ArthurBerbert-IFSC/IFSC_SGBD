@@ -47,10 +47,16 @@ def _friendly_error(exc: OperationalError) -> OperationalError:
     msg = str(exc).lower()
     if "connection refused" in msg:
         new_msg = "Verificar host/porta, firewall e pg_hba.conf"
-    elif "timeout" in msg:
+    elif "timeout" in msg or "connection timed out" in msg:
         new_msg = "Servidor inacessível; conferir rede/VPN"
-    elif "authentication failed" in msg:
+    elif "no route to host" in msg:
+        new_msg = "Sem rota até o host; verificar rede/firewall/VPN"
+    elif "could not translate host name" in msg:
+        new_msg = "Host inválido ou DNS indisponível"
+    elif "authentication failed" in msg or "password authentication failed" in msg:
         new_msg = "Usuário/senha inválidos ou método no pg_hba.conf"
+    elif "ssl" in msg and "handshake" in msg:
+        new_msg = "Erro SSL/TLS; alinhar requisitos de criptografia do servidor"
     else:
         new_msg = str(exc)
     return OperationalError(new_msg)

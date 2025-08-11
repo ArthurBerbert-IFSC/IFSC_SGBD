@@ -85,6 +85,7 @@ class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
         self.txtPassword.setEchoMode(QLineEdit.EchoMode.Password)
         pwd_layout.addWidget(self.txtPassword)
         self.btnTogglePassword = QPushButton("Mostrar")
+        self.btnTogglePassword.setText("Mostrar")
         pwd_layout.addWidget(self.btnTogglePassword)
         layout.addLayout(pwd_layout)
 
