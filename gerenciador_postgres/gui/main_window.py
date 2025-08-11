@@ -219,10 +219,13 @@ class MainWindow(QMainWindow):
                 self.statusbar.showMessage(
                     f"Conectado a {params['dbname']} como {params['user']}"
                 )
-                self.stacked_widget.setCurrentWidget(self.mdi)
+                self.stacked_widget.setCurrentWidget(self.initial_panel)
 
                 QMessageBox.information(
-                    self, "Conexão bem-sucedida", f"Conectado ao banco {params['dbname']}.")
+                    self,
+                    "Conexão bem-sucedida",
+                    f"Conectado ao banco {params['dbname']}.",
+                )
 
             def finalize_fail(error: Exception):
                 if not getattr(self, "_connect_in_progress", False):
@@ -256,6 +259,7 @@ class MainWindow(QMainWindow):
 
         def handle_reject():
             sub_window.close()
+            self.stacked_widget.setCurrentWidget(self.initial_panel)
 
         dlg.accepted.connect(handle_accept)
         dlg.rejected.connect(handle_reject)
