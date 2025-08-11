@@ -80,7 +80,7 @@ class ConnectionManager:
 
         password = profile.get("password")
         if password is None:
-            env_var = f"{profile_name.upper()}_PASSWORD"
+            env_var = profile.get("password_env") or f"{profile_name.upper()}_PASSWORD"
             password = os.getenv(env_var)
         if password is None:
             try:
