@@ -109,23 +109,19 @@ class ConnectionManager:
             raise
 
     # ------------------------------------------------------------------
-    def connect(self, **params) -> connection:
-        """Estabelece uma nova conexão direta usando os parâmetros fornecidos."""
+    def connect(self, **params):
+        """
+        Conecta ao PostgreSQL com suporte a connect_timeout (segundos).
+        Ex.: host, port, dbname, user, password, sslmode, connect_timeout.
+        """
 
-        current = getattr(self._thread_local, "current_conn", None)
-        if current and getattr(current, "closed", 1) == 0:
-            self.disconnect()
-        try:
-            conn = psycopg2.connect(**params)
-            self._thread_local.current_conn = conn
-            self._thread_local.current_profile = None
-            return conn
-        except OperationalError:
-            logger.exception("Erro operacional ao conectar ao banco de dados")
-            raise
-        except Exception:
-            logger.exception("Erro inesperado ao conectar ao banco de dados")
-            raise
+        timeout = int(params.pop("connect_timeout", 5) or 5)
+        logger.info("Conectando ao PostgreSQL em %s:%s/%s (timeout=%ss)...",
+                    params.get("host"), params.get("port"), params.get("dbname"), timeout)
+        conn = psycopg2.connect(connect_timeout=timeout, **params)
+        conn.autocommit = False
+        logger.info("Conexão aberta.")
+        return conn
 
     # ------------------------------------------------------------------
     def get_connection(self) -> connection:

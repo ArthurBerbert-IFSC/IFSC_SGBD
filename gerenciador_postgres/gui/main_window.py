@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea
 from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QIcon
 from pathlib import Path
 from .connection_dialog import ConnectionDialog
@@ -16,21 +16,66 @@ from ..controllers import (
     AuditController,
 )
 from ..logger import setup_logger
+import psycopg2
 
 
 class ConnectThread(QThread):
-    finished = pyqtSignal(object)
+    succeeded = pyqtSignal(object)  # emits placeholder result
+    failed = pyqtSignal(Exception)
 
     def __init__(self, params):
         super().__init__()
         self.params = params
+        self._cancelled = False
+
+    def request_cancel(self):
+        self._cancelled = True
 
     def run(self):
         try:
-            ConnectionManager().connect(**self.params)
-            self.finished.emit(None)
+            # Realiza um teste de conexão em background (conecta e fecha)
+            conn = ConnectionManager().connect(**self.params)
+            if self._cancelled:
+                self.failed.emit(Exception("Conexão cancelada"))
+                return
+
+            # Preparar auditoria (DDL leve) nesta mesma conexão
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS audit_log (
+                            id SERIAL PRIMARY KEY,
+                            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            operador VARCHAR(100) NOT NULL,
+                            operacao VARCHAR(50) NOT NULL,
+                            objeto_tipo VARCHAR(50) NOT NULL,
+                            objeto_nome VARCHAR(100) NOT NULL,
+                            detalhes JSONB,
+                            dados_antes JSONB,
+                            dados_depois JSONB,
+                            ip_address INET,
+                            sucesso BOOLEAN DEFAULT TRUE
+                        )
+                        """
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)"
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_audit_operador ON audit_log(operador)"
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_audit_operacao ON audit_log(operacao)"
+                    )
+                conn.commit()
+            except Exception:
+                # Não falhar a conexão se DDL de auditoria não puder rodar agora
+                pass
+
+            self.succeeded.emit(conn)
         except Exception as e:
-            self.finished.emit(e)
+            self.failed.emit(e)
 
 
 class MainWindow(QMainWindow):
@@ -154,78 +199,117 @@ class MainWindow(QMainWindow):
 
         def handle_accept():
             params = dlg.get_connection_params()
+            # Garante timeout padrão curto para não travar indefinidamente
+            params.setdefault('connect_timeout', 5)
             sub_window.close()
 
             self._progress = QProgressDialog(
-                "Conectando ao banco de dados...", None, 0, 0, self
+                "Conectando ao banco de dados...", "Cancelar", 0, 0, self
             )
-            self._progress.setWindowModality(Qt.WindowModality.ApplicationModal)
-            self._progress.setCancelButton(None)
+            # Evita travamento: usar WindowModal em vez de ApplicationModal
+            self._progress.setWindowModality(Qt.WindowModality.WindowModal)
             self._progress.setMinimumDuration(0)
             self._progress.show()
 
             self._connect_thread = ConnectThread(params)
+            self._connect_in_progress = True
+            # Timeout de segurança (15s)
+            self._connect_timeout_timer = QTimer(self)
+            self._connect_timeout_timer.setSingleShot(True)
+            self._connect_timeout_timer.timeout.connect(
+                lambda: finalize_fail(TimeoutError("Tempo esgotado ao conectar"))
+            )
+            self._connect_timeout_timer.start(15000)
 
-            def finalize(error):
+            def finalize_success(_):
+                if not getattr(self, "_connect_in_progress", False):
+                    # Já cancelado/timeout; descarte conexão recebida
+                    return
+                self._connect_in_progress = False
+                try:
+                    self._connect_timeout_timer.stop()
+                except Exception:
+                    pass
                 self._progress.close()
-                if error is None:
-                    self.db_manager = DBManager(lambda: ConnectionManager().connect(**params))
+                # Faz a conexão real no thread da UI (rápido após teste)
+                try:
+                    ui_conn = ConnectionManager().connect(**params)
+                except Exception as e:
+                    finalize_fail(e)
+                    return
+                self.db_manager = DBManager(ui_conn)
 
-                    # Inicializar audit_manager primeiro
-                    self.audit_manager = AuditManager(self.db_manager, self.logger)
-                    self.audit_controller = AuditController(self.audit_manager, self.logger)
+                # Inicializar audit_manager primeiro
+                self.audit_manager = AuditManager(self.db_manager, self.logger)
+                self.audit_controller = AuditController(self.audit_manager, self.logger)
 
-                    # Passar audit_manager para os outros managers
-                    self.role_manager = RoleManager(
-                        self.db_manager, self.logger,
-                        operador=params['user'],
-                        audit_manager=self.audit_manager
-                    )
-                    self.users_controller = UsersController(self.role_manager)
-                    self.groups_controller = GroupsController(self.role_manager)
+                # Passar audit_manager para os outros managers
+                self.role_manager = RoleManager(
+                    self.db_manager, self.logger,
+                    operador=params['user'],
+                    audit_manager=self.audit_manager
+                )
+                self.users_controller = UsersController(self.role_manager)
+                self.groups_controller = GroupsController(self.role_manager)
 
-                    self.schema_manager = SchemaManager(
-                        self.db_manager, self.logger,
-                        operador=params['user'],
-                        audit_manager=self.audit_manager
-                    )
-                    self.schema_controller = SchemaController(self.schema_manager, self.logger)
+                self.schema_manager = SchemaManager(
+                    self.db_manager, self.logger,
+                    operador=params['user'],
+                    audit_manager=self.audit_manager
+                )
+                self.schema_controller = SchemaController(self.schema_manager, self.logger)
 
-                    self.menuGerenciar.setEnabled(True)
-                    self.statusbar.showMessage(
-                        f"Conectado a {params['dbname']} como {params['user']}"
-                    )
+                self.menuGerenciar.setEnabled(True)
+                self.statusbar.showMessage(
+                    f"Conectado a {params['dbname']} como {params['user']}"
+                )
 
-                    # Registrar login na auditoria
-                    self.audit_manager.log_operation(
-                        operador=params['user'],
-                        operacao='LOGIN',
-                        objeto_tipo='SYSTEM',
-                        objeto_nome='database_connection',
-                        detalhes={
-                            'database': params['dbname'],
-                            'host': params['host'],
-                            'port': params.get('port', 5432)
-                        },
-                        sucesso=True
-                    )
+                # Registrar login na auditoria
+                self.audit_manager.log_operation(
+                    operador=params['user'],
+                    operacao='LOGIN',
+                    objeto_tipo='SYSTEM',
+                    objeto_nome='database_connection',
+                    detalhes={
+                        'database': params['dbname'],
+                        'host': params['host'],
+                        'port': params.get('port', 5432)
+                    },
+                    sucesso=True
+                )
 
-                    QMessageBox.information(
-                        self, "Conexão bem-sucedida", f"Conectado ao banco {params['dbname']}.")
-                else:
+                QMessageBox.information(
+                    self, "Conexão bem-sucedida", f"Conectado ao banco {params['dbname']}.")
+
+            def finalize_fail(error: Exception):
+                if not getattr(self, "_connect_in_progress", False):
+                    return
+                self._connect_in_progress = False
+                try:
+                    self._connect_timeout_timer.stop()
+                except Exception:
+                    pass
+                self._progress.close()
+                try:
+                    if hasattr(self, "_connect_thread") and self._connect_thread.isRunning():
+                        self._connect_thread.request_cancel()
                     ConnectionManager().disconnect()
-                    self.db_manager = None
-                    self.role_manager = None
-                    self.users_controller = None
-                    self.schema_manager = None
-                    self.schema_controller = None
-                    self.audit_manager = None
-                    self.audit_controller = None
-                    self.menuGerenciar.setEnabled(False)
-                    self.statusbar.showMessage("Não conectado")
-                    QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
+                except Exception:
+                    pass
+                self.db_manager = None
+                self.role_manager = None
+                self.users_controller = None
+                self.schema_manager = None
+                self.schema_controller = None
+                self.audit_manager = None
+                self.audit_controller = None
+                self.menuGerenciar.setEnabled(False)
+                self.statusbar.showMessage("Não conectado")
+                QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
 
-            self._connect_thread.finished.connect(finalize)
+            self._connect_thread.succeeded.connect(finalize_success)
+            self._connect_thread.failed.connect(finalize_fail)
+            self._progress.canceled.connect(lambda: finalize_fail(Exception("Operação cancelada pelo usuário")))
             self._connect_thread.start()
 
         def handle_reject():

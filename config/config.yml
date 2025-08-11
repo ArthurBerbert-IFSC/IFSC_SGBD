@@ -5,12 +5,6 @@ databases:
   password: GeoIFSC2025
   port: 5432
   user: postgres
-- dbname: Campus_Maruo_Ramos_db
-  host: 172.16.0.228
-  name: Ge
-  password: GeoIFSC2025
-  port: 5432
-  user: postgres
 - dbname: Campus_Mauro_Ramos_db
   host: 172.16.0.228
   name: Geral

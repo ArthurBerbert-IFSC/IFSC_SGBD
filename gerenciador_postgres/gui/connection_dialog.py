@@ -1,22 +1,31 @@
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QDialog,
-    QVBoxLayout,
+    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressDialog,
+    QSpinBox,
+    QVBoxLayout,
+    QMessageBox,
     QComboBox,
     QPushButton,
-    QDialogButtonBox,
-    QSpinBox,
     QCheckBox,
-    QMessageBox,
 )
-from PyQt6.QtGui import QIcon
 from pathlib import Path
+import logging
 from ..config_manager import load_config, save_config
 
 
-class ConnectionDialog(QDialog):
+class _TaskRunner(QThread):
+    pass
+
+
+class ConnectionDialog(QDialog):  # caso já seja QDialog, mantenha
+    connected = pyqtSignal(object)  # emite a conexão/obj de sessão no sucesso
+
     """Diálogo para entrada e gerenciamento de parâmetros de conexão."""
 
     def __init__(self, parent=None):
@@ -88,7 +97,7 @@ class ConnectionDialog(QDialog):
         )
         layout.addWidget(self.buttonBox)
 
-        # Conectar sinais
+        # Conectar sinais: aqui apenas aceitar/rejeitar; a conexão é gerida pela MainWindow
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
         self.cmbProfiles.currentTextChanged.connect(self.load_selected_profile)
@@ -175,3 +184,5 @@ class ConnectionDialog(QDialog):
         if self.txtPassword.text():
             params["password"] = self.txtPassword.text()
         return params
+
+    # A conexão é realizada pela MainWindow; este diálogo apenas coleta parâmetros.
