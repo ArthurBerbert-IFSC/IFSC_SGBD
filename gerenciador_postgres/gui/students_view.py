@@ -72,16 +72,15 @@ class StudentsView(QWidget):
             group_name, ok = QInputDialog.getText(
                 self,
                 "Nova Turma",
-                "Nome da turma (deve começar com 'grp_'):",
+                "Digite o nome da turma (o prefixo 'grp_' será adicionado automaticamente):",
                 QLineEdit.EchoMode.Normal,
-                "grp_",
+                "",
             )
-            if not ok or not group_name:
+            if not ok or not group_name.strip():
                 return None
-            group_name = group_name.strip()
+            group_name = group_name.strip().lower()
             if not group_name.startswith("grp_"):
-                QMessageBox.warning(self, "Erro", "Nome da turma deve começar com 'grp_'.")
-                return None
+                group_name = f"grp_{group_name}"
             try:
                 self.controller.create_group(group_name)
                 self.controller.apply_template_to_group(group_name, DEFAULT_TEMPLATE)

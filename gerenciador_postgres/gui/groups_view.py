@@ -136,13 +136,15 @@ class GroupsView(QWidget):
         name, ok = QInputDialog.getText(
             self,
             "Novo Grupo",
-            "Nome do grupo (deve começar com 'grp_'):",
+            "Digite o nome do grupo (o prefixo 'grp_' será adicionado automaticamente):",
             QLineEdit.EchoMode.Normal,
-            "grp_",
+            "",
         )
-        if not ok or not name:
+        if not ok or not name.strip():
             return
-        name = name.strip()
+        name = name.strip().lower()
+        if not name.startswith("grp_"):
+            name = f"grp_{name}"
         try:
             self.controller.create_group(name)
             QMessageBox.information(self, "Sucesso", f"Grupo '{name}' criado.")

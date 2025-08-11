@@ -80,10 +80,15 @@ class BatchUserDialog(QDialog):
         group_name = self.cmbGroups.currentText()
         if group_name == "-- Criar nova turma --":
             group_name, ok = QInputDialog.getText(
-                self, "Nova Turma", "Nome da nova turma:"
+                self,
+                "Nova Turma",
+                "Digite o nome da nova turma (o prefixo 'grp_' será adicionado automaticamente):",
             )
-            if not ok or not group_name:
+            if not ok or not group_name.strip():
                 raise ValueError("Nome da turma inválido.")
+            group_name = group_name.strip()
+            if not group_name.lower().startswith("grp_"):
+                group_name = f"grp_{group_name.lower()}"
         return users_data, valid_until, group_name
 
 

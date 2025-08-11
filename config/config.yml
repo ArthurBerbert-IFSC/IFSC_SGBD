@@ -10,6 +10,11 @@ databases:
   name: Geral
   port: 5432
   user: postgres
+- dbname: Campus_Mauro_Ramos_db
+  host: 172.16.0.228
+  name: aaa
+  port: 5432
+  user: postgres
 group_prefix: grp_
 log_level: DEBUG
 log_path: D:\GitHub\IFSC_SGBD\logs\app.log
