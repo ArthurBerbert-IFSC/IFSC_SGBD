@@ -7,6 +7,12 @@ import subprocess
 import sys
 import logging
 import os
+if os.getenv("ENV", "").lower() in {"dev", "development"} or os.getenv("DEBUG") == "true":
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
 from gerenciador_postgres.config_manager import load_config, validate_config
 
 

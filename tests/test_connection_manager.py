@@ -13,6 +13,7 @@ from gerenciador_postgres.connection_manager import (
     ConnectionManager,
     env_var_for_profile,
     resolve_password,
+    _friendly_error,
 )
 
 
@@ -157,3 +158,15 @@ def test_resolve_password_env_over_keyring(monkeypatch):
 
     monkeypatch.delenv("PROD_PASSWORD")
     assert resolve_password("prod", "user") == "ring"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("could not translate host name", "Host inválido"),
+    ("No route to host", "Sem rota"),
+    ("connection timed out", "Servidor inacessível"),
+    ("password authentication failed", "Usuário/senha inválidos"),
+    ("SSL SYSCALL error: EOF detected", "SSL"),
+])
+def test_friendly_error_messages(raw, expected):
+    err = _friendly_error(OperationalError(raw))
+    assert expected.lower() in str(err).lower()
