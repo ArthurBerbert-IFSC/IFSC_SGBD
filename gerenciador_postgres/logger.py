@@ -1,8 +1,8 @@
 import logging
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from .path_config import BASE_DIR
 from .config_manager import load_config
-import os
 
 
 def setup_logger():
@@ -15,26 +15,28 @@ def setup_logger():
     """
 
     try:
-        config = load_config()
+        cfg = load_config()
     except Exception:
-        config = {"log_path": str(BASE_DIR / "logs" / "app.log"), "log_level": "INFO"}
+        cfg = {"log_path": str(BASE_DIR / "logs" / "app.log"), "log_level": "INFO"}
 
-    log_path = config.get("log_path", str(BASE_DIR / "logs" / "app.log"))
-    log_level = getattr(logging, config.get("log_level", "INFO").upper(), logging.INFO)
-
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    log_path = Path(cfg.get("log_path", BASE_DIR / "logs" / "app.log"))
+    log_path = log_path if log_path.is_absolute() else BASE_DIR / log_path
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_level = getattr(logging, cfg.get("log_level", "INFO").upper(), logging.INFO)
 
     logger = logging.getLogger()  # logger raiz
     logger.setLevel(log_level)
 
-    formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     file_handler = RotatingFileHandler(
-        log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+        log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
     )
+    file_handler.setLevel(log_level)
     file_handler.setFormatter(formatter)
 
     stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(log_level)
     stream_handler.setFormatter(formatter)
 
     logger.handlers.clear()

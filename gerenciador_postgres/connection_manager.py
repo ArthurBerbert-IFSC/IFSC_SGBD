@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import re
 import psycopg2
 import keyring
 from psycopg2 import OperationalError
@@ -24,6 +25,35 @@ from .logger import setup_logger
 
 logger = logging.getLogger(__name__)
 logger.propagate = True
+
+
+def env_var_for_profile(profile_name: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", profile_name).upper().strip("_")
+    return f"{slug}_PASSWORD"
+
+
+def resolve_password(profile_name: str, user: str) -> str | None:
+    env_var = env_var_for_profile(profile_name)
+    password = os.getenv(env_var)
+    if password is not None:
+        return password
+    try:
+        return keyring.get_password("IFSC_SGBD", user)
+    except Exception:
+        return None
+
+
+def _friendly_error(exc: OperationalError) -> OperationalError:
+    msg = str(exc).lower()
+    if "connection refused" in msg:
+        new_msg = "Verificar host/porta, firewall e pg_hba.conf"
+    elif "timeout" in msg:
+        new_msg = "Servidor inacessível; conferir rede/VPN"
+    elif "authentication failed" in msg:
+        new_msg = "Usuário/senha inválidos ou método no pg_hba.conf"
+    else:
+        new_msg = str(exc)
+    return OperationalError(new_msg)
 
 
 class ConnectionManager:
@@ -82,17 +112,12 @@ class ConnectionManager:
             "port": profile.get("port", 5432),
         }
 
-        password = profile.get("password")
-        if password is None:
-            env_var = f"{profile_name.upper()}_PASSWORD"
-            password = os.getenv(env_var)
-        if password is None:
-            try:
-                password = keyring.get_password("IFSC_SGBD", profile["user"])
-            except Exception:
-                password = None
+        password = resolve_password(profile_name, profile["user"])
         if password:
             params["password"] = password
+
+        timeout = int(config.get("connect_timeout", 5))
+        params["connect_timeout"] = timeout
 
         pool = self._pools.get(profile_name)
         if pool is None:
@@ -105,9 +130,9 @@ class ConnectionManager:
             self._thread_local.current_conn = conn
             self._thread_local.current_profile = profile_name
             return conn
-        except OperationalError:
+        except OperationalError as e:
             logger.exception("Erro operacional ao conectar ao banco de dados")
-            raise
+            raise _friendly_error(e)
         except Exception:
             logger.exception("Erro inesperado ao conectar ao banco de dados")
             raise
@@ -121,13 +146,19 @@ class ConnectionManager:
         if not logging.getLogger('app').handlers:
             setup_logger()
 
-        timeout = int(params.pop("connect_timeout", 5) or 5)
-        logger.info("Conectando ao PostgreSQL em %s:%s/%s (timeout=%ss)...",
-                    params.get("host"), params.get("port"), params.get("dbname"), timeout)
-        conn = psycopg2.connect(connect_timeout=timeout, **params)
-        conn.autocommit = False
-        logger.info("Conexão aberta.")
-        return conn
+        timeout = int(params.pop("connect_timeout", load_config().get("connect_timeout", 5)) or 5)
+        logger.info(
+            "Conectando ao PostgreSQL em %s:%s/%s (timeout=%ss)...",
+            params.get("host"), params.get("port"), params.get("dbname"), timeout,
+        )
+        try:
+            conn = psycopg2.connect(connect_timeout=timeout, **params)
+            conn.autocommit = False
+            logger.info("Conexão aberta.")
+            return conn
+        except OperationalError as e:
+            logger.exception("Erro operacional ao conectar ao banco de dados")
+            raise _friendly_error(e)
 
     # ------------------------------------------------------------------
     def get_connection(self) -> connection:

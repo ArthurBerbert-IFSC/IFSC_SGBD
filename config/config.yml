@@ -1,17 +1,16 @@
 databases:
-- dbname: Campus_Maruo_Ramos_db
+- dbname: Campus_Mauro_Ramos_db
   host: 172.16.0.228
   name: remoto
-  password: GeoIFSC2025
   port: 5432
   user: postgres
 - dbname: Campus_Mauro_Ramos_db
   host: 172.16.0.228
   name: Geral
-  password: GeoIFSC2025
   port: 5432
   user: postgres
 group_prefix: grp_
 log_level: DEBUG
-log_path: D:\GitHub\IFSC_SGBD\logs\app.log
+log_path: logs/app.log
 schema_creation_group: Professores
+connect_timeout: 5
