@@ -29,7 +29,7 @@ class InitialPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._setup_ui()
-        self._populate()
+        self.refresh()
 
     def _setup_ui(self) -> None:
         layout = QGridLayout(self)
@@ -50,11 +50,16 @@ class InitialPanel(QWidget):
         self.db_box = QGroupBox("Banco de Dados", self)
         self.check_box = QGroupBox("Checklist", self)
 
+        self.setStyleSheet(
+            """
+            QWidget {background-color: #fafafa;}
+            QGroupBox {background-color: #ffffff; border: 1px solid #cccccc; border-radius: 5px;}
+            QGroupBox::title {subcontrol-origin: margin; subcontrol-position: top center; padding: 0 3px; font-weight: bold;}
+            """
+        )
+
         for box in (self.app_box, self.env_box, self.db_box, self.check_box):
             box.setLayout(QVBoxLayout())
-            box.setStyleSheet(
-                "QGroupBox {background-color: #f9f9f9; border: 1px solid #d3d3d3; border-radius: 5px;}"
-            )
 
         layout.addWidget(self.app_box, 1, 0)
         layout.addWidget(self.env_box, 1, 1)
@@ -62,6 +67,16 @@ class InitialPanel(QWidget):
         layout.addWidget(self.check_box, 2, 1)
         layout.setColumnStretch(0, 1)
         layout.setColumnStretch(1, 1)
+
+    def refresh(self) -> None:
+        for box in (self.app_box, self.env_box, self.db_box, self.check_box):
+            layout = box.layout()
+            while layout.count():
+                item = layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+        self._populate()
 
     def _populate(self) -> None:
         meta = AppMetadata()
