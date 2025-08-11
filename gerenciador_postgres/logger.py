@@ -42,3 +42,8 @@ def setup_logger():
     logger.addHandler(stream_handler)
 
     return logger
+
+
+# Configure default logger on module import if not already configured
+if not logging.getLogger('app').handlers:
+    setup_logger()
