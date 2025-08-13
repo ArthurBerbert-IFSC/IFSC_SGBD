@@ -300,9 +300,10 @@ class GroupsView(QWidget):
                     )
                 sch_perms = schema_level.get(schema, set())
                 general_item.setCheckState(5, Qt.CheckState.Checked if 'USAGE' in sch_perms else Qt.CheckState.Unchecked)
-        general_item.setCheckState(6, Qt.CheckState.Checked if 'CREATE' in sch_perms else Qt.CheckState.Unchecked)
-        schema_item.insertChild(0, general_item)
-    self.treePrivileges.expandAll()
+                general_item.setCheckState(6, Qt.CheckState.Checked if 'CREATE' in sch_perms else Qt.CheckState.Unchecked)
+                schema_item.insertChild(0, general_item)
+        # Expand after populating all schemas
+        self.treePrivileges.expandAll()
 
     def _apply_template(self):
         if not self.current_group:
@@ -365,12 +366,11 @@ class GroupsView(QWidget):
                     # Schema-level flags (USAGE/CREATE)
                     schema_usage = table_item.checkState(5) == Qt.CheckState.Checked
                     schema_create = table_item.checkState(6) == Qt.CheckState.Checked
-                    if schema_usage or schema_create:
-                        # Guardar em chave especial para posterior grant_schema_privileges (feito fora desta estrutura)
-                        privileges.setdefault(schema, {})['__SCHEMA_PRIVS__'] = {
-                            *( ['USAGE'] if schema_usage else [] ),
-                            *( ['CREATE'] if schema_create else [] ),
-                        }
+                    # Guardar sempre (mesmo vazio) para permitir revogar privilégios de schema
+                    privileges.setdefault(schema, {})['__SCHEMA_PRIVS__'] = {
+                        *( ['USAGE'] if schema_usage else [] ),
+                        *( ['CREATE'] if schema_create else [] ),
+                    }
                 else:
                     table = table_item.text(0)
                     perms = set()
