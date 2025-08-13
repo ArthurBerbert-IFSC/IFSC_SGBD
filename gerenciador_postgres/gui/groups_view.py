@@ -169,9 +169,10 @@ class GroupsView(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-            success = self.controller.delete_group_and_members(group)
+            if reply == QMessageBox.StandardButton.Yes:
+                success = self.controller.delete_group_and_members(group)
+            else:
+                success = self.controller.delete_group(group)
         else:
             reply = QMessageBox.question(
                 self,

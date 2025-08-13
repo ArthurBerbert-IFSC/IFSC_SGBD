@@ -13,6 +13,7 @@ def _make_dialog():
     dlg.chkSavePassword = SimpleNamespace(isChecked=lambda: True)
     dlg.txtPassword = SimpleNamespace(text=lambda: "p")
     dlg.txtUser = SimpleNamespace(text=lambda: "u")
+    dlg.cmbProfiles = SimpleNamespace(currentText=lambda: "")
     dlg.update_password_indicator = lambda: None
     dlg._keyring_warning_shown = False
     return dlg
