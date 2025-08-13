@@ -10,6 +10,7 @@ from PyQt6.QtGui import QIcon
 from pathlib import Path
 from ..db_manager import DBManager
 import psycopg2
+from .sql_syntax_highlighter import SQLSyntaxHighlighter
 
 
 class SQLConsoleView(QWidget):
@@ -26,6 +27,7 @@ class SQLConsoleView(QWidget):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         self.txtSQL = QTextEdit()
+        self._highlighter = SQLSyntaxHighlighter(self.txtSQL)
         self.btnExecute = QPushButton("Executar")
         self.txtResult = QPlainTextEdit()
         self.txtResult.setReadOnly(True)
