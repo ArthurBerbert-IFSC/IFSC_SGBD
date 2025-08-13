@@ -1,3 +1,10 @@
+from time import perf_counter
+from pathlib import Path
+import json
+
+import psycopg2
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon, QFont
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -7,13 +14,12 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QComboBox,
     QInputDialog,
+    QLabel,
+    QTabWidget,
+    QStatusBar,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QFont
-from pathlib import Path
+
 from ..db_manager import DBManager
-import psycopg2
-import json
 from .sql_syntax_highlighter import SQLSyntaxHighlighter
 
 class SQLConsoleView(QWidget):
@@ -47,10 +53,18 @@ class SQLConsoleView(QWidget):
         self.btnExecute = QPushButton("Executar")
         self.btnIncrease = QPushButton("+")
         self.btnDecrease = QPushButton("-")
-        self.txtResult = QPlainTextEdit()
-        self.txtResult.setReadOnly(True)
+        self.lblFont = QLabel("Tamanho do texto:")
+        self.txtDataOutput = QPlainTextEdit()
+        self.txtDataOutput.setReadOnly(True)
+        self.txtMessages = QPlainTextEdit()
+        self.txtMessages.setReadOnly(True)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.txtDataOutput, "Data Output")
+        self.tabs.addTab(self.txtMessages, "Mensagens")
+        self.status_bar = QStatusBar()
 
         button_layout = QHBoxLayout()
+        button_layout.addWidget(self.lblFont)
         button_layout.addWidget(self.btnDecrease)
         button_layout.addWidget(self.btnIncrease)
         button_layout.addStretch()
@@ -58,7 +72,8 @@ class SQLConsoleView(QWidget):
 
         layout.addWidget(self.txtSQL)
         layout.addLayout(button_layout)
-        layout.addWidget(self.txtResult)
+        layout.addWidget(self.tabs)
+        layout.addWidget(self.status_bar)
 
         self.btnExecute.clicked.connect(self.on_execute)
         self.cmbQueries.currentIndexChanged.connect(self.on_query_selected)
@@ -125,6 +140,11 @@ class SQLConsoleView(QWidget):
         if not sql_text:
             return
         conn = self.db_manager.conn
+        self.status_bar.showMessage("Executando...")
+        self.txtDataOutput.clear()
+        self.txtMessages.clear()
+        start_time = perf_counter()
+        last_row_count = 0
         try:
             with conn.cursor() as cur:
                 statements = [s.strip() for s in sql_text.split(";") if s.strip()]
@@ -137,19 +157,32 @@ class SQLConsoleView(QWidget):
                         output_lines.append("\t".join(headers))
                         for row in rows:
                             output_lines.append("\t".join(str(col) for col in row))
+                        last_row_count = len(rows)
                     else:
-                        output_lines.append(f"{cur.rowcount} linha(s) afetadas.")
+                        last_row_count = cur.rowcount
+                        output_lines.append(
+                            f"{cur.rowcount} linha(s) afetadas."
+                        )
                 conn.commit()
-                self.txtResult.setPlainText("\n".join(output_lines) or "Comando executado.")
+                self.txtDataOutput.setPlainText(
+                    "\n".join(output_lines) or "Comando executado."
+                )
+                elapsed = perf_counter() - start_time
+                self.txtMessages.setPlainText("Comando executado com sucesso.")
+                self.status_bar.showMessage(
+                    f"Concluído em {elapsed:.2f}s | Linhas afetadas: {last_row_count}"
+                )
         except psycopg2.Error as e:
             conn.rollback()
-            self.txtResult.setPlainText(f"Erro: {e}")
+            self.txtMessages.setPlainText(f"Erro: {e}")
+            self.status_bar.showMessage("Erro ao executar a consulta")
 
     def _set_font_size(self):
         font = QFont(self.txtSQL.font())
         font.setPointSize(self.font_size)
         self.txtSQL.setFont(font)
-        self.txtResult.setFont(font)
+        self.txtDataOutput.setFont(font)
+        self.txtMessages.setFont(font)
 
     def increase_font(self):
         self.font_size += 1
