@@ -4,7 +4,7 @@ import json
 
 import psycopg2
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QFont
+from PyQt6.QtGui import QIcon, QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -17,6 +17,9 @@ from PyQt6.QtWidgets import (
     QLabel,
     QTabWidget,
     QStatusBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QSplitter,
 )
 
 from ..db_manager import DBManager
@@ -39,6 +42,20 @@ class SQLConsoleView(QWidget):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
+        # Font controls at the top
+        self.lblFont = QLabel("Tamanho do texto:")
+        self.btnDecrease = QPushButton("-")
+        self.btnIncrease = QPushButton("+")
+        self.btnClear = QPushButton("Limpar")
+        font_layout = QHBoxLayout()
+        font_layout.addWidget(self.lblFont)
+        font_layout.addWidget(self.btnDecrease)
+        font_layout.addWidget(self.btnIncrease)
+        font_layout.addWidget(self.btnClear)
+        font_layout.addStretch()
+        layout.addLayout(font_layout)
+
+        # Saved queries controls
         query_layout = QHBoxLayout()
         self.cmbQueries = QComboBox()
         self.btnSaveQuery = QPushButton("Salvar")
@@ -48,34 +65,45 @@ class SQLConsoleView(QWidget):
         query_layout.addWidget(self.btnDeleteQuery)
         layout.addLayout(query_layout)
 
+        # SQL editor and results
         self.txtSQL = QTextEdit()
+        self.txtSQL.setTabStopDistance(
+            4 * self.txtSQL.fontMetrics().horizontalAdvance(" ")
+        )
         self._highlighter = SQLSyntaxHighlighter(self.txtSQL)
         self.btnExecute = QPushButton("Executar")
-        self.btnIncrease = QPushButton("+")
-        self.btnDecrease = QPushButton("-")
-        self.lblFont = QLabel("Tamanho do texto:")
-        self.txtDataOutput = QPlainTextEdit()
-        self.txtDataOutput.setReadOnly(True)
-        self.txtMessages = QPlainTextEdit()
-        self.txtMessages.setReadOnly(True)
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.txtDataOutput, "Data Output")
-        self.tabs.addTab(self.txtMessages, "Mensagens")
-        self.status_bar = QStatusBar()
-
         button_layout = QHBoxLayout()
-        button_layout.addWidget(self.lblFont)
-        button_layout.addWidget(self.btnDecrease)
-        button_layout.addWidget(self.btnIncrease)
         button_layout.addStretch()
         button_layout.addWidget(self.btnExecute)
 
-        layout.addWidget(self.txtSQL)
-        layout.addLayout(button_layout)
-        layout.addWidget(self.tabs)
+        sql_container = QWidget()
+        sql_layout = QVBoxLayout(sql_container)
+        sql_layout.addWidget(self.txtSQL)
+        sql_layout.addLayout(button_layout)
+
+        self.tblDataOutput = QTableWidget()
+        self.txtMessages = QPlainTextEdit()
+        self.txtMessages.setReadOnly(True)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.tblDataOutput, "Saída de Dados")
+        self.tabs.addTab(self.txtMessages, "Mensagens")
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(sql_container)
+        splitter.addWidget(self.tabs)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+
+        self.status_bar = QStatusBar()
+
+        layout.addWidget(splitter)
         layout.addWidget(self.status_bar)
 
+        # Shortcuts and signals
+        self.shortcut = QShortcut(QKeySequence(Qt.Key.Key_F5), self)
+        self.shortcut.activated.connect(self.on_execute)
         self.btnExecute.clicked.connect(self.on_execute)
+        self.btnClear.clicked.connect(self.txtSQL.clear)
         self.cmbQueries.currentIndexChanged.connect(self.on_query_selected)
         self.btnSaveQuery.clicked.connect(self.on_save_query)
         self.btnDeleteQuery.clicked.connect(self.on_delete_query)
@@ -141,32 +169,35 @@ class SQLConsoleView(QWidget):
             return
         conn = self.db_manager.conn
         self.status_bar.showMessage("Executando...")
-        self.txtDataOutput.clear()
+        self.tblDataOutput.clear()
+        self.tblDataOutput.setRowCount(0)
+        self.tblDataOutput.setColumnCount(0)
         self.txtMessages.clear()
         start_time = perf_counter()
         last_row_count = 0
         try:
             with conn.cursor() as cur:
                 statements = [s.strip() for s in sql_text.split(";") if s.strip()]
-                output_lines: list[str] = []
                 for stmt in statements:
                     cur.execute(stmt)
                     if cur.description:
                         rows = cur.fetchall()
                         headers = [d[0] for d in cur.description]
-                        output_lines.append("\t".join(headers))
-                        for row in rows:
-                            output_lines.append("\t".join(str(col) for col in row))
+                        self.tblDataOutput.setColumnCount(len(headers))
+                        self.tblDataOutput.setHorizontalHeaderLabels(headers)
+                        self.tblDataOutput.setRowCount(len(rows))
+                        for r, row in enumerate(rows):
+                            for c, col in enumerate(row):
+                                self.tblDataOutput.setItem(
+                                    r, c, QTableWidgetItem(str(col))
+                                )
                         last_row_count = len(rows)
                     else:
                         last_row_count = cur.rowcount
-                        output_lines.append(
-                            f"{cur.rowcount} linha(s) afetadas."
-                        )
+                        self.tblDataOutput.clear()
+                        self.tblDataOutput.setRowCount(0)
+                        self.tblDataOutput.setColumnCount(0)
                 conn.commit()
-                self.txtDataOutput.setPlainText(
-                    "\n".join(output_lines) or "Comando executado."
-                )
                 elapsed = perf_counter() - start_time
                 self.txtMessages.setPlainText("Comando executado com sucesso.")
                 self.status_bar.showMessage(
@@ -181,7 +212,7 @@ class SQLConsoleView(QWidget):
         font = QFont(self.txtSQL.font())
         font.setPointSize(self.font_size)
         self.txtSQL.setFont(font)
-        self.txtDataOutput.setFont(font)
+        self.tblDataOutput.setFont(font)
         self.txtMessages.setFont(font)
 
     def increase_font(self):
