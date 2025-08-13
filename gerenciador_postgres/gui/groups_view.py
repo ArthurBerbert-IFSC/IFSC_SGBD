@@ -95,8 +95,14 @@ class GroupsView(QWidget):
             "DELETE",
         ])
         right_layout.addWidget(self.treePrivileges)
+
         self.btnSave = QPushButton("Salvar")
-        right_layout.addWidget(self.btnSave)
+        self.btnSweep = QPushButton("Sincronizar privilégios")
+        actions_layout = QHBoxLayout()
+        actions_layout.addWidget(self.btnSave)
+        actions_layout.addWidget(self.btnSweep)
+        actions_layout.addStretch(1)
+        right_layout.addLayout(actions_layout)
         self.splitter.addWidget(right_panel)
 
         layout.addWidget(self.splitter)
@@ -106,6 +112,7 @@ class GroupsView(QWidget):
         self.treePrivileges.setEnabled(False)
         self.btnApplyTemplate.setEnabled(False)
         self.btnSave.setEnabled(False)
+        self.btnSweep.setEnabled(False)
         self.lstMembers.setEnabled(False)
 
     def _connect_signals(self):
@@ -114,6 +121,7 @@ class GroupsView(QWidget):
         self.lstGroups.currentItemChanged.connect(self._on_group_selected)
         self.btnApplyTemplate.clicked.connect(self._apply_template)
         self.btnSave.clicked.connect(self._save_privileges)
+        self.btnSweep.clicked.connect(self._sweep_privileges)
 
     # ------------------------------------------------------------------
     def refresh_groups(self):
@@ -199,6 +207,7 @@ class GroupsView(QWidget):
             self.treePrivileges.setEnabled(False)
             self.btnApplyTemplate.setEnabled(False)
             self.btnSave.setEnabled(False)
+            self.btnSweep.setEnabled(False)
             self.lstMembers.setEnabled(False)
             self.lstMembers.clear()
             return
@@ -206,6 +215,7 @@ class GroupsView(QWidget):
         self.treePrivileges.setEnabled(True)
         self.btnApplyTemplate.setEnabled(True)
         self.btnSave.setEnabled(True)
+        self.btnSweep.setEnabled(True)
         self.lstMembers.setEnabled(True)
         self._populate_tree()
         self._refresh_members()
@@ -314,6 +324,30 @@ class GroupsView(QWidget):
             )
 
         self._execute_async(task, on_success, on_error, "Salvando privilégios...")
+
+    def _sweep_privileges(self):
+        if not self.current_group:
+            return
+
+        def task():
+            return self.controller.sweep_group_privileges(self.current_group)
+
+        def on_success(success):
+            if success:
+                QMessageBox.information(
+                    self, "Concluído", f"Privilégios do grupo '{self.current_group}' sincronizados."
+                )
+            else:
+                QMessageBox.critical(
+                    self, "Erro", "Falha ao sincronizar privilégios do grupo."
+                )
+
+        def on_error(e: Exception):
+            QMessageBox.critical(
+                self, "Erro", f"Não foi possível sincronizar os privilégios: {e}"
+            )
+
+        self._execute_async(task, on_success, on_error, "Sincronizando privilégios...")
 
     def _refresh_members(self):
         self.lstMembers.clear()

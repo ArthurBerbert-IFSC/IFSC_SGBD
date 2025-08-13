@@ -52,12 +52,21 @@ class GroupsController(QObject):
     def apply_group_privileges(self, group_name: str, privileges, obj_type: str = "TABLE"):
         success = self.role_manager.set_group_privileges(group_name, privileges, obj_type=obj_type)
         if success:
+            # Sincroniza defaults para refletir os privilégios aplicados
+            try:
+                self.role_manager.sweep_privileges(target_group=group_name)
+            except Exception:
+                pass
             self.data_changed.emit()
         return success
 
     def apply_template_to_group(self, group_name: str, template: str):
         success = self.role_manager.apply_template_to_group(group_name, template)
         if success:
+            try:
+                self.role_manager.sweep_privileges(target_group=group_name)
+            except Exception:
+                pass
             self.data_changed.emit()
         return success
 
@@ -70,14 +79,32 @@ class GroupsController(QObject):
     def grant_schema_privileges(self, group_name: str, schema: str, privileges):
         success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
         if success:
+            try:
+                self.role_manager.sweep_privileges(target_group=group_name)
+            except Exception:
+                pass
             self.data_changed.emit()
         return success
 
     def alter_default_privileges(self, group_name: str, schema: str, obj_type: str, privileges):
         success = self.role_manager.alter_default_privileges(group_name, schema, obj_type, privileges)
         if success:
+            try:
+                self.role_manager.sweep_privileges(target_group=group_name)
+            except Exception:
+                pass
             self.data_changed.emit()
         return success
 
     def get_current_database(self):
         return self.role_manager.dao.conn.get_dsn_parameters().get("dbname")
+
+    # ---------------------------------------------------------------
+    # Sincronização (sweep) de privilégios
+    # ---------------------------------------------------------------
+    def sweep_group_privileges(self, group_name: str) -> bool:
+        """Reaplica GRANTs e ajusta default privileges para o grupo informado."""
+        success = self.role_manager.sweep_privileges(target_group=group_name)
+        if success:
+            self.data_changed.emit()
+        return success

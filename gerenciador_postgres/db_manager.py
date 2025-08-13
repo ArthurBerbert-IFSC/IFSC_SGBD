@@ -410,7 +410,7 @@ class DBManager:
                 )
 
     def alter_default_privileges(
-        self, group: str, schema: str, obj_type: str, privileges: Set[str]
+        self, group: str, schema: str, obj_type: str, privileges: Set[str], *, for_role: str | None = None
     ):
         """Atualiza ``ALTER DEFAULT PRIVILEGES`` para novos objetos.
 
@@ -448,22 +448,42 @@ class DBManager:
         obj_keyword = type_map[obj_type]
         with self.conn.cursor() as cur:
             # Remove privilégios anteriores
-            cur.execute(
-                sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA {} REVOKE ALL ON {} FROM {}"
-                ).format(identifier, obj_keyword, sql.Identifier(group))
-            )
-            if privileges:
+            if for_role:
                 cur.execute(
                     sql.SQL(
-                        "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT {} ON {} TO {}"
-                    ).format(
-                        identifier,
-                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
-                        obj_keyword,
-                        sql.Identifier(group),
-                    )
+                        "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA {} REVOKE ALL ON {} FROM {}"
+                    ).format(sql.Identifier(for_role), identifier, obj_keyword, sql.Identifier(group))
                 )
+            else:
+                cur.execute(
+                    sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES IN SCHEMA {} REVOKE ALL ON {} FROM {}"
+                    ).format(identifier, obj_keyword, sql.Identifier(group))
+                )
+            if privileges:
+                if for_role:
+                    cur.execute(
+                        sql.SQL(
+                            "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA {} GRANT {} ON {} TO {}"
+                        ).format(
+                            sql.Identifier(for_role),
+                            identifier,
+                            sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                            obj_keyword,
+                            sql.Identifier(group),
+                        )
+                    )
+                else:
+                    cur.execute(
+                        sql.SQL(
+                            "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT {} ON {} TO {}"
+                        ).format(
+                            identifier,
+                            sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                            obj_keyword,
+                            sql.Identifier(group),
+                        )
+                    )
 
     # Métodos de schema
     def create_schema(self, schema_name: str, owner: str | None = None):

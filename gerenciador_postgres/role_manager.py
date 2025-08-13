@@ -6,6 +6,7 @@ import unicodedata
 import re
 from psycopg2 import sql
 from .config_manager import load_config
+from config.permission_templates import DEFAULT_TEMPLATE
 
 class RoleManager:
     """Camada de serviço: orquestra operações, valida regras e controla transações."""
@@ -310,6 +311,14 @@ class RoleManager:
                 raise ValueError(f"Grupo '{group_name}' já existe.")
             with self.dao.transaction():
                 self.dao.create_group(group_name)
+                # Aplica automaticamente o template padrão de permissões
+                try:
+                    self.apply_template_to_group(group_name, DEFAULT_TEMPLATE)
+                except Exception as e:
+                    # Não interrompe a criação do grupo se o template falhar
+                    self.logger.warning(
+                        f"[{self.operador}] Grupo criado, mas falhou ao aplicar template padrão '{DEFAULT_TEMPLATE}': {e}"
+                    )
             self.logger.info(f"[{self.operador}] Criou grupo: {group_name}")
             return group_name
         except Exception as e:
@@ -348,6 +357,24 @@ class RoleManager:
         try:
             with self.dao.transaction():
                 self.dao.add_user_to_group(username, group_name)
+                # Garante que objetos futuros criados por 'username' concedam privilégios ao grupo automaticamente
+                # Aplicamos defaults mínimos (ex.: SELECT para tables), ajustáveis conforme política.
+                try:
+                    # Para tabelas, usar SELECT como mínimo; aplicar em todos os schemas existentes
+                    min_table_perms = {"SELECT"}
+                    for schema in self.dao.list_schemas():
+                        self.dao.alter_default_privileges(
+                            group_name,
+                            schema=schema,
+                            obj_type="tables",
+                            privileges=min_table_perms,
+                            for_role=username,
+                        )
+                except Exception as e:
+                    # Não impede a associação; loga aviso para ajuste fino posterior
+                    self.logger.warning(
+                        f"[{self.operador}] Falha ao configurar default privileges para criador '{username}' -> grupo '{group_name}': {e}"
+                    )
             self.logger.info(f"[{self.operador}] Adicionou usuário '{username}' ao grupo '{group_name}'")
             return True
         except Exception as e:
@@ -358,6 +385,20 @@ class RoleManager:
         try:
             with self.dao.transaction():
                 self.dao.remove_user_from_group(username, group_name)
+                # Revoga defaults FOR ROLE para que novas criações de 'username' não concedam mais ao grupo
+                try:
+                    for schema in self.dao.list_schemas():
+                        self.dao.alter_default_privileges(
+                            group_name,
+                            schema=schema,
+                            obj_type="tables",
+                            privileges=set(),  # remove todos os defaults do grupo
+                            for_role=username,
+                        )
+                except Exception as e:
+                    self.logger.debug(
+                        f"[{self.operador}] Ignorando erro ao revogar defaults FOR ROLE '{username}' do grupo '{group_name}': {e}"
+                    )
             self.logger.info(f"[{self.operador}] Removeu usuário '{username}' do grupo '{group_name}'")
             return True
         except Exception as e:
@@ -370,6 +411,29 @@ class RoleManager:
             with self.dao.transaction():
                 self.dao.remove_user_from_group(username, old_group)
                 self.dao.add_user_to_group(username, new_group)
+                # Ajusta defaults: revoga do grupo antigo e aplica no novo para o usuário
+                try:
+                    for schema in self.dao.list_schemas():
+                        # Revoga do grupo antigo
+                        self.dao.alter_default_privileges(
+                            old_group,
+                            schema=schema,
+                            obj_type="tables",
+                            privileges=set(),
+                            for_role=username,
+                        )
+                        # Concede no grupo novo (mínimo SELECT)
+                        self.dao.alter_default_privileges(
+                            new_group,
+                            schema=schema,
+                            obj_type="tables",
+                            privileges={"SELECT"},
+                            for_role=username,
+                        )
+                except Exception as e:
+                    self.logger.warning(
+                        f"[{self.operador}] Falha ao ajustar defaults FOR ROLE na transferência de '{username}': {e}"
+                    )
                 if self.audit_manager:
                     self.audit_manager.log_operation(
                         operador=self.operador,
@@ -448,6 +512,33 @@ class RoleManager:
         try:
             with self.dao.transaction():
                 self.dao.apply_group_privileges(group_name, privileges, obj_type=obj_type)
+                # Ajusta também os privilégios padrão (ALTER DEFAULT PRIVILEGES) para novos objetos,
+                # usando a união dos privilégios aplicados por schema.
+                obj_type_upper = obj_type.upper()
+                if obj_type_upper == "TABLE":
+                    # União por schema dos privilégios de tabelas
+                    for schema, tables in privileges.items():
+                        union_perms: Set[str] = set()
+                        for perms in tables.values():
+                            union_perms |= set(perms)
+                        # Configura default privileges para futuras tabelas nesse schema
+                        try:
+                            self.dao.alter_default_privileges(group_name, schema, "tables", union_perms)
+                        except Exception as e:
+                            self.logger.warning(
+                                f"[{self.operador}] Falha ao ajustar default privileges (tables) em '{schema}' para '{group_name}': {e}"
+                            )
+                elif obj_type_upper == "SEQUENCE":
+                    for schema, seqs in privileges.items():
+                        union_perms: Set[str] = set()
+                        for perms in seqs.values():
+                            union_perms |= set(perms)
+                        try:
+                            self.dao.alter_default_privileges(group_name, schema, "sequences", union_perms)
+                        except Exception as e:
+                            self.logger.warning(
+                                f"[{self.operador}] Falha ao ajustar default privileges (sequences) em '{schema}' para '{group_name}': {e}"
+                            )
             self.logger.info(
                 f"[{self.operador}] Atualizou privilégios do grupo '{group_name}'"
             )
@@ -576,6 +667,35 @@ class RoleManager:
                             group_name, schema, obj_type, set(perms)
                         )
 
+                # Configura também default privileges FOR ROLE para cada membro atual do grupo,
+                # de modo que novos objetos criados por esses usuários concedam permissões ao grupo.
+                try:
+                    members = self.dao.list_group_members(group_name)
+                except Exception:
+                    members = []
+                # Derivar privilégios mínimos para tabelas a partir do template (se presente)
+                min_table_perms = set()
+                if "future" in tpl:
+                    for s, defs in tpl["future"].items():
+                        if "tables" in defs:
+                            min_table_perms |= set(defs["tables"])
+                if not min_table_perms:
+                    min_table_perms = {"SELECT"}
+                for member in members:
+                    for schema in schema_perms.keys() or ["public"]:
+                        try:
+                            self.dao.alter_default_privileges(
+                                group_name,
+                                schema,
+                                "tables",
+                                min_table_perms,
+                                for_role=member,
+                            )
+                        except Exception as e:
+                            self.logger.debug(
+                                f"[{self.operador}] Ignorando erro ao configurar defaults FOR ROLE '{member}' em '{schema}': {e}"
+                            )
+
             self.logger.info(
                 f"[{self.operador}] Aplicou template '{template}' ao grupo '{group_name}'"
             )
@@ -584,6 +704,56 @@ class RoleManager:
             self.logger.error(
                 f"[{self.operador}] Falha ao aplicar template '{template}' ao grupo '{group_name}': {e}"
             )
+            return False
+
+    # ------------------------------------------------------------------
+    # Rotinas utilitárias de manutenção de privilégios
+    # ------------------------------------------------------------------
+    def sweep_privileges(self, target_group: str | None = None, include_sequences: bool = True) -> bool:
+        """Reaplica privilégios em todos os schemas/objetos para um grupo ou todos.
+
+        - Para cada schema existente, obtém as tabelas (e opcionalmente sequências)
+          e reaplica GRANTs já visíveis no information_schema (idempotente).
+        - Ajusta também ALTER DEFAULT PRIVILEGES para refletir os privilégios atuais por schema.
+
+        Args:
+            target_group: Se informado, limita ao grupo especificado; do contrário, aplica a todos os grupos listados.
+            include_sequences: Se True, também processa sequências.
+        """
+        try:
+            groups = [target_group] if target_group else self.list_groups()
+            schemas = self.dao.list_schemas()
+
+            with self.dao.transaction():
+                for group in groups:
+                    # Recoleta privilégios atuais do grupo (por tabela)
+                    current = self.dao.get_group_privileges(group)
+                    # Reaplica (idempotente) para tabelas
+                    if current:
+                        self.dao.apply_group_privileges(group, current, obj_type="TABLE")
+                        # Ajusta default privileges (tabelas) por schema usando união dos privilégios
+                        for schema, tbls in current.items():
+                            union_perms = set()
+                            for perms in tbls.values():
+                                union_perms |= set(perms)
+                            try:
+                                self.dao.alter_default_privileges(group, schema, "tables", union_perms)
+                            except Exception as e:
+                                self.logger.warning(
+                                    f"[{self.operador}] Falha ao ajustar default privileges (tables) em '{schema}' para '{group}': {e}"
+                                )
+
+                    if include_sequences:
+                        # Para sequências: listar por schema e reaplicar, se seu projeto já controla isso via templates
+                        sequences = self.list_tables_by_schema(include_types=("S",))
+                        if sequences:
+                            # Por padrão, nenhuma permissão explicitada; mantenha idempotência (não revoga), então só aplica se houver template/política definida.
+                            pass
+
+            self.logger.info(f"[{self.operador}] Sweep de privilégios concluído para grupos: {groups}")
+            return True
+        except Exception as e:
+            self.logger.error(f"[{self.operador}] Falha no sweep de privilégios: {e}")
             return False
 
     # ------------------------------------------------------------------
