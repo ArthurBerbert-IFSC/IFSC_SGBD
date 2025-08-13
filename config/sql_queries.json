@@ -1,1 +1,3 @@
-{}
+{
+  "arvore": "SELECT *\nFROM geo2.arvore"
+}

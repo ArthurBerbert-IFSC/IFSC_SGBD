@@ -46,6 +46,18 @@ class GroupsController(QObject):
     def get_group_privileges(self, group_name: str):
         return self.role_manager.get_group_privileges(group_name)
 
+    def get_schema_level_privileges(self, group_name: str):
+        try:
+            return self.role_manager.dao.get_schema_privileges(group_name)
+        except Exception:
+            return {}
+
+    def get_default_table_privileges(self, group_name: str):
+        try:
+            return self.role_manager.dao.get_default_table_privileges(group_name)
+        except Exception:
+            return {}
+
     def list_privilege_templates(self):
         return PERMISSION_TEMPLATES
 

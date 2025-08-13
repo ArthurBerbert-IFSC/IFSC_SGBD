@@ -93,6 +93,8 @@ class GroupsView(QWidget):
             "INSERT",
             "UPDATE",
             "DELETE",
+            "USAGE(Schema)",
+            "CREATE(Schema)",
         ])
         right_layout.addWidget(self.treePrivileges)
 
@@ -125,6 +127,12 @@ class GroupsView(QWidget):
 
     # ------------------------------------------------------------------
     def refresh_groups(self):
+        # Preserva o grupo selecionado, se houver
+        prev = self.current_group
+        if not prev:
+            item = self.lstGroups.currentItem()
+            prev = item.text() if item else None
+
         self.lstGroups.clear()
         self.lstMembers.clear()
         if not self.controller:
@@ -132,9 +140,14 @@ class GroupsView(QWidget):
         for grp in self.controller.list_groups():
             self.lstGroups.addItem(QListWidgetItem(grp))
         self._load_templates()
-        # Seleciona automaticamente o primeiro grupo, se existir,
-        # para evitar ações com grupo None.
-        if self.lstGroups.count() > 0:
+        # Restaura seleção anterior, se possível; senão seleciona o primeiro
+        if prev:
+            matches = self.lstGroups.findItems(prev, Qt.MatchFlag.MatchExactly)
+            if matches:
+                self.lstGroups.setCurrentItem(matches[0])
+            elif self.lstGroups.count() > 0:
+                self.lstGroups.setCurrentRow(0)
+        elif self.lstGroups.count() > 0:
             self.lstGroups.setCurrentRow(0)
 
     def _load_templates(self):
@@ -229,27 +242,67 @@ class GroupsView(QWidget):
             return
         data = self.controller.get_schema_tables()
         privileges = self.controller.get_group_privileges(self.current_group)
+        schema_level = self.controller.get_schema_level_privileges(self.current_group)
+        future_defaults = self.controller.get_default_table_privileges(self.current_group)
         self.treePrivileges.clear()
         for schema, tables in data.items():
             schema_item = QTreeWidgetItem([schema])
-            # Only set the tristate flag so the parent reflects its children.
-            schema_item.setFlags(
-                schema_item.flags() | Qt.ItemFlag.ItemIsAutoTristate
-            )
+            schema_item.setFlags(schema_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
             self.treePrivileges.addTopLevelItem(schema_item)
-            for table in tables:
-                table_item = QTreeWidgetItem([table, "", "", "", ""])
-                table_item.setFlags(
-                    table_item.flags()
+
+            # Se não há tabelas, ainda assim mostramos um nó "(geral)" para configurar privilégios futuros
+            if not tables:
+                general_item = QTreeWidgetItem(["(geral)", "", "", "", "", "", ""])
+                general_item.setData(0, Qt.ItemDataRole.UserRole, {"schema_general": True})
+                general_item.setFlags(
+                    general_item.flags()
                     | Qt.ItemFlag.ItemIsUserCheckable
                     | Qt.ItemFlag.ItemIsSelectable
                 )
-                perms = privileges.get(schema, {}).get(table, set())
+                # Marcar privilégios default futuros existentes
+                existing_future = future_defaults.get(schema, set())
                 for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
-                    state = Qt.CheckState.Checked if label in perms else Qt.CheckState.Unchecked
-                    table_item.setCheckState(col, state)
-                schema_item.addChild(table_item)
-        self.treePrivileges.expandAll()
+                    general_item.setCheckState(
+                        col,
+                        Qt.CheckState.Checked if label in existing_future else Qt.CheckState.Unchecked,
+                    )
+                # Marcar USAGE/CREATE reais
+                sch_perms = schema_level.get(schema, set())
+                general_item.setCheckState(5, Qt.CheckState.Checked if 'USAGE' in sch_perms else Qt.CheckState.Unchecked)
+                general_item.setCheckState(6, Qt.CheckState.Checked if 'CREATE' in sch_perms else Qt.CheckState.Unchecked)
+                schema_item.addChild(general_item)
+            else:
+                for table in tables:
+                    table_item = QTreeWidgetItem([table, "", "", "", "", "", ""])
+                    table_item.setFlags(
+                        table_item.flags()
+                        | Qt.ItemFlag.ItemIsUserCheckable
+                        | Qt.ItemFlag.ItemIsSelectable
+                    )
+                    perms = privileges.get(schema, {}).get(table, set())
+                    for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
+                        state = Qt.CheckState.Checked if label in perms else Qt.CheckState.Unchecked
+                        table_item.setCheckState(col, state)
+                    schema_item.addChild(table_item)
+                # Adicionar nó (geral) adicional para schema com tabelas (para configurar futuros + USAGE/CREATE)
+                general_item = QTreeWidgetItem(["(geral)", "", "", "", "", "", ""])
+                general_item.setData(0, Qt.ItemDataRole.UserRole, {"schema_general": True})
+                general_item.setFlags(
+                    general_item.flags()
+                    | Qt.ItemFlag.ItemIsUserCheckable
+                    | Qt.ItemFlag.ItemIsSelectable
+                )
+                existing_future = future_defaults.get(schema, set())
+                for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
+                    general_item.setCheckState(
+                        col,
+                        Qt.CheckState.Checked if label in existing_future else Qt.CheckState.Unchecked,
+                    )
+                sch_perms = schema_level.get(schema, set())
+                general_item.setCheckState(5, Qt.CheckState.Checked if 'USAGE' in sch_perms else Qt.CheckState.Unchecked)
+        general_item.setCheckState(6, Qt.CheckState.Checked if 'CREATE' in sch_perms else Qt.CheckState.Unchecked)
+        schema_item.insertChild(0, general_item)
+    self.treePrivileges.expandAll()
 
     def _apply_template(self):
         if not self.current_group:
@@ -299,15 +352,37 @@ class GroupsView(QWidget):
         for i in range(self.treePrivileges.topLevelItemCount()):
             schema_item = self.treePrivileges.topLevelItem(i)
             schema = schema_item.text(0)
+            schema_general_perms = None
             for j in range(schema_item.childCount()):
                 table_item = schema_item.child(j)
-                table = table_item.text(0)
-                perms = set()
-                for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
-                    if table_item.checkState(col) == Qt.CheckState.Checked:
-                        perms.add(label)
-                if perms:
+                if table_item.data(0, Qt.ItemDataRole.UserRole):
+                    # Nó (geral) - guarda permissões para aplicar como default privileges no backend depois
+                    gp = set()
+                    for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
+                        if table_item.checkState(col) == Qt.CheckState.Checked:
+                            gp.add(label)
+                    schema_general_perms = gp
+                    # Schema-level flags (USAGE/CREATE)
+                    schema_usage = table_item.checkState(5) == Qt.CheckState.Checked
+                    schema_create = table_item.checkState(6) == Qt.CheckState.Checked
+                    if schema_usage or schema_create:
+                        # Guardar em chave especial para posterior grant_schema_privileges (feito fora desta estrutura)
+                        privileges.setdefault(schema, {})['__SCHEMA_PRIVS__'] = {
+                            *( ['USAGE'] if schema_usage else [] ),
+                            *( ['CREATE'] if schema_create else [] ),
+                        }
+                else:
+                    table = table_item.text(0)
+                    perms = set()
+                    for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
+                        if table_item.checkState(col) == Qt.CheckState.Checked:
+                            perms.add(label)
                     privileges.setdefault(schema, {})[table] = perms
+
+            # Se schema vazio => usar nó geral para criar entrada sintética que o backend tratará como default privileges
+            if schema_general_perms is not None and (not privileges.get(schema) or list(privileges.get(schema).keys()) == ['__SCHEMA_PRIVS__']):
+                # Representamos com chave especial '__FUTURE__' que não corresponde a uma tabela real
+                privileges.setdefault(schema, {})['__FUTURE__'] = schema_general_perms
 
         def task():
             return self.controller.apply_group_privileges(
@@ -317,6 +392,9 @@ class GroupsView(QWidget):
         def on_success(success):
             if success:
                 QMessageBox.information(self, "Sucesso", "Privilégios atualizados.")
+                # Atualiza visual imediatamente para refletir o estado salvo
+                self._populate_tree()
+                self._refresh_members()
             else:
                 QMessageBox.critical(
                     self, "Erro", "Falha ao salvar os privilégios do grupo."

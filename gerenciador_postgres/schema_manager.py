@@ -83,6 +83,8 @@ class SchemaManager:
                             f"[{self.operador}] Falha ao habilitar PostGIS no schema '{name}': {e}"
                         )
 
+                # (Auto-config de privilégios removida para permitir escolha manual pelo usuário.)
+
                 dados_depois = {'schema_name': name, 'owner': owner}
                 sucesso = True
 

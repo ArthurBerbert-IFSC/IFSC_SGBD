@@ -408,6 +408,65 @@ class DBManager:
                         sql.Identifier(group),
                     )
                 )
+    # ---------------------------------------------------------------
+    # Consultas de privilégios de schema e default privileges futuros
+    # ---------------------------------------------------------------
+    def get_schema_privileges(self, role: str) -> Dict[str, Set[str]]:
+        """Retorna {'schema': {'USAGE','CREATE'}} para privilégios diretos de schema do role."""
+        out: Dict[str, Set[str]] = {}
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT n.nspname,
+                       has_schema_privilege(%s, n.nspname, 'USAGE') AS can_usage,
+                       has_schema_privilege(%s, n.nspname, 'CREATE') AS can_create
+                FROM pg_namespace n
+                WHERE n.nspname NOT LIKE 'pg\\_%'
+                  AND n.nspname <> 'information_schema'
+                ORDER BY n.nspname
+                """,
+                (role, role),
+            )
+            for schema, can_usage, can_create in cur.fetchall():
+                perms = set()
+                if can_usage:
+                    perms.add('USAGE')
+                if can_create:
+                    perms.add('CREATE')
+                if perms:
+                    out[schema] = perms
+        return out
+
+    def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
+        """Retorna default privileges (ALTER DEFAULT PRIVILEGES) para futuras tabelas por schema concedidos ao role."""
+        code_map = {'r': 'SELECT', 'a': 'INSERT', 'w': 'UPDATE', 'd': 'DELETE'}
+        out: Dict[str, Set[str]] = {}
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT n.nspname, d.defaclacl
+                FROM pg_default_acl d
+                JOIN pg_namespace n ON n.oid = d.defaclnamespace
+                WHERE d.defaclobjtype = 'r'
+                """
+            )
+            rows = cur.fetchall()
+            import re
+            pattern = re.compile(r"^(?P<grantee>[^=]+)=(?P<privs>[^/]*)/.*$")
+            for schema, acl_array in rows:
+                if not acl_array:
+                    continue
+                for acl in acl_array:
+                    m = pattern.match(acl)
+                    if not m:
+                        continue
+                    grantee = m.group('grantee')
+                    privcodes = m.group('privs')
+                    if grantee == role:
+                        mapped = {code_map[c] for c in privcodes if c in code_map}
+                        if mapped:
+                            out.setdefault(schema, set()).update(mapped)
+        return out
 
     def alter_default_privileges(
         self, group: str, schema: str, obj_type: str, privileges: Set[str], *, for_role: str | None = None

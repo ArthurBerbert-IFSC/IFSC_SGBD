@@ -511,34 +511,67 @@ class RoleManager:
     ) -> bool:
         try:
             with self.dao.transaction():
-                self.dao.apply_group_privileges(group_name, privileges, obj_type=obj_type)
-                # Ajusta também os privilégios padrão (ALTER DEFAULT PRIVILEGES) para novos objetos,
-                # usando a união dos privilégios aplicados por schema.
                 obj_type_upper = obj_type.upper()
-                if obj_type_upper == "TABLE":
-                    # União por schema dos privilégios de tabelas
-                    for schema, tables in privileges.items():
-                        union_perms: Set[str] = set()
-                        for perms in tables.values():
-                            union_perms |= set(perms)
-                        # Configura default privileges para futuras tabelas nesse schema
+                # Separar entradas FUTURE ("__FUTURE__") das reais
+                real_privs: Dict[str, Dict[str, Set[str]]] = {}
+                future_privs: Dict[str, Set[str]] = {}
+                for schema, objs in privileges.items():
+                    for obj_name, perms in objs.items():
+                        if obj_name == '__SCHEMA_PRIVS__':
+                            # Será tratado após aplicar objetos
+                            continue
+                        if obj_name == '__FUTURE__' and obj_type_upper == 'TABLE':
+                            future_privs[schema] = set(perms)
+                        else:
+                            real_privs.setdefault(schema, {})[obj_name] = set(perms)
+
+                # Aplica privilégios reais (tabelas/sequências existentes)
+                if real_privs:
+                    self.dao.apply_group_privileges(group_name, real_privs, obj_type=obj_type)
+
+                # Ajusta default privileges para futuros objetos conforme FUTURE explícito
+                if obj_type_upper == 'TABLE':
+                    for schema, perms in future_privs.items():
                         try:
-                            self.dao.alter_default_privileges(group_name, schema, "tables", union_perms)
+                            self.dao.alter_default_privileges(group_name, schema, 'tables', perms)
                         except Exception as e:
                             self.logger.warning(
-                                f"[{self.operador}] Falha ao ajustar default privileges (tables) em '{schema}' para '{group_name}': {e}"
+                                f"[{self.operador}] Falha ao definir default privileges (tables) FUTURE em '{schema}' para '{group_name}': {e}"
                             )
-                elif obj_type_upper == "SEQUENCE":
+                    # Também, se não houve FUTURE explícito mas há privilégios reais, usar união (comportamento anterior)
+                    if not future_privs and real_privs:
+                        for schema, tables in real_privs.items():
+                            union_perms: Set[str] = set()
+                            for perms in tables.values():
+                                union_perms |= set(perms)
+                            try:
+                                self.dao.alter_default_privileges(group_name, schema, 'tables', union_perms)
+                            except Exception as e:
+                                self.logger.warning(
+                                    f"[{self.operador}] Falha ao ajustar default privileges (tables) em '{schema}' para '{group_name}': {e}"
+                                )
+                elif obj_type_upper == 'SEQUENCE':
+                    # Mantém lógica anterior para sequences
                     for schema, seqs in privileges.items():
                         union_perms: Set[str] = set()
                         for perms in seqs.values():
                             union_perms |= set(perms)
                         try:
-                            self.dao.alter_default_privileges(group_name, schema, "sequences", union_perms)
+                            self.dao.alter_default_privileges(group_name, schema, 'sequences', union_perms)
                         except Exception as e:
                             self.logger.warning(
                                 f"[{self.operador}] Falha ao ajustar default privileges (sequences) em '{schema}' para '{group_name}': {e}"
                             )
+
+                # Aplicar privilégios de schema explícitos (USAGE/CREATE) se presentes
+                try:
+                    for schema, objs in privileges.items():
+                        if '__SCHEMA_PRIVS__' in objs:
+                            schema_perms = set(objs['__SCHEMA_PRIVS__'])
+                            if schema_perms:
+                                self.dao.grant_schema_privileges(group_name, schema, schema_perms)
+                except Exception as e:
+                    self.logger.warning(f"[{self.operador}] Falha ao aplicar privilégios de schema para '{group_name}': {e}")
             self.logger.info(
                 f"[{self.operador}] Atualizou privilégios do grupo '{group_name}'"
             )
