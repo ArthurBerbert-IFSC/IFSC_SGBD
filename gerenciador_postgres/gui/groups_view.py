@@ -132,6 +132,10 @@ class GroupsView(QWidget):
         for grp in self.controller.list_groups():
             self.lstGroups.addItem(QListWidgetItem(grp))
         self._load_templates()
+        # Seleciona automaticamente o primeiro grupo, se existir,
+        # para evitar ações com grupo None.
+        if self.lstGroups.count() > 0:
+            self.lstGroups.setCurrentRow(0)
 
     def _load_templates(self):
         if not self.controller:
@@ -326,28 +330,32 @@ class GroupsView(QWidget):
         self._execute_async(task, on_success, on_error, "Salvando privilégios...")
 
     def _sweep_privileges(self):
-        if not self.current_group:
+        # Determina o grupo selecionado no momento do clique
+        item = self.lstGroups.currentItem()
+        group_name = item.text() if item else self.current_group
+        if not group_name:
+            QMessageBox.warning(self, "Seleção necessária", "Selecione um grupo para sincronizar.")
             return
 
         def task():
-            return self.controller.sweep_group_privileges(self.current_group)
+            return self.controller.sweep_group_privileges(group_name)
 
         def on_success(success):
             if success:
                 QMessageBox.information(
-                    self, "Concluído", f"Privilégios do grupo '{self.current_group}' sincronizados."
+                    self, "Concluído", f"Privilégios do grupo '{group_name}' sincronizados."
                 )
             else:
                 QMessageBox.critical(
-                    self, "Erro", "Falha ao sincronizar privilégios do grupo."
+                    self, "Erro", f"Falha ao sincronizar privilégios do grupo '{group_name}'."
                 )
 
         def on_error(e: Exception):
             QMessageBox.critical(
-                self, "Erro", f"Não foi possível sincronizar os privilégios: {e}"
+                self, "Erro", f"Não foi possível sincronizar os privilégios do grupo '{group_name}': {e}"
             )
 
-        self._execute_async(task, on_success, on_error, "Sincronizando privilégios...")
+        self._execute_async(task, on_success, on_error, f"Sincronizando privilégios de '{group_name}'...")
 
     def _refresh_members(self):
         self.lstMembers.clear()
