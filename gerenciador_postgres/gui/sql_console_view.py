@@ -9,12 +9,12 @@ from PyQt6.QtWidgets import (
     QInputDialog,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QFont
 from pathlib import Path
 from ..db_manager import DBManager
 import psycopg2
 import json
-
+from .sql_syntax_highlighter import SQLSyntaxHighlighter
 
 class SQLConsoleView(QWidget):
     """Janela simples para executar comandos SQL."""
@@ -43,17 +43,30 @@ class SQLConsoleView(QWidget):
         layout.addLayout(query_layout)
 
         self.txtSQL = QTextEdit()
+        self._highlighter = SQLSyntaxHighlighter(self.txtSQL)
         self.btnExecute = QPushButton("Executar")
+        self.btnIncrease = QPushButton("+")
+        self.btnDecrease = QPushButton("-")
         self.txtResult = QPlainTextEdit()
         self.txtResult.setReadOnly(True)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.btnDecrease)
+        button_layout.addWidget(self.btnIncrease)
+        button_layout.addStretch()
+        button_layout.addWidget(self.btnExecute)
+
         layout.addWidget(self.txtSQL)
-        layout.addWidget(self.btnExecute, alignment=Qt.AlignmentFlag.AlignRight)
+        layout.addLayout(button_layout)
         layout.addWidget(self.txtResult)
 
         self.btnExecute.clicked.connect(self.on_execute)
         self.cmbQueries.currentIndexChanged.connect(self.on_query_selected)
         self.btnSaveQuery.clicked.connect(self.on_save_query)
         self.btnDeleteQuery.clicked.connect(self.on_delete_query)
+        self.btnIncrease.clicked.connect(self.increase_font)
+        self.btnDecrease.clicked.connect(self.decrease_font)
+        self.font_size = self.txtSQL.font().pointSize()
 
         self._refresh_query_list()
 
@@ -131,3 +144,18 @@ class SQLConsoleView(QWidget):
         except psycopg2.Error as e:
             conn.rollback()
             self.txtResult.setPlainText(f"Erro: {e}")
+
+    def _set_font_size(self):
+        font = QFont(self.txtSQL.font())
+        font.setPointSize(self.font_size)
+        self.txtSQL.setFont(font)
+        self.txtResult.setFont(font)
+
+    def increase_font(self):
+        self.font_size += 1
+        self._set_font_size()
+
+    def decrease_font(self):
+        if self.font_size > 1:
+            self.font_size -= 1
+            self._set_font_size()
