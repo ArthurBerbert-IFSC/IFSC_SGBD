@@ -508,6 +508,7 @@ class RoleManager:
         group_name: str,
         privileges: Dict[str, Dict[str, Set[str]]],
         obj_type: str = "TABLE",
+        defaults_applied: bool = False,
     ) -> bool:
         try:
             with self.dao.transaction():
@@ -538,8 +539,9 @@ class RoleManager:
                             self.logger.warning(
                                 f"[{self.operador}] Falha ao definir default privileges (tables) FUTURE em '{schema}' para '{group_name}': {e}"
                             )
-                    # Também, se não houve FUTURE explícito mas há privilégios reais, usar união (comportamento anterior)
-                    if not future_privs and real_privs:
+                    # Caso não haja FUTURE explícito e nenhum default pré-aplicado,
+                    # usa-se a união dos privilégios reais (comportamento anterior).
+                    if not future_privs and real_privs and not defaults_applied:
                         for schema, tables in real_privs.items():
                             union_perms: Set[str] = set()
                             for perms in tables.values():

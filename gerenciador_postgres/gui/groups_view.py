@@ -462,7 +462,11 @@ class GroupsView(QWidget):
             self.controller.alter_default_privileges(
                 role, schema, "tables", default_perms_to_set
             )
-            return self.controller.apply_group_privileges(role, table_privs)
+            return self.controller.apply_group_privileges(
+                role,
+                table_privs,
+                defaults_applied=True,
+            )
 
         def on_success(success):
             if success:
