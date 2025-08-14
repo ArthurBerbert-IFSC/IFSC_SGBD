@@ -359,15 +359,16 @@ class PrivilegesView(QWidget):
                 ok &= self.controller.grant_schema_privileges(
                     role, schema, perms, skip_sweep=skip_sweep
                 )
-            defaults_applied = any(default_privs.values())
+            defaults_applied = any(perms for perms in default_privs.values())
             for schema, perms in default_privs.items():
-                ok &= self.controller.alter_default_privileges(
-                    role,
-                    schema,
-                    "tables",
-                    perms,
-                    owner=default_owners.get(schema),
-                )
+                if perms:
+                    ok &= self.controller.alter_default_privileges(
+                        role,
+                        schema,
+                        "tables",
+                        perms,
+                        owner=default_owners.get(schema),
+                    )
             ok &= self.controller.apply_group_privileges(
                 role,
                 table_privileges,
