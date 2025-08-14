@@ -30,6 +30,25 @@ PG_PRIVCODE_TO_NAME = {
     "t": "TRIGGER",
 }
 
+# Supported object type identifiers for default privileges
+OBJECT_TYPES = {"tables", "sequences", "functions", "types"}
+
+# Mapping between friendly names and SQL keywords used by ALTER DEFAULT PRIVILEGES
+OBJECT_TYPE_MAPS = {
+    "tables": "TABLES",
+    "sequences": "SEQUENCES",
+    "functions": "FUNCTIONS",
+    "types": "TYPES",
+}
+
+# Mapping to pg_default_acl objtype codes used by get_default_privileges
+OBJECT_TYPE_CODES = {
+    "tables": "r",
+    "sequences": "S",
+    "functions": "f",
+    "types": "T",
+}
+
 
 class DBManager:
     """Camada de acesso a dados para gerenciamento de roles e schemas."""
@@ -638,51 +657,71 @@ class DBManager:
         """Altera os privilégios padrão para objetos futuros em um schema."""
         logger.debug(f"=== alter_default_privileges START ===")
         logger.debug(f"group={group}, schema={schema}, obj_type={obj_type}, privileges={privileges}, for_role={for_role}")
-        
+
         # Validações
         if obj_type not in OBJECT_TYPES:
             raise ValueError(f"Tipo de objeto inválido: {obj_type}")
-        
-        # Determina comando com base no tipo de objeto
+
+        # Mapeia para nome SQL e código de objeto
         obj_sql_name = OBJECT_TYPE_MAPS.get(obj_type, obj_type.upper())
-        
+        code = OBJECT_TYPE_CODES.get(obj_type)
+
+        # Consulta privilégios atuais
+        existing = self.get_default_privileges(group, code).get(schema, {}).get(group, set())
+        if existing == set(privileges):
+            logger.debug("Default privileges already set; no-op.")
+            return True
+
         # Define clausula FOR ROLE
         for_clause = ""
-        params = [group, schema]
-        
+        params: List[object] = []
         if for_role:
             for_clause = "FOR ROLE %s"
-            params.insert(0, for_role)
-    
+            params.append(for_role)
+
         with self.conn.cursor() as cur:
             # Revoga primeiro
-            revoke_sql = sql.SQL("ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} REVOKE ALL ON {obj_type} FROM {group}").format(
+            revoke_sql = sql.SQL(
+                "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} REVOKE ALL ON {obj_type} FROM {group}"
+            ).format(
                 for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
                 schema=sql.Identifier(schema),
                 obj_type=sql.SQL(obj_sql_name),
-                group=sql.Identifier(group)
+                group=sql.Identifier(group),
             )
-            
-            logger.debug(f"Executing REVOKE: {revoke_sql.as_string(cur)}")
+
+            try:
+                sql_text = revoke_sql.as_string(cur)
+            except Exception:
+                sql_text = str(revoke_sql)
+            logger.debug(f"Executing REVOKE: {sql_text}")
             cur.execute(revoke_sql, params)
-            
+
             # Concede os novos privilégios, se houver
             if privileges:
-                grant_sql = sql.SQL("ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} GRANT {privs} ON {obj_type} TO {group}").format(
+                grant_sql = sql.SQL(
+                    "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} GRANT {privs} ON {obj_type} TO {group}"
+                ).format(
                     for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
                     schema=sql.Identifier(schema),
                     privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
                     obj_type=sql.SQL(obj_sql_name),
-                    group=sql.Identifier(group)
+                    group=sql.Identifier(group),
                 )
-                
-                logger.debug(f"Executing GRANT: {grant_sql.as_string(cur)}")
+
+                try:
+                    sql_text = grant_sql.as_string(cur)
+                except Exception:
+                    sql_text = str(grant_sql)
+                logger.debug(f"Executing GRANT: {sql_text}")
                 cur.execute(grant_sql, params)
-    
+
         # Força commit para garantir que as alterações sejam persistidas
         self.conn.commit()
-        
-        logger.info(f"✓ Applied default privileges {privileges} for {obj_type} in {schema} to {group}")
+
+        logger.info(
+            f"\u2713 Applied default privileges {privileges} for {obj_type} in {schema} to {group}"
+        )
         logger.debug(f"=== alter_default_privileges END ===")
         return True
 

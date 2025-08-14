@@ -43,6 +43,9 @@ class DummyConn:
         self.cursor_obj = DummyCursor()
         return self.cursor_obj
 
+    def commit(self):
+        pass
+
 
 class DBManagerDefaultPrivTests(unittest.TestCase):
     def setUp(self):
@@ -57,6 +60,15 @@ class DBManagerDefaultPrivTests(unittest.TestCase):
         self.assertIn("REVOKE ALL", executed[0])
         self.assertIn("GRANT", executed[1])
         self.assertIn("SELECT", executed[1])
+
+    def test_alter_default_privileges_noop(self):
+        def fake_get_default_privileges(role, code):
+            return {"public": {"grp": {"SELECT"}}}
+
+        self.dbm.get_default_privileges = fake_get_default_privileges
+        result = self.dbm.alter_default_privileges("grp", "public", "tables", {"SELECT"})
+        self.assertTrue(result)
+        self.assertIsNone(self.conn.cursor_obj)
 
 
 if __name__ == "__main__":
