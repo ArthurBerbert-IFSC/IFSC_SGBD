@@ -426,8 +426,12 @@ class DBManager:
                 """,
                 (role,),
             )
-            for schema, privilege in cur.fetchall():
-                out.setdefault(schema, set()).add(privilege)
+            for row in cur.fetchall():
+                if len(row) < 2:
+                    continue
+                schema, privilege = row[0], row[1]
+                if privilege in ("USAGE", "CREATE"):
+                    out.setdefault(schema, set()).add(privilege)
         return out
 
     def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
