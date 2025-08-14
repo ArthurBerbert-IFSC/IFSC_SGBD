@@ -97,16 +97,21 @@ class GroupsView(QWidget):
         right_layout.addLayout(top)
 
         # Container para privilégios de schema no padrão mestre-detalhe
-        self.schema_container = QWidget()
-        self.schema_privs_layout = QHBoxLayout(self.schema_container)
-        self.schema_list_widget = QListWidget()
-        self.schema_list_widget.setMaximumWidth(200)
-        self.schema_privs_layout.addWidget(self.schema_list_widget)
+        self.schema_group = QGroupBox("Gerenciamento de Schemas")
+        schema_management_layout = QVBoxLayout()
+        detail_layout = QHBoxLayout()
 
-        self.schema_details_widget = QWidget()
-        self.schema_details_layout = QVBoxLayout(self.schema_details_widget)
-        self.schema_privs_layout.addWidget(self.schema_details_widget, 1)
-        right_layout.addWidget(self.schema_container)
+        self.schema_list = QListWidget()
+        self.schema_list.setMaximumWidth(250)
+        detail_layout.addWidget(self.schema_list)
+
+        self.schema_details_panel = QWidget()
+        self.schema_details_layout = QVBoxLayout(self.schema_details_panel)
+        detail_layout.addWidget(self.schema_details_panel, 1)
+
+        schema_management_layout.addLayout(detail_layout)
+        self.schema_group.setLayout(schema_management_layout)
+        right_layout.addWidget(self.schema_group)
 
         self.treePrivileges = QTreeWidget()
         self.treePrivileges.setHeaderLabels([
@@ -131,7 +136,7 @@ class GroupsView(QWidget):
         self.setLayout(layout)
 
         # Disable privilege controls until a group is selected
-        self.schema_container.setEnabled(False)
+        self.schema_group.setEnabled(False)
         self.treePrivileges.setEnabled(False)
         self.btnApplyTemplate.setEnabled(False)
         self.btnSave.setEnabled(False)
@@ -142,8 +147,8 @@ class GroupsView(QWidget):
         self.btnNewGroup.clicked.connect(self._on_new_group)
         self.btnDeleteGroup.clicked.connect(self._on_delete_group)
         self.lstGroups.currentItemChanged.connect(self._on_group_selected)
-        self.schema_list_widget.currentItemChanged.connect(
-            self._on_schema_selected
+        self.schema_list.currentItemChanged.connect(
+            self._update_schema_details
         )
         self.btnApplyTemplate.clicked.connect(self._apply_template)
         self.btnSave.clicked.connect(self._save_privileges)
@@ -245,55 +250,32 @@ class GroupsView(QWidget):
     def _on_group_selected(self, current, previous):
         if not current:
             self.current_group = None
-            self.schema_container.setEnabled(False)
+            self.schema_group.setEnabled(False)
             self.treePrivileges.setEnabled(False)
             self.btnApplyTemplate.setEnabled(False)
             self.btnSave.setEnabled(False)
             self.btnSweep.setEnabled(False)
             self.lstMembers.setEnabled(False)
             self.lstMembers.clear()
-            self.schema_list_widget.clear()
+            self.schema_list.clear()
             self._clear_layout(self.schema_details_layout)
             return
         self.current_group = current.text()
-        self.schema_container.setEnabled(True)
+        self.schema_group.setEnabled(True)
         self.treePrivileges.setEnabled(True)
         self.btnApplyTemplate.setEnabled(True)
         self.btnSave.setEnabled(True)
         self.btnSweep.setEnabled(True)
         self.lstMembers.setEnabled(True)
-        self._populate_schemas()
-        self._populate_table_tree()
+        self._populate_privileges()
         self._refresh_members()
 
-    def _populate_schemas(self):
-        if not self.controller or not self.current_group:
-            return
-        try:
-            self.schema_tables = self.controller.get_schema_tables()
-        except Exception as e:  # pragma: no cover
-            logging.exception("Erro ao ler schemas")
-            QMessageBox.warning(
-                self,
-                "Erro",
-                f"Não foi possível ler os schemas.\nMotivo: {e}",
-            )
-            self.schema_tables = {}
-
-        self.schema_list_widget.blockSignals(True)
-        self.schema_list_widget.clear()
-        for schema in sorted(self.schema_tables.keys()):
-            self.schema_list_widget.addItem(QListWidgetItem(schema))
-        self.schema_list_widget.blockSignals(False)
-        if self.schema_list_widget.count() > 0:
-            self.schema_list_widget.setCurrentRow(0)
-
-    def _populate_table_tree(self):
+    def _populate_privileges(self):
         if not self.controller or not self.current_group:
             return
         role = self.current_group
         try:
-            schema_tables = self.schema_tables or self.controller.get_schema_tables()
+            self.schema_tables = self.controller.get_schema_tables()
             table_privs = self.controller.get_group_privileges(role)
         except Exception as e:  # pragma: no cover
             logging.exception("Erro ao ler privilégios do grupo")
@@ -302,10 +284,18 @@ class GroupsView(QWidget):
                 "Erro",
                 f"Não foi possível ler os privilégios.\nMotivo: {e}",
             )
-            schema_tables, table_privs = {}, {}
+            self.schema_tables, table_privs = {}, {}
+
+        self.schema_list.blockSignals(True)
+        self.schema_list.clear()
+        for schema in sorted(self.schema_tables.keys()):
+            self.schema_list.addItem(QListWidgetItem(schema))
+        self.schema_list.blockSignals(False)
+        if self.schema_list.count() > 0:
+            self.schema_list.setCurrentRow(0)
 
         self.treePrivileges.clear()
-        for schema, tables in schema_tables.items():
+        for schema, tables in self.schema_tables.items():
             schema_item = QTreeWidgetItem([schema])
             self.treePrivileges.addTopLevelItem(schema_item)
             for table in tables:
@@ -326,7 +316,7 @@ class GroupsView(QWidget):
                 schema_item.addChild(table_item)
         self.treePrivileges.expandAll()
 
-    def _on_schema_selected(self, current_item, previous_item):
+    def _update_schema_details(self, current_item, previous_item):
         if not current_item or not self.controller or not self.current_group:
             return
         schema_name = current_item.text()
@@ -422,7 +412,7 @@ class GroupsView(QWidget):
         self._execute_async(task, on_success, on_error, "Aplicando template...")
 
     def _save_privileges(self):
-        current_schema_item = self.schema_list_widget.currentItem()
+        current_schema_item = self.schema_list.currentItem()
         if not self.current_group or not current_schema_item:
             QMessageBox.warning(
                 self, "Atenção", "Selecione um grupo e um schema primeiro."
@@ -475,8 +465,7 @@ class GroupsView(QWidget):
                     "Sucesso",
                     f"Privilégios para o schema '{schema}' foram atualizados.",
                 )
-                self._on_schema_selected(current_schema_item, None)
-                self._populate_table_tree()
+                self._populate_privileges()
                 self._refresh_members()
             else:
                 QMessageBox.critical(
