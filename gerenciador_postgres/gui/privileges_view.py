@@ -151,6 +151,42 @@ class PrivilegesView(QWidget):
         self.treeSchemaPrivileges.expandAll()
         self.treeTablePrivileges.expandAll()
 
+        role = self.cmbRole.currentText()
+        if not role:
+            return
+        try:
+            db_privs = self.controller.get_database_privileges(role)
+            db_item = self.treeDbPrivileges.topLevelItem(0)
+            for col, label in enumerate(["CONNECT", "CREATE", "TEMP"], start=1):
+                if label in db_privs:
+                    db_item.setCheckState(col, Qt.CheckState.Checked)
+
+            schema_privs = self.controller.get_schema_privileges(role)
+            for i in range(self.treeSchemaPrivileges.topLevelItemCount()):
+                schema_item = self.treeSchemaPrivileges.topLevelItem(i)
+                schema = schema_item.text(0)
+                perms = schema_privs.get(schema, set())
+                for col, label in enumerate(["USAGE", "CREATE"], start=1):
+                    if label in perms:
+                        schema_item.setCheckState(col, Qt.CheckState.Checked)
+
+            table_privs = self.controller.get_group_privileges(role)
+            for i in range(self.treeTablePrivileges.topLevelItemCount()):
+                schema_item = self.treeTablePrivileges.topLevelItem(i)
+                schema = schema_item.text(0)
+                tables = table_privs.get(schema, {})
+                for j in range(schema_item.childCount()):
+                    table_item = schema_item.child(j)
+                    table = table_item.text(0)
+                    perms = tables.get(table, set())
+                    for col, label in enumerate(
+                        ["SELECT", "INSERT", "UPDATE", "DELETE"], start=1
+                    ):
+                        if label in perms:
+                            table_item.setCheckState(col, Qt.CheckState.Checked)
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao carregar privilégios: {e}")
+
     # ------------------------------------------------------------------
     # Ações
     # ------------------------------------------------------------------

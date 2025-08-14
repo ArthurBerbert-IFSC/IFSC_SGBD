@@ -439,6 +439,24 @@ class RoleManager:
             )
             return {}
 
+    def get_database_privileges(self, role_name: str) -> Set[str]:
+        try:
+            return self.dao.get_database_privileges(role_name)
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Erro ao obter privilégios de banco para '{role_name}': {e}"
+            )
+            return set()
+
+    def get_schema_privileges(self, role_name: str) -> Dict[str, Set[str]]:
+        try:
+            return self.dao.get_schema_privileges(role_name)
+        except Exception as e:
+            self.logger.error(
+                f"[{self.operador}] Erro ao obter privilégios de schema para '{role_name}': {e}"
+            )
+            return {}
+
     def set_group_privileges(
         self,
         group_name: str,
