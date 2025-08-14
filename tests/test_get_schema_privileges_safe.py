@@ -9,9 +9,10 @@ from gerenciador_postgres.db_manager import DBManager
 
 class DummyCursor:
     def __init__(self):
-        # Include a malformed row with only one column to simulate unexpected
-        # database adapter behaviour.
-        self.result = [("public", "USAGE"), ("broken",)]
+        # Include malformed rows: one with only a single column and one that is
+        # not a sequence at all to simulate unexpected database adapter
+        # behaviour.
+        self.result = [("public", "USAGE"), ("broken",), None]
 
     def __enter__(self):
         return self
