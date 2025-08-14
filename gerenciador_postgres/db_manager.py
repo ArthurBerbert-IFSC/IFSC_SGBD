@@ -538,9 +538,11 @@ class DBManager:
                 FROM pg_default_acl d
                 JOIN pg_namespace n ON n.oid = d.defaclnamespace
                 JOIN pg_roles owner_rol ON owner_rol.oid = d.defaclrole
-                CROSS JOIN LATERAL aclexplode(d.defaclacl) AS x(grantee, grantor, privs)
+                -- aclexplode returns (grantee oid, grantor oid, privs text[], grant_options boolean[])
+                CROSS JOIN LATERAL pg_catalog.aclexplode(d.defaclacl) AS x(grantee, grantor, privs, grant_options)
                 JOIN pg_roles grantee_rol ON grantee_rol.oid = x.grantee
-                CROSS JOIN LATERAL unnest(x.privs) AS priv(privilege_type, is_grantable)
+                -- unnest the text[] of privilege names; grant options ignored for now
+                CROSS JOIN LATERAL unnest(x.privs) AS priv(privilege_type)
                 WHERE d.defaclobjtype = %(objtype)s
                 {role_filter}
                 GROUP BY n.nspname, owner_rol.rolname, grantee_rol.rolname
