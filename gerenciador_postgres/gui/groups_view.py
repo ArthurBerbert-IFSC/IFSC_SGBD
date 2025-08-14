@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from pathlib import Path
+import logging
 
 
 class _TaskRunner(QThread):
@@ -240,10 +241,19 @@ class GroupsView(QWidget):
     def _populate_tree(self):
         if not self.controller or not self.current_group:
             return
-        data = self.controller.get_schema_tables()
-        privileges = self.controller.get_group_privileges(self.current_group)
-        schema_level = self.controller.get_schema_level_privileges(self.current_group)
-        future_defaults = self.controller.get_default_table_privileges(self.current_group)
+        try:
+            data = self.controller.get_schema_tables()
+            privileges = self.controller.get_group_privileges(self.current_group)
+            schema_level = self.controller.get_schema_level_privileges(self.current_group)
+            future_defaults = self.controller.get_default_table_privileges(self.current_group)
+        except Exception as e:  # pragma: no cover
+            logging.exception("Erro ao ler privilégios do grupo")
+            QMessageBox.warning(
+                self,
+                "Erro",
+                f"Não foi possível ler os privilégios.\nMotivo: {e}",
+            )
+            data, privileges, schema_level, future_defaults = {}, {}, {}, {}
         self.treePrivileges.clear()
         for schema, tables in data.items():
             schema_item = QTreeWidgetItem([schema])
