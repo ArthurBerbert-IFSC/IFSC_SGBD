@@ -10,7 +10,9 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QGroupBox,
     QCheckBox,
-)
+    QProgressDialog,
+    QApplication)
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from pathlib import Path
@@ -294,6 +296,14 @@ class PrivilegesView(QWidget):
             return
         role = self.cmbRole.currentText()
 
+        progress = QProgressDialog(
+            "Salvando permissões...", None, 0, 0, self
+        )
+        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        progress.setCancelButton(None)
+        progress.show()
+        QApplication.processEvents()
+
         db_privs = set()
         db_item = self.treeDbPrivileges.topLevelItem(0)
         if db_item:
@@ -355,4 +365,6 @@ class PrivilegesView(QWidget):
             QMessageBox.critical(
                 self, "Erro", f"Não foi possível salvar as permissões: {e}"
             )
+        finally:
+            progress.close()
 
