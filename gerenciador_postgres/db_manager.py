@@ -427,15 +427,15 @@ class DBManager:
                 (role,),
             )
             # Some database adapters may yield rows with fewer columns or a
-            # non-sequence type.  Safely extract the expected values and skip
-            # anything that doesn't match the ``(schema, privilege)`` format.
+            # completely unexpected object.  Rather than failing with an
+            # ``IndexError`` or ``TypeError`` in those situations, ensure the
+            # row looks like a two element sequence before trying to unpack it.
             for row in cur.fetchall():
-                try:
-                    schema, privilege = row[0], row[1]
-                except (IndexError, TypeError):
+                if not isinstance(row, (list, tuple)) or len(row) < 2:
                     # Skip malformed or unexpected row formats instead of
                     # raising an error that would break the UI.
                     continue
+                schema, privilege = row[0], row[1]
                 out.setdefault(schema, set()).add(privilege)
         return out
 
