@@ -426,14 +426,16 @@ class DBManager:
                 """,
                 (role,),
             )
-            # Some database adapters may return rows with an unexpected
-            # number of columns.  To avoid ``IndexError`` in those cases
-            # we iterate over the raw rows and guard against short tuples.
+            # Some database adapters may yield rows with fewer columns or a
+            # non-sequence type.  Safely extract the expected values and skip
+            # anything that doesn't match the ``(schema, privilege)`` format.
             for row in cur.fetchall():
-                if len(row) < 2:
-                    # Skip malformed rows instead of raising an error
+                try:
+                    schema, privilege = row[0], row[1]
+                except (IndexError, TypeError):
+                    # Skip malformed or unexpected row formats instead of
+                    # raising an error that would break the UI.
                     continue
-                schema, privilege = row[0], row[1]
                 out.setdefault(schema, set()).add(privilege)
         return out
 
