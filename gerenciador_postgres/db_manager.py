@@ -591,135 +591,100 @@ class DBManager:
         return result
 
     def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
-        """Backward compatible wrapper for default table privileges of a role."""
-        data = self.get_default_privileges(role, "r")
-        meta = data.pop("_meta", None)  # discard meta for backward compatibility
-        flattened: Dict[str, Set[str]] = {}
-        for schema, grants in data.items():
-            if role in grants:
-                flattened[schema] = grants[role]
-        return flattened
+        """Retorna os privilégios padrão para tabelas futuramente criadas em cada schema."""
+        logger.debug(f"=== get_default_table_privileges START for role: '{role}' ===")
+    
+        out = {}
+        try:
+            with self.conn.cursor() as cur:
+                # Query direta usando aclexplode - muito mais confiável
+                query = """
+                    SELECT 
+                        n.nspname AS schema_name,
+                        a.privilege_type
+                    FROM 
+                        pg_default_acl t
+                        JOIN pg_roles r ON t.defaclrole = r.oid
+                        JOIN pg_namespace n ON t.defaclnamespace = n.oid,
+                        LATERAL aclexplode(t.defaclacl) AS a
+                    WHERE 
+                        pg_get_userbyid(a.grantee) = %s
+                        AND t.defaclobjtype = 'r'  -- 'r' para tabelas
+                        AND n.nspname NOT LIKE 'pg\\\_%%' ESCAPE '\\'
+                        AND n.nspname <> 'information_schema'
+                    ORDER BY 
+                        n.nspname
+                """
+                
+                logger.debug(f"Executando query: {query} com parâmetro: {role}")
+                cur.execute(query, (role,))
+                
+                for schema, priv in cur.fetchall():
+                    if priv in ('SELECT', 'INSERT', 'UPDATE', 'DELETE'):
+                        if schema not in out:
+                            out[schema] = set()
+                        out[schema].add(priv)
+                        logger.debug(f"✓ Found default privilege: {schema}.{priv} for {role}")
+    
+        except Exception as e:
+            logger.exception(f"Erro ao consultar privilégios default para role '{role}'")
+    
+        logger.debug(f"=== get_default_table_privileges END: {out} ===")
+        return out
 
     def alter_default_privileges(
-        self, group: str, schema: str, obj_type: str, privileges: Set[str], *, for_role: str | None = None
+        self, group: str, schema: str, obj_type: str, privileges: Set[str], for_role: str = None
     ):
-        """Atualiza ``ALTER DEFAULT PRIVILEGES`` para novos objetos.
-
-        Parameters
-        ----------
-        group : str
-            Role a receber os privilégios padrão.
-        schema : str
-            Schema onde os objetos serão criados.
-        obj_type : str
-            Tipo de objeto (``tables``, ``sequences``, ``functions`` ou ``types``).
-        privileges : Set[str]
-            Conjunto de privilégios a conceder. Se vazio, remove todos.
-        """
+        """Altera os privilégios padrão para objetos futuros em um schema."""
         logger.debug(f"=== alter_default_privileges START ===")
         logger.debug(f"group={group}, schema={schema}, obj_type={obj_type}, privileges={privileges}, for_role={for_role}")
-
-        type_map = {
-            "tables": sql.SQL("TABLES"),
-            "sequences": sql.SQL("SEQUENCES"),
-            "functions": sql.SQL("FUNCTIONS"),
-            "types": sql.SQL("TYPES"),
-        }
-        if obj_type not in type_map:
-            raise ValueError(
-                "obj_type deve ser 'tables', 'sequences', 'functions' ou 'types'"
-            )
-
-        whitelist_key = obj_type.rstrip("s").upper()
-        invalid = set(privileges) - PRIVILEGE_WHITELIST[whitelist_key]
-        if invalid:
-            raise ValueError(
-                f"Privilégios inválidos para {whitelist_key}: {', '.join(sorted(invalid))}"
-            )
-
-        # Idempotência: verifica se já está conforme antes de aplicar
-        objtype_codes = {"tables": "r", "sequences": "S", "functions": "f", "types": "T"}
-        code = objtype_codes[obj_type]
-        current = self.get_default_privileges(group, code)
-        existing = current.get(schema, {}).get(group, set())
-        if existing == set(privileges):
-            logger.debug(
-                "Default privileges in schema '%s' for '%s' unchanged: %s",
-                schema,
-                group,
-                sorted(privileges),
-            )
-            logger.debug("=== alter_default_privileges END (no-op) ===")
-            return
-
-        identifier = sql.Identifier(schema)
-        obj_keyword = type_map[obj_type]
+        
+        # Validações
+        if obj_type not in OBJECT_TYPES:
+            raise ValueError(f"Tipo de objeto inválido: {obj_type}")
+        
+        # Determina comando com base no tipo de objeto
+        obj_sql_name = OBJECT_TYPE_MAPS.get(obj_type, obj_type.upper())
+        
+        # Define clausula FOR ROLE
+        for_clause = ""
+        params = [group, schema]
+        
+        if for_role:
+            for_clause = "FOR ROLE %s"
+            params.insert(0, for_role)
+    
         with self.conn.cursor() as cur:
-            # Remove privilégios anteriores
-            if for_role:
-                revoke_sql = sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA {} REVOKE ALL ON {} FROM {}"
-                ).format(sql.Identifier(for_role), identifier, obj_keyword, sql.Identifier(group))
-                try:
-                    stmt_str = revoke_sql.as_string(cur)
-                except Exception:
-                    stmt_str = str(revoke_sql)
-                logger.debug(f"Executing REVOKE (FOR ROLE): {stmt_str}")
-                cur.execute(revoke_sql)
-            else:
-                revoke_sql = sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA {} REVOKE ALL ON {} FROM {}"
-                ).format(identifier, obj_keyword, sql.Identifier(group))
-                try:
-                    stmt_str = revoke_sql.as_string(cur)
-                except Exception:
-                    stmt_str = str(revoke_sql)
-                logger.debug(f"Executing REVOKE: {stmt_str}")
-                cur.execute(revoke_sql)
-                
-            if privileges:
-                if for_role:
-                    grant_sql = sql.SQL(
-                        "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA {} GRANT {} ON {} TO {}"
-                    ).format(
-                        sql.Identifier(for_role),
-                        identifier,
-                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
-                        obj_keyword,
-                        sql.Identifier(group),
-                    )
-                    try:
-                        stmt_str = grant_sql.as_string(cur)
-                    except Exception:
-                        stmt_str = str(grant_sql)
-                    logger.debug(f"Executing GRANT (FOR ROLE): {stmt_str}")
-                    cur.execute(grant_sql)
-                else:
-                    grant_sql = sql.SQL(
-                        "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT {} ON {} TO {}"
-                    ).format(
-                        identifier,
-                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
-                        obj_keyword,
-                        sql.Identifier(group),
-                    )
-                    try:
-                        stmt_str = grant_sql.as_string(cur)
-                    except Exception:
-                        stmt_str = str(grant_sql)
-                    logger.debug(f"Executing GRANT: {stmt_str}")
-                    cur.execute(grant_sql)
-                    
-                logger.info(f"✅ Applied default privileges {privileges} for {obj_type} in {schema} to {group}")
-            else:
-                logger.info(f"🗑️ Revoked all default privileges for {obj_type} in {schema} from {group}")
-                
-        # Força commit se não estiver em transação
-        if not self.conn.autocommit:
-            self.conn.commit()
-            logger.debug("Forced commit for default privileges")
+            # Revoga primeiro
+            revoke_sql = sql.SQL("ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} REVOKE ALL ON {obj_type} FROM {group}").format(
+                for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
+                schema=sql.Identifier(schema),
+                obj_type=sql.SQL(obj_sql_name),
+                group=sql.Identifier(group)
+            )
             
+            logger.debug(f"Executing REVOKE: {revoke_sql.as_string(cur)}")
+            cur.execute(revoke_sql, params)
+            
+            # Concede os novos privilégios, se houver
+            if privileges:
+                grant_sql = sql.SQL("ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} GRANT {privs} ON {obj_type} TO {group}").format(
+                    for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
+                    schema=sql.Identifier(schema),
+                    privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                    obj_type=sql.SQL(obj_sql_name),
+                    group=sql.Identifier(group)
+                )
+                
+                logger.debug(f"Executing GRANT: {grant_sql.as_string(cur)}")
+                cur.execute(grant_sql, params)
+    
+        # Força commit para garantir que as alterações sejam persistidas
+        self.conn.commit()
+        
+        logger.info(f"✓ Applied default privileges {privileges} for {obj_type} in {schema} to {group}")
         logger.debug(f"=== alter_default_privileges END ===")
+        return True
 
     # Métodos de schema
     def create_schema(self, schema_name: str, owner: str | None = None):

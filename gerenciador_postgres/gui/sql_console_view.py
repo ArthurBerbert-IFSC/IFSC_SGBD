@@ -175,6 +175,7 @@ class SQLConsoleView(QWidget):
         self.txtMessages.clear()
         start_time = perf_counter()
         last_row_count = 0
+        cur = None
         try:
             with conn.cursor() as cur:
                 statements = [s.strip() for s in sql_text.split(";") if s.strip()]
@@ -203,10 +204,37 @@ class SQLConsoleView(QWidget):
                 self.status_bar.showMessage(
                     f"Concluído em {elapsed:.2f}s | Linhas afetadas: {last_row_count}"
                 )
-        except psycopg2.Error as e:
-            conn.rollback()
-            self.txtMessages.setPlainText(f"Erro: {e}")
-            self.status_bar.showMessage("Erro ao executar a consulta")
+        except psycopg2.OperationalError as e:
+            # Check if it's a connection loss error
+            if "server closed the connection unexpectedly" in str(e) or "connection already closed" in str(e):
+                self.append_message("Erro: Conexão com o servidor perdida. Verifique sua conexão de rede ou VPN.", "error")
+                # Mark connection as closed to prevent further attempts to use it
+                if hasattr(conn, 'closed'):
+                    conn.closed = 1
+            else:
+                self.append_message(f"Erro na execução: {e}", "error")
+                try:
+                    if not getattr(conn, 'closed', True):
+                        conn.rollback()
+                except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                    # Connection already closed, nothing to rollback
+                    pass
+        except Exception as e:
+            self.append_message(f"Erro na execução: {e}", "error")
+            try:
+                if not getattr(conn, 'closed', True):
+                    conn.rollback()
+            except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                # Connection already closed, nothing to rollback
+                pass
+        finally:
+            # Only close the cursor if the connection is still open
+            try:
+                if not getattr(conn, 'closed', True) and cur is not None:
+                    cur.close()
+            except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                # Connection already closed, cannot close cursor
+                pass
 
     def _set_font_size(self):
         font = QFont(self.txtSQL.font())

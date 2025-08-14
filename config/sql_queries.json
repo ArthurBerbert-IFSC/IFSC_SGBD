@@ -1,3 +1,5 @@
 {
-  "arvore": "SELECT *\nFROM geo2.arvore"
+  "arvore": "SELECT *\nFROM geo2.arvore",
+  "Privilegios_01": "-- Comando simples para ver todas as entradas de privilégios futuros\nSELECT \n    n.nspname AS schema_name,\n    r.rolname AS owner_role,\n    pg_get_userbyid(a.grantee) AS grantee_role,\n    a.privilege_type,\n    t.defaclobjtype AS obj_type\nFROM \n    pg_default_acl t\n    JOIN pg_roles r ON t.defaclrole = r.oid\n    JOIN pg_namespace n ON t.defaclnamespace = n.oid,\n    LATERAL aclexplode(t.defaclacl) AS a\nWHERE \n    n.nspname = 'Teste_001_Esquema' \n    AND t.defaclobjtype = 'r';  -- 'r' para tabelas",
+  "001": "SELECT\n  n.nspname                   AS schema,\n  d.defaclobjtype            AS objtype,\n  d.defaclrole::regrole      AS owner,       -- owner cujos objetos futuros herdarão\n  d.defaclacl                AS acl_raw\nFROM pg_default_acl d\nJOIN pg_namespace n ON n.oid = d.defaclnamespace\nWHERE d.defaclobjtype = 'r'\nORDER BY n.nspname, owner;"
 }
