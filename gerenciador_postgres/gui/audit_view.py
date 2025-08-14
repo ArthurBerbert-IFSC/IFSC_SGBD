@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QComboBox, QLineEdit, QDateTimeEdit, QLabel, QTextEdit,
     QSplitter, QGroupBox, QCheckBox, QSpinBox, QMessageBox, QProgressDialog,
-    QHeaderView, QTabWidget
+    QHeaderView, QTabWidget, QFileDialog
 )
 from PyQt6.QtCore import Qt, QDateTime, QThread, pyqtSignal, QTimer, QModelIndex
 from PyQt6.QtGui import QIcon, QFont
@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List
 import json
+import csv
 
 
 class AuditLoadWorker(QThread):
@@ -409,8 +410,36 @@ class AuditView(QWidget):
     
     def _export_logs(self):
         """Exporta logs para arquivo."""
-        # TODO: Implementar exportação (CSV, Excel, etc.)
-        QMessageBox.information(self, "Exportar", "Funcionalidade de exportação será implementada em breve.")
+        if self.table_logs.rowCount() == 0:
+            QMessageBox.information(self, "Exportar", "Não há registros para exportar.")
+            return
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Salvar logs",
+            "logs.csv",
+            "CSV Files (*.csv)"
+        )
+        if not filename:
+            return
+
+        try:
+            with open(filename, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                headers = [
+                    self.table_logs.horizontalHeaderItem(i).text()
+                    for i in range(self.table_logs.columnCount())
+                ]
+                writer.writerow(headers)
+                for row in range(self.table_logs.rowCount()):
+                    writer.writerow([
+                        self.table_logs.item(row, col).text()
+                        if self.table_logs.item(row, col) else ""
+                        for col in range(self.table_logs.columnCount())
+                    ])
+            QMessageBox.information(self, "Exportar", "Logs exportados com sucesso.")
+        except Exception as e:
+            QMessageBox.critical(self, "Exportar", f"Erro ao exportar logs: {e}")
     
     def _cleanup_old_logs(self):
         """Remove logs antigos."""

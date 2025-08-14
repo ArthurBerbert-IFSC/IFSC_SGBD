@@ -1,6 +1,8 @@
 import os
 import sys
 from types import SimpleNamespace
+import pytest
+pytest.importorskip("PyQt6.QtWidgets")
 from PyQt6.QtWidgets import QMessageBox
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
