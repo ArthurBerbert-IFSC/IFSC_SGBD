@@ -643,10 +643,13 @@ class DBManager:
         current = self.get_default_privileges(group, code)
         existing = current.get(schema, {}).get(group, set())
         if existing == set(privileges):
-            logger.info(
-                f"ℹ️ Default privileges in schema '{schema}' for '{group}' already {sorted(privileges)}"
+            logger.debug(
+                "Default privileges in schema '%s' for '%s' unchanged: %s",
+                schema,
+                group,
+                sorted(privileges),
             )
-            logger.debug(f"=== alter_default_privileges END (no-op) ===")
+            logger.debug("=== alter_default_privileges END (no-op) ===")
             return
 
         identifier = sql.Identifier(schema)

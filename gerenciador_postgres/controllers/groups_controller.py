@@ -134,8 +134,11 @@ class GroupsController(QObject):
                 group_name, schema, obj_type, privileges
             )
             if success:
+                # READ-BACK: reconsulta apenas os defaults do grupo/objeto-alvo
+                code_map = {"tables": "r", "sequences": "S", "functions": "f", "types": "T"}
+                code = code_map.get(obj_type, "r")
                 try:
-                    self.role_manager.sweep_privileges(target_group=group_name)
+                    self.role_manager.dao.get_default_privileges(group_name, code)
                 except Exception:
                     pass
                 self.data_changed.emit()
