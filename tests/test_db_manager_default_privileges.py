@@ -11,6 +11,7 @@ class DummyCursor:
     def __init__(self):
         self.executed = []
         self.connection = None
+        self.result = []
 
     def __enter__(self):
         return self
@@ -19,7 +20,18 @@ class DummyCursor:
         pass
 
     def execute(self, sql, params=None):
-        self.executed.append(str(sql))
+        sql_str = str(sql)
+        self.executed.append(sql_str)
+        if "server_version_num" in sql_str:
+            self.result = [(150000,)]
+        else:
+            self.result = []
+
+    def fetchone(self):
+        return self.result[0] if self.result else None
+
+    def fetchall(self):
+        return self.result
 
 
 class DummyConn:

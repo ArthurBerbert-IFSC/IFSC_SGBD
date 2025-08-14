@@ -328,9 +328,11 @@ class GroupsView(QWidget):
             schema_privs = self.controller.get_schema_level_privileges(role).get(
                 schema_name, set()
             )
-            default_privs = self.controller.get_default_table_privileges(role).get(
-                schema_name, set()
+            default_info = self.controller.get_default_table_privileges(role).get(
+                schema_name, {}
             )
+            default_privs = default_info.get("privileges", set())
+            owner_role = default_info.get("owner")
         except Exception as e:  # pragma: no cover
             logging.exception("Erro ao ler privilégios de schema")
             QMessageBox.warning(
@@ -338,7 +340,7 @@ class GroupsView(QWidget):
                 "Erro",
                 f"Não foi possível ler os privilégios.\nMotivo: {e}",
             )
-            schema_privs, default_privs = set(), set()
+            schema_privs, default_privs, owner_role = set(), set(), None
 
         usage_create_box = QGroupBox("Permissões no Schema")
         usage_create_layout = QHBoxLayout()
@@ -367,6 +369,10 @@ class GroupsView(QWidget):
         defaults_layout.addWidget(self.cb_default_delete)
         defaults_box.setLayout(defaults_layout)
         self.schema_details_layout.addWidget(defaults_box)
+
+        if owner_role:
+            owner_label = QLabel(f"owner: {owner_role}")
+            self.schema_details_layout.addWidget(owner_label)
 
         self.schema_details_layout.addStretch()
 

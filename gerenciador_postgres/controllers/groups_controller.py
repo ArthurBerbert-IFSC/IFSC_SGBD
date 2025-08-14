@@ -10,6 +10,8 @@ class GroupsController(QObject):
     def __init__(self, role_manager):
         super().__init__()
         self.role_manager = role_manager
+        self._is_refreshing = False
+        self._is_applying = False
 
     # ---------------------------------------------------------------
     # Operações de grupos
@@ -53,10 +55,30 @@ class GroupsController(QObject):
             return {}
 
     def get_default_table_privileges(self, group_name: str):
-        try:
-            return self.role_manager.dao.get_default_table_privileges(group_name)
-        except Exception:
+        """Retorna privilégios futuros com informação de owner.
+
+        Evita reentrância usando ``_is_refreshing`` para ignorar chamadas
+        simultâneas.
+        """
+        if self._is_refreshing:
             return {}
+        self._is_refreshing = True
+        try:
+            data = self.role_manager.dao.get_default_privileges(group_name, "r")
+        except Exception:
+            data = {}
+        finally:
+            self._is_refreshing = False
+
+        meta = data.pop("_meta", {})
+        owners = meta.get("owner_roles", {})
+        result = {}
+        for schema, grants in data.items():
+            result[schema] = {
+                "owner": owners.get(schema),
+                "privileges": grants.get(group_name, set()),
+            }
+        return result
 
     def list_privilege_templates(self):
         return PERMISSION_TEMPLATES
@@ -99,14 +121,27 @@ class GroupsController(QObject):
         return success
 
     def alter_default_privileges(self, group_name: str, schema: str, obj_type: str, privileges):
-        success = self.role_manager.alter_default_privileges(group_name, schema, obj_type, privileges)
-        if success:
-            try:
-                self.role_manager.sweep_privileges(target_group=group_name)
-            except Exception:
-                pass
-            self.data_changed.emit()
-        return success
+        """Aplica ``ALTER DEFAULT PRIVILEGES`` com trava de reentrância.
+
+        Após aplicar, dispara ``data_changed`` para que a interface possa
+        reconsultar o estado atualizado.
+        """
+        if self._is_applying:
+            return False
+        self._is_applying = True
+        try:
+            success = self.role_manager.alter_default_privileges(
+                group_name, schema, obj_type, privileges
+            )
+            if success:
+                try:
+                    self.role_manager.sweep_privileges(target_group=group_name)
+                except Exception:
+                    pass
+                self.data_changed.emit()
+            return success
+        finally:
+            self._is_applying = False
 
     def get_current_database(self):
         return self.role_manager.dao.conn.get_dsn_parameters().get("dbname")

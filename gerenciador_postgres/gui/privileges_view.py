@@ -128,7 +128,7 @@ class PrivilegesView(QWidget):
         role = self.cmbRole.currentText()
         data = self.controller.get_schema_tables()
         schema_privs = self.controller.get_schema_level_privileges(role)
-        default_privs = self.controller.get_default_table_privileges(role)
+        default_info = self.controller.get_default_table_privileges(role)
 
         # Banco
         self.treeDbPrivileges.clear()
@@ -147,6 +147,10 @@ class PrivilegesView(QWidget):
         self._clear_layout(self.schemaLayout)
         self.schema_checkboxes.clear()
         for schema in data.keys():
+            info = default_info.get(schema, {})
+            privs = info.get("privileges", set())
+            owner_role = info.get("owner")
+
             box = QGroupBox(schema)
             box_layout = QVBoxLayout()
 
@@ -162,17 +166,19 @@ class PrivilegesView(QWidget):
             row2 = QHBoxLayout()
             row2.addWidget(QLabel("Padrão para Novas Tabelas:"))
             cb_select = QCheckBox("SELECT")
-            cb_select.setChecked("SELECT" in default_privs.get(schema, set()))
+            cb_select.setChecked("SELECT" in privs)
             row2.addWidget(cb_select)
             cb_insert = QCheckBox("INSERT")
-            cb_insert.setChecked("INSERT" in default_privs.get(schema, set()))
+            cb_insert.setChecked("INSERT" in privs)
             row2.addWidget(cb_insert)
             cb_update = QCheckBox("UPDATE")
-            cb_update.setChecked("UPDATE" in default_privs.get(schema, set()))
+            cb_update.setChecked("UPDATE" in privs)
             row2.addWidget(cb_update)
             cb_delete = QCheckBox("DELETE")
-            cb_delete.setChecked("DELETE" in default_privs.get(schema, set()))
+            cb_delete.setChecked("DELETE" in privs)
             row2.addWidget(cb_delete)
+            if owner_role:
+                row2.addWidget(QLabel(f"owner: {owner_role}"))
             box_layout.addLayout(row2)
 
             box.setLayout(box_layout)
