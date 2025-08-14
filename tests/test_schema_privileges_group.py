@@ -8,7 +8,14 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 pytest.importorskip("PyQt6.QtWidgets")
 from gerenciador_postgres.db_manager import DBManager
 from gerenciador_postgres.gui.groups_view import GroupsView
-from PyQt6.QtWidgets import QApplication, QTreeWidget, QListWidget, QPushButton
+from PyQt6.QtWidgets import (
+    QApplication,
+    QTreeWidget,
+    QListWidget,
+    QPushButton,
+    QWidget,
+    QVBoxLayout,
+)
 from PyQt6.QtCore import Qt
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -78,13 +85,19 @@ def test_grant_and_display_schema_privileges():
     view = GroupsView.__new__(GroupsView)
     view.controller = DummyController()
     view.current_group = "grp_role"
+    view.schema_list_widget = QListWidget()
+    view.schema_details_widget = QWidget()
+    view.schema_details_layout = QVBoxLayout()
+    view.schema_details_widget.setLayout(view.schema_details_layout)
     view.treePrivileges = QTreeWidget()
     view.btnApplyTemplate = QPushButton()
     view.btnSave = QPushButton()
     view.btnSweep = QPushButton()
     view.lstMembers = QListWidget()
-    view._populate_tree()
 
-    general_item = view.treePrivileges.topLevelItem(0).child(0)
-    assert general_item.checkState(5) == Qt.CheckState.Checked
-    assert general_item.checkState(6) == Qt.CheckState.Checked
+    view._populate_schemas()
+    item = view.schema_list_widget.item(0)
+    view._on_schema_selected(item, None)
+
+    assert view.cb_usage.isChecked()
+    assert view.cb_create.isChecked()
