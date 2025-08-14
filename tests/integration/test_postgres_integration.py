@@ -114,8 +114,9 @@ def test_default_privileges(conn):
 
 def test_enable_postgis(conn):
     db = DBManager(conn)
+    conn.rollback()
     cur = conn.cursor()
-    cur.execute("DROP EXTENSION IF EXISTS postgis")
+    cur.execute("DROP EXTENSION IF EXISTS postgis CASCADE")
     conn.commit()
     with db.transaction():
         db.enable_postgis("public")
@@ -125,6 +126,7 @@ def test_enable_postgis(conn):
 
 def test_apply_group_privileges_rollback(conn):
     db = DBManager(conn)
+    conn.rollback()
     cur = conn.cursor()
     cur.execute("DROP TABLE IF EXISTS public.t_valid")
     cur.execute("DROP ROLE IF EXISTS conflict_role")

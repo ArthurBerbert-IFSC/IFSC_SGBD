@@ -11,8 +11,8 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QCheckBox,
     QProgressDialog,
-    QApplication,
-)
+    QApplication)
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from pathlib import Path
