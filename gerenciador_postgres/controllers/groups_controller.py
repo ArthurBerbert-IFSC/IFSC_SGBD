@@ -83,8 +83,19 @@ class GroupsController(QObject):
     def list_privilege_templates(self):
         return PERMISSION_TEMPLATES
 
-    def apply_group_privileges(self, group_name: str, privileges, obj_type: str = "TABLE"):
-        success = self.role_manager.set_group_privileges(group_name, privileges, obj_type=obj_type)
+    def apply_group_privileges(
+        self,
+        group_name: str,
+        privileges,
+        obj_type: str = "TABLE",
+        defaults_applied: bool = False,
+    ):
+        success = self.role_manager.set_group_privileges(
+            group_name,
+            privileges,
+            obj_type=obj_type,
+            defaults_applied=defaults_applied,
+        )
         if success:
             # Sincroniza defaults para refletir os privilégios aplicados
             try:
