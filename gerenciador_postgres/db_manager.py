@@ -426,17 +426,29 @@ class DBManager:
                 """,
                 (role,),
             )
-            # Some database adapters may yield rows with fewer columns or a
-            # completely unexpected object.  Rather than failing with an
-            # ``IndexError`` or ``TypeError`` in those situations, ensure the
-            # row looks like a two element sequence before trying to unpack it.
-            for row in cur.fetchall():
-                if not isinstance(row, (list, tuple)) or len(row) < 2:
-                    # Skip malformed or unexpected row formats instead of
-                    # raising an error that would break the UI.
-                    continue
-                schema, privilege = row[0], row[1]
-                out.setdefault(schema, set()).add(privilege)
+            # Tratamento robusto para evitar IndexError na tupla
+            try:
+                rows = cur.fetchall()
+                for row in rows:
+                    try:
+                        # Verifica se a linha tem pelo menos 2 elementos
+                        if not row or len(row) < 2:
+                            continue
+                        
+                        schema = str(row[0]) if row[0] is not None else ""
+                        privilege = str(row[1]) if row[1] is not None else ""
+                        
+                        # Só adiciona se ambos valores são válidos
+                        if schema and privilege and privilege in ("USAGE", "CREATE"):
+                            out.setdefault(schema, set()).add(privilege)
+                    except (IndexError, TypeError, AttributeError) as e:
+                        # Ignora linhas problemáticas e continua
+                        logger.debug(f"Linha ignorada em get_schema_privileges: {row}, erro: {e}")
+                        continue
+            except Exception as e:
+                # Em caso de erro geral na consulta, retorna dicionário vazio
+                logger.warning(f"Erro ao consultar privilégios de schema para role '{role}': {e}")
+                return {}
         return out
 
     def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
