@@ -121,13 +121,20 @@ class GroupsController(QObject):
             self.data_changed.emit()
         return success
 
-    def grant_schema_privileges(self, group_name: str, schema: str, privileges):
+    def grant_schema_privileges(
+        self,
+        group_name: str,
+        schema: str,
+        privileges,
+        skip_sweep: bool = False,
+    ):
         success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
         if success:
-            try:
-                self.role_manager.sweep_privileges(target_group=group_name)
-            except Exception:
-                pass
+            if not skip_sweep:
+                try:
+                    self.role_manager.sweep_privileges(target_group=group_name)
+                except Exception:
+                    pass
             self.data_changed.emit()
         return success
 
