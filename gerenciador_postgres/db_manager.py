@@ -357,12 +357,42 @@ class DBManager:
                             )
                         )
 
+    def get_database_privileges(self, role: str) -> Set[str]:
+        """Retorna os privilégios atuais de banco para ``role``."""
+
+        privileges: Set[str] = set()
+        with self.conn.cursor() as cur:
+            for priv in PRIVILEGE_WHITELIST["DATABASE"]:
+                cur.execute("SELECT has_database_privilege(%s, %s)", (role, priv))
+                row = cur.fetchone()
+                if row and row[0]:
+                    privileges.add("TEMP" if priv == "TEMPORARY" else priv)
+        return privileges
+
+    def get_schema_privileges(self, role: str) -> Dict[str, Set[str]]:
+        """Retorna os privilégios de schema concedidos a ``role``."""
+
+        query = (
+            "SELECT schema_name, privilege_type "
+            "FROM information_schema.schema_privileges "
+            "WHERE grantee = %s"
+        )
+        result: Dict[str, Set[str]] = {}
+        allowed = PRIVILEGE_WHITELIST["SCHEMA"]
+        with self.conn.cursor() as cur:
+            cur.execute(query, (role,))
+            for schema, privilege in cur.fetchall():
+                if privilege in allowed:
+                    result.setdefault(schema, set()).add(privilege)
+        return result
+
     def grant_database_privileges(self, group: str, privileges: Set[str]):
         """Concede privilégios de banco ao grupo especificado.
 
         Revoga primeiro todos os privilégios padrão e em seguida concede
         aqueles informados em ``privileges``.
         """
+        privileges = {"TEMPORARY" if p == "TEMP" else p for p in privileges}
         invalid = set(privileges) - PRIVILEGE_WHITELIST["DATABASE"]
         if invalid:
             raise ValueError(
