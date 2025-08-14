@@ -637,6 +637,18 @@ class DBManager:
                 f"Privilégios inválidos para {whitelist_key}: {', '.join(sorted(invalid))}"
             )
 
+        # Idempotência: verifica se já está conforme antes de aplicar
+        objtype_codes = {"tables": "r", "sequences": "S", "functions": "f", "types": "T"}
+        code = objtype_codes[obj_type]
+        current = self.get_default_privileges(group, code)
+        existing = current.get(schema, {}).get(group, set())
+        if existing == set(privileges):
+            logger.info(
+                f"ℹ️ Default privileges in schema '{schema}' for '{group}' already {sorted(privileges)}"
+            )
+            logger.debug(f"=== alter_default_privileges END (no-op) ===")
+            return
+
         identifier = sql.Identifier(schema)
         obj_keyword = type_map[obj_type]
         with self.conn.cursor() as cur:
