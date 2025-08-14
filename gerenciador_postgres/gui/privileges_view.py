@@ -352,8 +352,11 @@ class PrivilegesView(QWidget):
             if db_privs:
                 ok &= self.controller.grant_database_privileges(role, db_privs)
             for schema, perms in schema_privs.items():
-                ok &= self.controller.grant_schema_privileges(role, schema, perms)
-            defaults_applied = bool(default_privs)
+                skip_sweep = bool(default_privs.get(schema))
+                ok &= self.controller.grant_schema_privileges(
+                    role, schema, perms, skip_sweep=skip_sweep
+                )
+            defaults_applied = any(default_privs.values())
             for schema, perms in default_privs.items():
                 ok &= self.controller.alter_default_privileges(
                     role, schema, "tables", perms
@@ -363,6 +366,8 @@ class PrivilegesView(QWidget):
                 table_privileges,
                 defaults_applied=defaults_applied,
             )
+            if ok and not defaults_applied:
+                ok &= self.controller.sweep_group_privileges(role)
             if ok:
                 QMessageBox.information(
                     self, "Sucesso", "Permissões salvas com sucesso."
