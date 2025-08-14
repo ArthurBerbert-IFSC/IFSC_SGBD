@@ -426,7 +426,14 @@ class DBManager:
                 """,
                 (role,),
             )
-            for schema, privilege in cur.fetchall():
+            # Some database adapters may return rows with an unexpected
+            # number of columns.  To avoid ``IndexError`` in those cases
+            # we iterate over the raw rows and guard against short tuples.
+            for row in cur.fetchall():
+                if len(row) < 2:
+                    # Skip malformed rows instead of raising an error
+                    continue
+                schema, privilege = row[0], row[1]
                 out.setdefault(schema, set()).add(privilege)
         return out
 
