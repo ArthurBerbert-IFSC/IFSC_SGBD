@@ -97,11 +97,11 @@ class GroupsController(QObject):
             defaults_applied=defaults_applied,
         )
         if success:
-            # Sincroniza defaults para refletir os privilégios aplicados
-            try:
-                self.role_manager.sweep_privileges(target_group=group_name)
-            except Exception:
-                pass
+            if not defaults_applied:
+                try:
+                    self.role_manager.sweep_privileges(target_group=group_name)
+                except Exception:
+                    pass
             self.data_changed.emit()
         return success
 
