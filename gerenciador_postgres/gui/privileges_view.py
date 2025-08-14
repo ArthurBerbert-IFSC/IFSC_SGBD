@@ -192,6 +192,7 @@ class PrivilegesView(QWidget):
                     "UPDATE": cb_update,
                     "DELETE": cb_delete,
                 },
+                "owner": owner_role,
             }
 
         self.schemaLayout.addStretch()
@@ -319,6 +320,7 @@ class PrivilegesView(QWidget):
 
         schema_privs: dict[str, set[str]] = {}
         default_privs: dict[str, set[str]] = {}
+        default_owners: dict[str, str | None] = {}
         for schema, boxes in self.schema_checkboxes.items():
             perms = set()
             if boxes["USAGE"].isChecked():
@@ -330,6 +332,7 @@ class PrivilegesView(QWidget):
 
             dperms = {label for label, cb in boxes["DEFAULT"].items() if cb.isChecked()}
             default_privs[schema] = dperms
+            default_owners[schema] = boxes.get("owner")
 
         table_privileges: dict[str, dict[str, set[str]]] = {}
         for i in range(self.treeTablePrivileges.topLevelItemCount()):
@@ -359,7 +362,11 @@ class PrivilegesView(QWidget):
             defaults_applied = any(default_privs.values())
             for schema, perms in default_privs.items():
                 ok &= self.controller.alter_default_privileges(
-                    role, schema, "tables", perms
+                    role,
+                    schema,
+                    "tables",
+                    perms,
+                    owner=default_owners.get(schema),
                 )
             ok &= self.controller.apply_group_privileges(
                 role,
