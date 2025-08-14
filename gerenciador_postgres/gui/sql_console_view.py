@@ -163,6 +163,10 @@ class SQLConsoleView(QWidget):
             self._write_queries()
             self._refresh_query_list()
 
+    def append_message(self, msg: str):
+        """Append a message to the messages panel."""
+        self.txtMessages.appendPlainText(msg)
+
     def on_execute(self):
         sql_text = self.txtSQL.toPlainText().strip()
         if not sql_text:
@@ -207,12 +211,14 @@ class SQLConsoleView(QWidget):
         except psycopg2.OperationalError as e:
             # Check if it's a connection loss error
             if "server closed the connection unexpectedly" in str(e) or "connection already closed" in str(e):
-                self.append_message("Erro: Conexão com o servidor perdida. Verifique sua conexão de rede ou VPN.", "error")
+                self.append_message(
+                    "Erro: Conexão com o servidor perdida. Verifique sua conexão de rede ou VPN."
+                )
                 # Mark connection as closed to prevent further attempts to use it
                 if hasattr(conn, 'closed'):
                     conn.closed = 1
             else:
-                self.append_message(f"Erro na execução: {e}", "error")
+                self.append_message(f"Erro na execução: {e}")
                 try:
                     if not getattr(conn, 'closed', True):
                         conn.rollback()
@@ -220,7 +226,7 @@ class SQLConsoleView(QWidget):
                     # Connection already closed, nothing to rollback
                     pass
         except Exception as e:
-            self.append_message(f"Erro na execução: {e}", "error")
+            self.append_message(f"Erro na execução: {e}")
             try:
                 if not getattr(conn, 'closed', True):
                     conn.rollback()
