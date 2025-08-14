@@ -70,7 +70,7 @@ class DummyDAO:
             raise
 
 
-class TestableSchemaManager(SchemaManager):
+class DummySchemaManager(SchemaManager):
     def __init__(self, dao, logger, perms, allowed_group='Professores'):
         super().__init__(dao, logger)
         self.allowed_group = allowed_group
@@ -100,13 +100,13 @@ class SchemaManagerPermissionTests(unittest.TestCase):
         self.logger = logger
 
     def test_create_schema_authorized(self):
-        mgr = TestableSchemaManager(self.dao, self.logger, {'in_group': True})
+        mgr = DummySchemaManager(self.dao, self.logger, {'in_group': True})
         mgr.create_schema('novo')
         self.assertEqual(self.dao.created, [('novo', None)])
         self.assertTrue(self.dao.conn.committed)
 
     def test_create_schema_unauthorized(self):
-        mgr = TestableSchemaManager(self.dao, self.logger, {'in_group': False})
+        mgr = DummySchemaManager(self.dao, self.logger, {'in_group': False})
         with self.assertRaises(PermissionError):
             mgr.create_schema('novo')
         self.assertEqual(self.dao.created, [])
@@ -115,14 +115,14 @@ class SchemaManagerPermissionTests(unittest.TestCase):
 
     def test_delete_schema_authorized_owner(self):
         perms = {'owner': 'alice'}
-        mgr = TestableSchemaManager(self.dao, self.logger, perms)
+        mgr = DummySchemaManager(self.dao, self.logger, perms)
         mgr.delete_schema('teste')
         self.assertEqual(self.dao.dropped, [('teste', False)])
         self.assertTrue(self.dao.conn.committed)
 
     def test_delete_schema_unauthorized(self):
         perms = {'owner': 'other'}
-        mgr = TestableSchemaManager(self.dao, self.logger, perms)
+        mgr = DummySchemaManager(self.dao, self.logger, perms)
         with self.assertRaises(PermissionError):
             mgr.delete_schema('teste')
         self.assertEqual(self.dao.dropped, [])

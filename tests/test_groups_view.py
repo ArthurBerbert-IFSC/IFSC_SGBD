@@ -1,5 +1,7 @@
 import types
 from types import SimpleNamespace
+import pytest
+pytest.importorskip("PyQt6.QtWidgets")
 from PyQt6.QtWidgets import QMessageBox
 
 from gerenciador_postgres.gui.groups_view import GroupsView

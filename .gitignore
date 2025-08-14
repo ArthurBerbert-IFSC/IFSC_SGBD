@@ -208,3 +208,7 @@ __marimo__/
 
 # Ignore generated splash image
 assets/splash.png
+
+# Archive files
+*.zip
+*.rar

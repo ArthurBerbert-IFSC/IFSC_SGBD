@@ -1,9 +1,11 @@
 import os
 import sys
 import pathlib
+import pytest
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
+pytest.importorskip("PyQt6.QtWidgets")
 from gerenciador_postgres.db_manager import DBManager
 from gerenciador_postgres.gui.groups_view import GroupsView
 from PyQt6.QtWidgets import QApplication, QTreeWidget, QListWidget, QPushButton
