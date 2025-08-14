@@ -13,6 +13,8 @@ class DummyCursor:
         # not a sequence at all to simulate unexpected database adapter
         # behaviour.
         self.result = [("public", "USAGE"), ("broken",), None]
+        self.fetchone_values = [(True,), (False,), (False,), (False,)]
+        self.idx = 0
 
     def __enter__(self):
         return self
@@ -25,6 +27,11 @@ class DummyCursor:
 
     def fetchall(self):
         return self.result
+
+    def fetchone(self):
+        val = self.fetchone_values[self.idx]
+        self.idx += 1
+        return val
 
 
 class DummyConn:

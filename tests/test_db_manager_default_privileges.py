@@ -10,6 +10,7 @@ from gerenciador_postgres.db_manager import DBManager
 class DummyCursor:
     def __init__(self):
         self.executed = []
+        self.connection = None
 
     def __enter__(self):
         return self
@@ -22,6 +23,10 @@ class DummyCursor:
 
 
 class DummyConn:
+    def __init__(self):
+        self.autocommit = True
+        self.cursor_obj = None
+
     def cursor(self):
         self.cursor_obj = DummyCursor()
         return self.cursor_obj
