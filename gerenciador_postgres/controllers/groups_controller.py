@@ -138,7 +138,14 @@ class GroupsController(QObject):
             self.data_changed.emit()
         return success
 
-    def alter_default_privileges(self, group_name: str, schema: str, obj_type: str, privileges):
+    def alter_default_privileges(
+        self,
+        group_name: str,
+        schema: str,
+        obj_type: str,
+        privileges,
+        owner: str | None = None,
+    ):
         """Aplica ``ALTER DEFAULT PRIVILEGES`` com trava de reentrância.
 
         Após aplicar, dispara ``data_changed`` para que a interface possa
@@ -148,8 +155,9 @@ class GroupsController(QObject):
             return False
         self._is_applying = True
         try:
+            kwargs = {"for_role": owner} if owner else {}
             success = self.role_manager.alter_default_privileges(
-                group_name, schema, obj_type, privileges
+                group_name, schema, obj_type, privileges, **kwargs
             )
             if success:
                 # READ-BACK: reconsulta apenas os defaults do grupo/objeto-alvo
