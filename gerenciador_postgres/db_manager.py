@@ -417,24 +417,17 @@ class DBManager:
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT n.nspname,
-                       has_schema_privilege(%s, n.nspname, 'USAGE') AS can_usage,
-                       has_schema_privilege(%s, n.nspname, 'CREATE') AS can_create
-                FROM pg_namespace n
-                WHERE n.nspname NOT LIKE 'pg\\_%'
-                  AND n.nspname <> 'information_schema'
-                ORDER BY n.nspname
+                SELECT table_schema, privilege_type
+                FROM information_schema.schema_privileges
+                WHERE grantee = %s
+                  AND table_schema NOT LIKE 'pg\\_%'
+                  AND table_schema <> 'information_schema'
+                ORDER BY table_schema
                 """,
-                (role, role),
+                (role,),
             )
-            for schema, can_usage, can_create in cur.fetchall():
-                perms = set()
-                if can_usage:
-                    perms.add('USAGE')
-                if can_create:
-                    perms.add('CREATE')
-                if perms:
-                    out[schema] = perms
+            for schema, privilege in cur.fetchall():
+                out.setdefault(schema, set()).add(privilege)
         return out
 
     def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
