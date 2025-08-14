@@ -65,6 +65,11 @@ class SQLConsoleView(QWidget):
         query_layout.addWidget(self.btnDeleteQuery)
         layout.addLayout(query_layout)
 
+        self.lblLiteralWarning = QLabel(
+            "Use literais; parâmetros nomeados não são suportados aqui."
+        )
+        layout.addWidget(self.lblLiteralWarning)
+
         # SQL editor and results
         self.txtSQL = QTextEdit()
         self.txtSQL.setTabStopDistance(
