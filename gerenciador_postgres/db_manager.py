@@ -19,6 +19,17 @@ PRIVILEGE_WHITELIST = {
     "TYPE": {"USAGE"},
 }
 
+# Map codes from pg ACLs to human readable privilege names
+PG_PRIVCODE_TO_NAME = {
+    "a": "INSERT",
+    "r": "SELECT",
+    "w": "UPDATE",
+    "d": "DELETE",
+    "D": "TRUNCATE",
+    "x": "REFERENCES",
+    "t": "TRIGGER",
+}
+
 
 class DBManager:
     """Camada de acesso a dados para gerenciamento de roles e schemas."""
@@ -57,6 +68,17 @@ class DBManager:
         except Exception:
             conn.rollback()
             raise
+
+    # ------------------------------------------------------------------
+    def server_version_num(self) -> int:
+        """Return PostgreSQL server version as integer (e.g. 150002)."""
+        with self.conn.cursor() as cur:
+            cur.execute("SHOW server_version_num")
+            row = cur.fetchone()
+            try:
+                return int(row[0])
+            except (TypeError, ValueError, IndexError):
+                return 0
 
     def find_user_by_name(self, username: str) -> Optional[User]:
         with self.conn.cursor() as cur:
@@ -443,7 +465,13 @@ class DBManager:
                     ORDER BY nspname
                     """
                 )
-                schemas = [row[0] for row in cur.fetchall()]
+                schemas = []
+                for row in cur.fetchall():
+                    try:
+                        if row:
+                            schemas.append(row[0])
+                    except Exception:
+                        continue
                 logger.debug(f"Found schemas: {schemas}")
                 
                 # Para cada schema, verifica privilégios individualmente
@@ -480,97 +508,98 @@ class DBManager:
         logger.debug(f"=== get_schema_privileges END: {out} ===")
         return out
 
-    def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
-        """Retorna default privileges (ALTER DEFAULT PRIVILEGES) para futuras tabelas por schema concedidos ao role."""
-        code_map = {'r': 'SELECT', 'a': 'INSERT', 'w': 'UPDATE', 'd': 'DELETE'}
-        out: Dict[str, Set[str]] = {}
-        
+    def get_default_privileges(self, role: str | None = None, objtype: str = "r") -> Dict[str, Dict[str, Set[str]]]:
+        """Return default privileges for future objects.
+
+        Parameters
+        ----------
+        role: str | None
+            Filter by grantee role. If ``None`` return defaults for all grantees.
+        objtype: str
+            PostgreSQL object type (r: tables, S: sequences, f: functions,
+            T: types, n: schemas). Defaults to 'r'.
+        """
+
+        params = {"objtype": objtype}
+        role_filter = ""
+        if role:
+            role_filter = " AND grantee_rol.rolname = %(role)s"
+            params["role"] = role
+
+        ver = self.server_version_num()
+
+        if ver >= 120000:
+            sql_query = (
+                """
+                SELECT n.nspname AS schema,
+                       owner_rol.rolname AS owner_role,
+                       grantee_rol.rolname AS grantee_role,
+                       array_agg(priv.privilege_type ORDER BY priv.privilege_type) AS privileges
+                FROM pg_default_acl d
+                JOIN pg_namespace n ON n.oid = d.defaclnamespace
+                JOIN pg_roles owner_rol ON owner_rol.oid = d.defaclrole
+                CROSS JOIN LATERAL aclexplode(d.defaclacl) AS x(grantee, grantor, privs)
+                JOIN pg_roles grantee_rol ON grantee_rol.oid = x.grantee
+                CROSS JOIN LATERAL unnest(x.privs) AS priv(privilege_type, is_grantable)
+                WHERE d.defaclobjtype = %(objtype)s
+                {role_filter}
+                GROUP BY n.nspname, owner_rol.rolname, grantee_rol.rolname
+                ORDER BY n.nspname, grantee_rol.rolname
+                """.format(role_filter=role_filter)
+            )
+        else:
+            sql_query = (
+                """
+                SELECT n.nspname AS schema,
+                       owner_rol.rolname AS owner_role,
+                       COALESCE(grantee_rol.rolname, m[1], m[2]) AS grantee_role,
+                       string_to_array(m[3], NULL) AS privcodes
+                FROM pg_default_acl d
+                JOIN pg_namespace n ON n.oid = d.defaclnamespace
+                JOIN pg_roles owner_rol ON owner_rol.oid = d.defaclrole
+                CROSS JOIN LATERAL unnest(d.defaclacl) AS a(aclitem)
+                CROSS JOIN LATERAL regexp_match(a.aclitem::text, '^(?:"([^"]+)"|([^=]+))=([a-zA-Z]*)/.+$') AS m
+                LEFT JOIN pg_roles grantee_rol ON grantee_rol.rolname = COALESCE(m[1], m[2])
+                WHERE d.defaclobjtype = %(objtype)s
+                {role_filter}
+                ORDER BY n.nspname, grantee_role
+                """.format(role_filter=role_filter)
+            )
+
+        result: Dict[str, Dict[str, Set[str]]] = {}
+        meta_owner: Dict[str, str] = {}
+
         try:
             with self.conn.cursor() as cur:
-                logger.debug(f"=== get_default_table_privileges START for role: '{role}' ===")
-                
-                # Primeira consulta: vê o que existe em pg_default_acl
-                cur.execute(
-                    """
-                    SELECT n.nspname as schema_name, 
-                           r.rolname as defaclrole,
-                           d.defaclacl
-                    FROM pg_default_acl d
-                    JOIN pg_namespace n ON n.oid = d.defaclnamespace
-                    LEFT JOIN pg_roles r ON r.oid = d.defaclrole
-                    WHERE d.defaclobjtype = 'r'
-                    ORDER BY n.nspname
-                    """
-                )
-                all_defaults = cur.fetchall()
-                logger.debug(f"All default privileges in database: {all_defaults}")
-                
-                # Segunda consulta: original com mais detalhes
-                cur.execute(
-                    """
-                    SELECT n.nspname, d.defaclacl
-                    FROM pg_default_acl d
-                    JOIN pg_namespace n ON n.oid = d.defaclnamespace
-                    WHERE d.defaclobjtype = 'r'
-                    """
-                )
+                cur.execute(sql_query, params)
                 rows = cur.fetchall()
-                logger.debug(f"Processing {len(rows)} default privilege rows for role '{role}'")
-                
-                import re
-                # Pattern mais robusto para parsing de ACL
-                pattern = re.compile(r"^([^=]+)=([^/]*)/.*$")
-                
-                for schema, acl_array in rows:
-                    logger.debug(f"Processing schema '{schema}' with ACL array: {acl_array}")
-                    
-                    if not acl_array:
-                        logger.debug(f"Schema '{schema}': ACL array is empty")
-                        continue
-                    
-                    # ACL array pode vir como lista ou string
-                    if isinstance(acl_array, str):
-                        acl_list = [acl_array]
-                    else:
-                        acl_list = acl_array
-                    
-                    logger.debug(f"Schema '{schema}': Processing ACL list: {acl_list}")
-                    
-                    for acl in acl_list:
-                        if not acl:
-                            continue
-                            
-                        try:
-                            logger.debug(f"Parsing ACL entry: '{acl}'")
-                            m = pattern.match(str(acl))
-                            if not m:
-                                logger.debug(f"ACL '{acl}' doesn't match pattern")
-                                continue
-                                
-                            grantee = m.group(1).strip()
-                            privcodes = m.group(2)
-                            
-                            logger.debug(f"Parsed: grantee='{grantee}', privcodes='{privcodes}', looking for role='{role}'")
-                            
-                            # Verifica se é o role que estamos procurando
-                            if grantee == role:
-                                mapped = {code_map.get(c) for c in privcodes if c in code_map}
-                                mapped = {p for p in mapped if p}  # Remove None values
-                                if mapped:
-                                    out.setdefault(schema, set()).update(mapped)
-                                    logger.debug(f"✅ Found default privileges for {role} in {schema}: {mapped}")
-                            else:
-                                logger.debug(f"Grantee '{grantee}' != target role '{role}'")
-                        except Exception as e:
-                            logger.debug(f"Error parsing ACL '{acl}': {e}")
-                            continue
-                            
+
+            for row in rows:
+                schema, owner_role, grantee_role, privs = row
+                meta_owner[schema] = owner_role
+                result.setdefault(schema, {})
+                if ver >= 120000:
+                    privset = {p.upper() for p in privs}
+                else:
+                    privset = {PG_PRIVCODE_TO_NAME.get(p) for p in privs if p in PG_PRIVCODE_TO_NAME}
+                result[schema].setdefault(grantee_role, set()).update(privset)
+
         except Exception as e:
-            logger.warning(f"Erro ao consultar default privileges para role '{role}': {e}")
+            logger.warning("Erro ao consultar default privileges: %s", e)
             return {}
-            
-        logger.debug(f"=== get_default_table_privileges END: {out} ===")
-        return out
+
+        result["_meta"] = {"owner_roles": meta_owner}
+        return result
+
+    def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
+        """Backward compatible wrapper for default table privileges of a role."""
+        data = self.get_default_privileges(role, "r")
+        meta = data.pop("_meta", None)  # discard meta for backward compatibility
+        flattened: Dict[str, Set[str]] = {}
+        for schema, grants in data.items():
+            if role in grants:
+                flattened[schema] = grants[role]
+        return flattened
 
     def alter_default_privileges(
         self, group: str, schema: str, obj_type: str, privileges: Set[str], *, for_role: str | None = None
@@ -617,13 +646,21 @@ class DBManager:
                 revoke_sql = sql.SQL(
                     "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA {} REVOKE ALL ON {} FROM {}"
                 ).format(sql.Identifier(for_role), identifier, obj_keyword, sql.Identifier(group))
-                logger.debug(f"Executing REVOKE (FOR ROLE): {revoke_sql.as_string(cur)}")
+                try:
+                    stmt_str = revoke_sql.as_string(cur)
+                except Exception:
+                    stmt_str = str(revoke_sql)
+                logger.debug(f"Executing REVOKE (FOR ROLE): {stmt_str}")
                 cur.execute(revoke_sql)
             else:
                 revoke_sql = sql.SQL(
                     "ALTER DEFAULT PRIVILEGES IN SCHEMA {} REVOKE ALL ON {} FROM {}"
                 ).format(identifier, obj_keyword, sql.Identifier(group))
-                logger.debug(f"Executing REVOKE: {revoke_sql.as_string(cur)}")
+                try:
+                    stmt_str = revoke_sql.as_string(cur)
+                except Exception:
+                    stmt_str = str(revoke_sql)
+                logger.debug(f"Executing REVOKE: {stmt_str}")
                 cur.execute(revoke_sql)
                 
             if privileges:
@@ -637,7 +674,11 @@ class DBManager:
                         obj_keyword,
                         sql.Identifier(group),
                     )
-                    logger.debug(f"Executing GRANT (FOR ROLE): {grant_sql.as_string(cur)}")
+                    try:
+                        stmt_str = grant_sql.as_string(cur)
+                    except Exception:
+                        stmt_str = str(grant_sql)
+                    logger.debug(f"Executing GRANT (FOR ROLE): {stmt_str}")
                     cur.execute(grant_sql)
                 else:
                     grant_sql = sql.SQL(
@@ -648,7 +689,11 @@ class DBManager:
                         obj_keyword,
                         sql.Identifier(group),
                     )
-                    logger.debug(f"Executing GRANT: {grant_sql.as_string(cur)}")
+                    try:
+                        stmt_str = grant_sql.as_string(cur)
+                    except Exception:
+                        stmt_str = str(grant_sql)
+                    logger.debug(f"Executing GRANT: {stmt_str}")
                     cur.execute(grant_sql)
                     
                 logger.info(f"✅ Applied default privileges {privileges} for {obj_type} in {schema} to {group}")
