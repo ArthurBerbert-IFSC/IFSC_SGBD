@@ -603,6 +603,48 @@ class DBManager:
         result["_meta"] = {"owner_roles": meta_owner}
         return result
 
+    def get_object_dependencies(self, schema: str, objname: str) -> List[tuple[str, str]]:
+        """Return list of dependent objects for a given table/view.
+
+        The function queries ``pg_depend`` joined with ``pg_rewrite`` and
+        ``pg_class`` to find views (or other objects) that depend on the
+        target object. It is intentionally minimal and returns a list of
+        ``(schema, name)`` tuples for each dependent object found. Any rows
+        that do not contain both schema and object name are ignored so the
+        method is robust against unexpected adapter behaviour.
+        """
+
+        query = """
+            SELECT dep_n.nspname, dep_c.relname
+            FROM pg_depend d
+            JOIN pg_rewrite r ON r.oid = d.objid
+            JOIN pg_class dep_c ON dep_c.oid = r.ev_class
+            JOIN pg_namespace dep_n ON dep_n.oid = dep_c.relnamespace
+            WHERE d.refobjid = (
+                SELECT c.oid
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = %s AND c.relname = %s
+            )
+        """
+
+        deps: List[tuple[str, str]] = []
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(query, (schema, objname))
+                for row in cur.fetchall():
+                    try:
+                        dep_schema, dep_name = row[0], row[1]
+                    except Exception:
+                        continue
+                    if dep_schema and dep_name:
+                        deps.append((dep_schema, dep_name))
+        except Exception as e:
+            logger.warning("Erro ao consultar dependências de %s.%s: %s", schema, objname, e)
+            return []
+
+        return deps
+
     def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
         """Retorna os privilégios padrão para tabelas futuramente criadas em cada schema."""
         logger.debug(f"=== get_default_table_privileges START for role: '{role}' ===")
