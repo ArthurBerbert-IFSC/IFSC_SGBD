@@ -13,6 +13,9 @@ class DummyCursor:
     def execute(self, sql, params=None):
         pass
 
+    def fetchall(self):
+        return []
+
 
 class DummyConn:
     def cursor(self):
