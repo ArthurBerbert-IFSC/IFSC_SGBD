@@ -4,3 +4,4 @@ PyYAML
 keyring
 python-dotenv
 pdfplumber
+jsonschema

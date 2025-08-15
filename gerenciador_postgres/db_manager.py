@@ -7,6 +7,8 @@ from typing import Optional, List, Dict, Set, Callable
 import logging
 import re
 
+from contracts.permission_contract import filter_managed
+
 logger = logging.getLogger(__name__)
 logger.propagate = True
 
@@ -162,7 +164,7 @@ class DBManager:
                   AND rolname <> 'postgres'
                 ORDER BY rolname
             """)
-            return [row[0] for row in cur.fetchall()]
+            return filter_managed([row[0] for row in cur.fetchall()])
 
     def create_group(self, group_name: str):
         with self.conn.cursor() as cur:
@@ -267,7 +269,7 @@ class DBManager:
                 WHERE u.rolname = %s
                 ORDER BY g.rolname
             """, (username,))
-            return [row[0] for row in cur.fetchall()]
+            return filter_managed([row[0] for row in cur.fetchall()])
 
     def list_groups(self) -> List[str]:
         with self.conn.cursor() as cur:
@@ -279,7 +281,7 @@ class DBManager:
                   AND rolname <> 'postgres'
                 ORDER BY rolname
             """)
-            return [row[0] for row in cur.fetchall()]
+            return filter_managed([row[0] for row in cur.fetchall()])
 
     def list_roles(self) -> List[str]:
         """Retorna todos os roles disponíveis (usuários e grupos)."""
@@ -292,7 +294,7 @@ class DBManager:
                 ORDER BY rolname
                 """
             )
-            return [row[0] for row in cur.fetchall()]
+            return filter_managed([row[0] for row in cur.fetchall()])
 
     # Métodos de tabelas e privilégios ------------------------------------
 
