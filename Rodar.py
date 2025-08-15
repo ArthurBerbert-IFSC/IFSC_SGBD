@@ -35,6 +35,7 @@ def setup_logging():
 
 def main():
     logger = setup_logging()
+    logger.info("Debug default privileges: verifique se ALTER DEFAULT PRIVILEGES inclui FOR ROLE correto.")
     
     try:
         logger.info("Iniciando aplicação Gerenciador PostgreSQL")

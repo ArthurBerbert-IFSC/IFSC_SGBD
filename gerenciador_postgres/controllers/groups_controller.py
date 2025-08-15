@@ -89,6 +89,7 @@ class GroupsController(QObject):
         privileges,
         obj_type: str = "TABLE",
         defaults_applied: bool = False,
+        emit_signal: bool = True,
     ):
         success = self.role_manager.set_group_privileges(
             group_name,
@@ -102,7 +103,8 @@ class GroupsController(QObject):
                     self.role_manager.sweep_privileges(target_group=group_name)
                 except Exception:
                     pass
-            self.data_changed.emit()
+            if emit_signal:
+                self.data_changed.emit()
         return success
 
     def apply_template_to_group(self, group_name: str, template: str):
@@ -127,6 +129,7 @@ class GroupsController(QObject):
         schema: str,
         privileges,
         skip_sweep: bool = False,
+        emit_signal: bool = True,
     ):
         success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
         if success:
@@ -135,7 +138,8 @@ class GroupsController(QObject):
                     self.role_manager.sweep_privileges(target_group=group_name)
                 except Exception:
                     pass
-            self.data_changed.emit()
+            if emit_signal:
+                self.data_changed.emit()
         return success
 
     def alter_default_privileges(
@@ -145,6 +149,7 @@ class GroupsController(QObject):
         obj_type: str,
         privileges,
         owner: str | None = None,
+    emit_signal: bool = True,
     ):
         """Aplica ``ALTER DEFAULT PRIVILEGES`` com trava de reentrância.
 
@@ -167,7 +172,8 @@ class GroupsController(QObject):
                     self.role_manager.dao.get_default_privileges(group_name, code)
                 except Exception:
                     pass
-                self.data_changed.emit()
+                if emit_signal:
+                    self.data_changed.emit()
             return success
         finally:
             self._is_applying = False
