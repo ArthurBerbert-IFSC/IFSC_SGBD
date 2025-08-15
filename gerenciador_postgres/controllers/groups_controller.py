@@ -90,12 +90,14 @@ class GroupsController(QObject):
         obj_type: str = "TABLE",
         defaults_applied: bool = False,
         emit_signal: bool = True,
+        check_dependencies: bool = True,
     ):
         success = self.role_manager.set_group_privileges(
             group_name,
             privileges,
             obj_type=obj_type,
             defaults_applied=defaults_applied,
+            check_dependencies=check_dependencies,
         )
         if success and emit_signal:
             self.data_changed.emit()

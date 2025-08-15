@@ -510,6 +510,7 @@ class RoleManager:
         privileges: Dict[str, Dict[str, Set[str]]],
         obj_type: str = "TABLE",
         defaults_applied: bool = False,
+        check_dependencies: bool = True,
     ) -> bool:
         try:
             with self.dao.transaction():
@@ -529,7 +530,12 @@ class RoleManager:
 
                 # Aplica privilégios reais (tabelas/sequências existentes)
                 if real_privs:
-                    self.dao.apply_group_privileges(group_name, real_privs, obj_type=obj_type)
+                    self.dao.apply_group_privileges(
+                        group_name,
+                        real_privs,
+                        obj_type=obj_type,
+                        check_dependencies=check_dependencies,
+                    )
 
                 # Ajusta default privileges para futuros objetos conforme FUTURE explícito
                 if obj_type_upper == 'TABLE':

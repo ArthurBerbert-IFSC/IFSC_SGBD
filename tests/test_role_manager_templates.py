@@ -15,7 +15,7 @@ class DummyDAO:
     def list_tables_by_schema(self, **kwargs):
         return {"public": ["t1", "t2"]}
 
-    def apply_group_privileges(self, group, privileges, obj_type="TABLE"):
+    def apply_group_privileges(self, group, privileges, obj_type="TABLE", check_dependencies=True):
         self.applied = (group, privileges, obj_type)
 
     def grant_database_privileges(self, group, privileges):

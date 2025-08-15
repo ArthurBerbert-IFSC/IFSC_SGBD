@@ -24,7 +24,7 @@ class DummyCursor:
                 for table, privs in objs.items()
                 for priv in privs
             ]
-        elif self.record:
+        elif self.record and ("GRANT" in query or "REVOKE" in query):
             self.executed.append(query)
 
     def fetchall(self):
@@ -36,12 +36,14 @@ class DummyConn:
         self.current_privs = current_privs
         self.calls = 0
         self.last_cursor = None
+        self.cursors = []
 
     def cursor(self):
         self.calls += 1
         record = self.calls > 1
         cur = DummyCursor(self.current_privs, record)
         self.last_cursor = cur
+        self.cursors.append(cur)
         return cur
 
 
@@ -50,7 +52,9 @@ class ApplyGroupPrivilegesDiffTests(unittest.TestCase):
         conn = DummyConn({})
         dbm = DBManager(conn)
         dbm.apply_group_privileges("grp", {"public": {"t1": {"SELECT"}}})
-        commands = conn.last_cursor.executed
+        commands = []
+        for c in conn.cursors:
+            commands.extend(c.executed)
         self.assertEqual(len(commands), 1)
         self.assertIn("GRANT", commands[0])
         self.assertNotIn("REVOKE", commands[0])
@@ -59,7 +63,9 @@ class ApplyGroupPrivilegesDiffTests(unittest.TestCase):
         conn = DummyConn({"public": {"t1": {"SELECT"}}})
         dbm = DBManager(conn)
         dbm.apply_group_privileges("grp", {"public": {"t1": set()}})
-        commands = conn.last_cursor.executed
+        commands = []
+        for c in conn.cursors:
+            commands.extend(c.executed)
         self.assertEqual(len(commands), 1)
         self.assertIn("REVOKE", commands[0])
         self.assertNotIn("GRANT", commands[0])
@@ -68,7 +74,10 @@ class ApplyGroupPrivilegesDiffTests(unittest.TestCase):
         conn = DummyConn({"public": {"t1": {"SELECT"}}})
         dbm = DBManager(conn)
         dbm.apply_group_privileges("grp", {"public": {"t1": {"SELECT"}}})
-        self.assertEqual(conn.last_cursor.executed, [])
+        commands = []
+        for c in conn.cursors:
+            commands.extend(c.executed)
+        self.assertEqual(commands, [])
 
 
 if __name__ == "__main__":
