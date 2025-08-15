@@ -1,4 +1,4 @@
-"""Permission contract schema and helpers (v1.4.3).
+"""Permission contract schema and helpers (v1.4.4).
 
 Defines JSON schema for permission contract and validation utilities. The
 contract includes a list of regular expression patterns describing which
@@ -14,14 +14,21 @@ import re
 
 from jsonschema import Draft7Validator
 
-SCHEMA_VERSION = "1.4.3"
+SCHEMA_VERSION = "1.4.4"
 
 PERMISSION_CONTRACT_SCHEMA: dict[str, Any] = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "Permission Contract",
     "type": "object",
     "properties": {
-        "version": {"type": "string", "const": SCHEMA_VERSION},
+        "contract_version": {"type": "string", "const": SCHEMA_VERSION},
+        "scope": {"type": "string", "minLength": 1},
+        "managed_principals_mode": {
+            "type": "string",
+            "enum": ["regex", "literal"],
+            "default": "regex",
+        },
+        "auto_onboard_creators": {"type": "boolean", "default": False},
         "managed_principals": {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
@@ -52,13 +59,34 @@ PERMISSION_CONTRACT_SCHEMA: dict[str, Any] = {
                 },
             },
         },
+        "default_privileges": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "privileges": {
+                                "type": "array",
+                                "items": {"type": "string", "minLength": 1},
+                                "minItems": 1,
+                            },
+                            "for_role": {"type": "string", "minLength": 1},
+                        },
+                        "required": ["privileges"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+        },
     },
-    "required": ["version", "managed_principals"],
+    "required": ["contract_version", "managed_principals"],
     "additionalProperties": False,
 }
 
-
-def validate_contract(data: dict[str, Any]) -> dict[str, Any]:
+def validate_contract(data: dict[str, Any], pg_roles: Iterable[str] | None = None) -> dict[str, Any]:
     """Validate *data* against :data:`PERMISSION_CONTRACT_SCHEMA`.
 
     Raises ``jsonschema.ValidationError`` if invalid and returns the validated
@@ -67,8 +95,11 @@ def validate_contract(data: dict[str, Any]) -> dict[str, Any]:
 
     Draft7Validator(PERMISSION_CONTRACT_SCHEMA).validate(data)
 
-    obj_privs = data.get("object_privileges", {})
+    pg_role_set = set(pg_roles or [])
+
     schema_privs = data.get("schema_privileges", {})
+
+    obj_privs = data.get("object_privileges", {})
     for grantee, schemas in obj_privs.items():
         grantee_schema_privs = schema_privs.get(grantee, {})
         for schema in schemas:
@@ -76,6 +107,19 @@ def validate_contract(data: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(
                     f"Grantee '{grantee}' possui privilégios em objetos do schema '{schema}' sem USAGE em schema_privileges"
                 )
+
+    def_privs = data.get("default_privileges", {})
+    for grantee, schemas in def_privs.items():
+        grantee_schema_privs = schema_privs.get(grantee, {})
+        for schema, objtypes in schemas.items():
+            if "USAGE" not in set(map(str.upper, grantee_schema_privs.get(schema, []))):
+                raise ValueError(
+                    f"Grantee '{grantee}' possui default privileges em schema '{schema}' sem USAGE em schema_privileges"
+                )
+            for objtype, info in objtypes.items():
+                for_role = info.get("for_role")
+                if for_role and pg_roles is not None and for_role not in pg_role_set:
+                    raise ValueError(f"Role '{for_role}' não existe em pg_roles")
 
     return data
 
@@ -91,19 +135,29 @@ def load_contract(path: str | Path) -> dict[str, Any]:
 # the schema remains consistent.
 DEFAULT_CONTRACT = validate_contract(
     {
-        "version": SCHEMA_VERSION,
+        "contract_version": SCHEMA_VERSION,
+        "scope": "database",
+        "managed_principals_mode": "regex",
+        "auto_onboard_creators": False,
         # Application-managed role name patterns
         "managed_principals": [r"^grp_[A-Za-z0-9_]+$", r"^usr_[A-Za-z0-9_]+$"],
     }
 )
 
-_MANAGED_PATTERNS = [re.compile(p) for p in DEFAULT_CONTRACT["managed_principals"]]
+if DEFAULT_CONTRACT.get("managed_principals_mode") == "literal":
+    _MANAGED_NAMES = set(DEFAULT_CONTRACT["managed_principals"])
+    _MANAGED_PATTERNS: list[re.Pattern[str]] | None = None
+else:
+    _MANAGED_PATTERNS = [re.compile(p) for p in DEFAULT_CONTRACT["managed_principals"]]
+    _MANAGED_NAMES = None
 
 
 def is_managed_principal(name: str) -> bool:
     """Return ``True`` if *name* matches any managed principal pattern."""
 
-    return any(pat.match(name) for pat in _MANAGED_PATTERNS)
+    if _MANAGED_NAMES is not None:
+        return name in _MANAGED_NAMES
+    return any(pat.match(name) for pat in _MANAGED_PATTERNS or [])
 
 
 def filter_managed(names: Iterable[str]) -> list[str]:
