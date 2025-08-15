@@ -17,10 +17,13 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QDialogButtonBox,
     QComboBox,
+    QFileDialog,
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QIcon
 from pathlib import Path
+from PyPDF2 import PdfReader
+import re
 
 
 class BatchUserDialog(QDialog):
@@ -38,6 +41,9 @@ class BatchUserDialog(QDialog):
 
         self.txt = QTextEdit()
         layout.addWidget(self.txt)
+
+        self.btnImportPDF = QPushButton("Importar de PDF")
+        layout.addWidget(self.btnImportPDF)
 
         layout.addWidget(QLabel("Turma"))
         self.cmbGroups = QComboBox()
@@ -61,6 +67,50 @@ class BatchUserDialog(QDialog):
         layout.addWidget(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        self.btnImportPDF.clicked.connect(self.import_from_pdf)
+
+    def import_from_pdf(self):
+        """Abre um seletor de arquivos para importar um PDF e extrai o texto."""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "Selecionar PDF", "", "Arquivos PDF (*.pdf)"
+        )
+        if not file_name:
+            return
+
+        try:
+            reader = PdfReader(file_name)
+            text_lines = []
+            for page in reader.pages:
+                text = page.extract_text() or ""
+                text_lines.extend(text.splitlines())
+
+            student_data = []
+            student_line_re = re.compile(r"^\d+\s+\d+\s+.*")
+            for line in text_lines:
+                if student_line_re.match(line):
+                    parts = line.strip().split(maxsplit=2)
+                    if len(parts) == 3:
+                        student_data.append(f"{parts[1]} {parts[2]}")
+
+            if not student_data:
+                QMessageBox.warning(
+                    self,
+                    "Nenhum Aluno Encontrado",
+                    "Não foi possível encontrar dados de alunos no formato esperado no PDF.",
+                )
+                return
+
+            self.txt.setPlainText("\n".join(student_data))
+            QMessageBox.information(
+                self,
+                "Sucesso",
+                f"{len(student_data)} alunos importados do PDF para a caixa de texto.",
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Erro ao Ler PDF", f"Não foi possível processar o arquivo PDF.\nErro: {e}"
+            )
 
     def get_data(self):
         text = self.txt.toPlainText()
