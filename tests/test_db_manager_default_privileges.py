@@ -62,7 +62,7 @@ class DBManagerDefaultPrivTests(unittest.TestCase):
         self.assertIn("SELECT", executed[1])
 
     def test_alter_default_privileges_noop(self):
-        def fake_get_default_privileges(role, code):
+        def fake_get_default_privileges(owner=None, objtype="r", schema=None):
             return {"public": {"grp": {"SELECT"}}}
 
         self.dbm.get_default_privileges = fake_get_default_privileges

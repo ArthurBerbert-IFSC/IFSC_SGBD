@@ -10,56 +10,57 @@ class DummyCursor:
     def __init__(self, conn):
         self.conn = conn
         self.result = []
+
     def __enter__(self):
         return self
+
     def __exit__(self, exc_type, exc, tb):
         pass
+
     def execute(self, sql, params=None):
-        sql_str = str(sql)
-        if "SHOW server_version_num" in sql_str:
-            self.result = [(str(self.conn.version),)]
-        else:
-            self.result = self.conn.rows
+        self.result = self.conn.rows
+
     def fetchall(self):
         return self.result
+
     def fetchone(self):
         return self.result[0]
 
 
 class DummyConn:
-    def __init__(self, version, rows):
-        self.version = version
+    def __init__(self, rows):
         self.rows = rows
+
     def cursor(self):
         return DummyCursor(self)
+
     def commit(self):
         pass
+
     def rollback(self):
         pass
 
 
-def test_get_default_privileges_pg12():
+def test_get_default_privileges_parsing():
     rows = [
-        ("geo2", "postgres", "grp_Geo2_2025-2", ["DELETE", "INSERT", "SELECT", "UPDATE"]),
-        ("public", "postgres", "grp_Geo2_2025-2", ["SELECT"]),
-        ("Teste_001_Esquema", "postgres", "grp_Geo2_2025-2", ["INSERT", "SELECT", "UPDATE"]),
+        ("postgres", "geo2", ['"grp_Geo2_2025-2"=arwd/postgres']),
+        ("postgres", "public", ['"grp_Geo2_2025-2"=r/postgres']),
+        ("postgres", "Teste_001_Esquema", ['"grp_Geo2_2025-2"=arw/postgres']),
     ]
-    conn = DummyConn(150000, rows)
+    conn = DummyConn(rows)
     db = DBManager(conn)
-    res = db.get_default_privileges("grp_Geo2_2025-2")
-    assert res["geo2"]["grp_Geo2_2025-2"] == {"DELETE", "INSERT", "SELECT", "UPDATE"}
+    res = db.get_default_privileges(owner="postgres")
+    assert res["geo2"]["grp_Geo2_2025-2"] == {
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE",
+    }
     assert res["public"]["grp_Geo2_2025-2"] == {"SELECT"}
-    assert res["Teste_001_Esquema"]["grp_Geo2_2025-2"] == {"INSERT", "SELECT", "UPDATE"}
+    assert res["Teste_001_Esquema"]["grp_Geo2_2025-2"] == {
+        "INSERT",
+        "SELECT",
+        "UPDATE",
+    }
     assert res["_meta"]["owner_roles"]["geo2"] == "postgres"
 
-
-def test_get_default_privileges_fallback():
-    rows = [
-        ("geo2", "postgres", "grp_Geo2_2025-2", ["a", "r", "w", "d"]),
-        ("public", "postgres", "grp_Geo2_2025-2", ["r"]),
-    ]
-    conn = DummyConn(110000, rows)
-    db = DBManager(conn)
-    res = db.get_default_privileges("grp_Geo2_2025-2")
-    assert res["geo2"]["grp_Geo2_2025-2"] == {"INSERT", "SELECT", "UPDATE", "DELETE"}
-    assert res["public"]["grp_Geo2_2025-2"] == {"SELECT"}
