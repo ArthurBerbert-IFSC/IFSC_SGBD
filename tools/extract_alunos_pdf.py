@@ -4,10 +4,7 @@ import json
 import unicodedata
 from typing import List, Dict, Optional
 
-try:
-    import pdfplumber
-except ImportError:
-    raise SystemExit("Instale a dependência primeiro: pip install pdfplumber")
+import pdfplumber  # dependência obrigatória agora
 
 HEADER_MATR_PAT = re.compile(r'matr', re.IGNORECASE)
 HEADER_NOME_PAT = re.compile(r'nome', re.IGNORECASE)
@@ -86,16 +83,18 @@ def fallback_extract_text(page) -> List[Dict[str, str]]:
     return results
 
 def extract_alunos_from_pdf(pdf_path: str) -> List[Dict[str, str]]:
-    with pdfplumber.open(pdf_path) as pdf:
-        if not pdf.pages:
-            return []
-        first = pdf.pages[0]
-        alunos = extract_from_tables(first)
-        if not alunos:
-            alunos = fallback_extract_text(first)
-    # Opcional: remover duplicados preservando ordem
-    seen = set()
-    dedup = []
+    """Extrai alunos de um PDF usando pdfplumber se disponível; caso contrário tenta
+    um fallback simples baseado em extração de texto linha a linha.
+    """
+    alunos: List[Dict[str, str]] = []
+    with pdfplumber.open(pdf_path) as pdf:  # type: ignore
+        if pdf.pages:
+            first = pdf.pages[0]
+            alunos = extract_from_tables(first)
+            if not alunos:
+                alunos = fallback_extract_text(first)
+    # Deduplicação
+    seen = set(); dedup = []
     for a in alunos:
         key = (a['matricula'], strip_accents(a['nome'].lower()))
         if key not in seen:

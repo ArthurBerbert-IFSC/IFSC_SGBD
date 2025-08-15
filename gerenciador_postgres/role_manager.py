@@ -118,12 +118,16 @@ class RoleManager:
             last = partes[-1].lower() if len(partes) > 1 else ""
             tentativa = 0
             while True:
-                if tentativa == 0:
-                    candidate = first
-                elif tentativa == 1:
-                    candidate = f"{first}.{last}" if last else first
+                # Novo padrão: sempre usar first.last (se existir sobrenome) como base inicial.
+                if last:
+                    base = f"{first}.{last}"
                 else:
-                    candidate = f"{first}.{last}{tentativa}" if last else f"{first}{tentativa}"
+                    base = first
+                if tentativa == 0:
+                    candidate = base
+                else:
+                    # Sufixos numéricos iniciam em 2 (first.last2)
+                    candidate = f"{base}{tentativa+1}"
                 username = self._sanitize_username(candidate)
                 # Checagem prévia para evitar exceção de duplicidade e acelerar a próxima tentativa
                 try:
@@ -137,7 +141,7 @@ class RoleManager:
                             )
                         else:
                             tentativa += 1
-                            if tentativa > 100:
+                            if tentativa > 100:  # segurança para não loopar indefinidamente
                                 self.logger.error(
                                     f"[{self.operador}] Muitas tentativas para gerar username baseado em '{first} {last}'. Abortando este usuário."
                                 )
