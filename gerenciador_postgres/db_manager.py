@@ -377,24 +377,37 @@ class DBManager:
             raise ValueError(f"Tipo de objeto '{obj_type}' não suportado")
         keyword = sql.SQL(obj_type)
 
+        # Obtém os privilégios atuais para comparar com os desejados
+        current = self.get_group_privileges(group)
+
         with self.conn.cursor() as cur:
             for schema, objects in privileges.items():
                 for name, perms in objects.items():
-                    invalid = set(perms) - allowed
+                    desired = set(perms)
+                    invalid = desired - allowed
                     if invalid:
                         raise ValueError(
                             f"Privilégios inválidos para {obj_type}: {', '.join(sorted(invalid))}"
                         )
+
                     identifier = sql.Identifier(schema, name)
-                    cur.execute(
-                        sql.SQL(
-                            "REVOKE ALL PRIVILEGES ON {} {} FROM {}"
-                        ).format(keyword, identifier, sql.Identifier(group))
-                    )
-                    if perms:
+                    existing = current.get(schema, {}).get(name, set())
+                    to_grant = desired - existing
+                    to_revoke = existing - desired
+
+                    if to_revoke:
+                        cur.execute(
+                            sql.SQL("REVOKE {} ON {} {} FROM {}").format(
+                                sql.SQL(", ").join(sql.SQL(p) for p in sorted(to_revoke)),
+                                keyword,
+                                identifier,
+                                sql.Identifier(group),
+                            )
+                        )
+                    if to_grant:
                         cur.execute(
                             sql.SQL("GRANT {} ON {} {} TO {}").format(
-                                sql.SQL(", ").join(sql.SQL(p) for p in sorted(perms)),
+                                sql.SQL(", ").join(sql.SQL(p) for p in sorted(to_grant)),
                                 keyword,
                                 identifier,
                                 sql.Identifier(group),
