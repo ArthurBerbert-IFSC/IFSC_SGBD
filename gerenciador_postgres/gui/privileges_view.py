@@ -30,6 +30,10 @@ class PrivilegesView(QWidget):
         self.controller = controller
         self.templates = PERMISSION_TEMPLATES
         self.schema_checkboxes: dict[str, dict] = {}
+        # Track unsaved modifications and populate state
+        self._dirty = False
+        self._updating = False
+        self._current_role_index = 0
 
         self._setup_ui()
         self._connect_signals()
@@ -86,7 +90,10 @@ class PrivilegesView(QWidget):
     def _connect_signals(self):
         self.btnApplyTemplate.clicked.connect(self._apply_template)
         self.btnSave.clicked.connect(self._save_privileges)
-        self.cmbRole.currentIndexChanged.connect(self._populate_tree)
+        # Track checkbox changes to mark view as dirty
+        self.treeDbPrivileges.itemChanged.connect(self._mark_dirty)
+        self.treeTablePrivileges.itemChanged.connect(self._mark_dirty)
+        self.cmbRole.currentIndexChanged.connect(self._on_role_changed)
 
     # ------------------------------------------------------------------
     # Carregamento de dados
@@ -97,11 +104,14 @@ class PrivilegesView(QWidget):
             return
         try:
             users, groups = self.controller.list_entities()
+            self.cmbRole.blockSignals(True)
             self.cmbRole.clear()
             for user in users:
                 self.cmbRole.addItem(user)
             for group in groups:
                 self.cmbRole.addItem(group)
+            self.cmbRole.blockSignals(False)
+            self._current_role_index = self.cmbRole.currentIndex()
         except Exception as e:
             QMessageBox.critical(
                 self, "Erro", f"Falha ao carregar usuários/grupos: {e}"
@@ -120,11 +130,45 @@ class PrivilegesView(QWidget):
             elif item.layout() is not None:
                 self._clear_layout(item.layout())
 
+    def _mark_dirty(self, *args, **kwargs):
+        if self._updating:
+            return
+        self._dirty = True
+
+    def _on_role_changed(self, index: int):
+        if index == self._current_role_index:
+            return
+        if self._dirty:
+            resp = QMessageBox.question(
+                self,
+                "Alterações não salvas",
+                "Salvar alterações antes de trocar de grupo?",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if resp == QMessageBox.StandardButton.Save:
+                if not self._save_privileges():
+                    self.cmbRole.blockSignals(True)
+                    self.cmbRole.setCurrentIndex(self._current_role_index)
+                    self.cmbRole.blockSignals(False)
+                    return
+            elif resp == QMessageBox.StandardButton.Cancel:
+                self.cmbRole.blockSignals(True)
+                self.cmbRole.setCurrentIndex(self._current_role_index)
+                self.cmbRole.blockSignals(False)
+                return
+            # Discard: no action, proceed to switch
+        self._current_role_index = index
+        self._populate_tree()
+
     def _populate_tree(self):
         """Lista schemas e tabelas disponíveis para atribuição de privilégios."""
         if not self.controller:
             return
 
+        self._updating = True
         role = self.cmbRole.currentText()
         data = self.controller.get_schema_tables()
         schema_privs = self.controller.get_schema_level_privileges(role)
@@ -157,9 +201,11 @@ class PrivilegesView(QWidget):
             row1 = QHBoxLayout()
             cb_usage = QCheckBox("USAGE")
             cb_usage.setChecked("USAGE" in schema_privs.get(schema, set()))
+            cb_usage.stateChanged.connect(self._mark_dirty)
             row1.addWidget(cb_usage)
             cb_create = QCheckBox("CREATE")
             cb_create.setChecked("CREATE" in schema_privs.get(schema, set()))
+            cb_create.stateChanged.connect(self._mark_dirty)
             row1.addWidget(cb_create)
             box_layout.addLayout(row1)
 
@@ -167,15 +213,19 @@ class PrivilegesView(QWidget):
             row2.addWidget(QLabel("Padrão para Novas Tabelas:"))
             cb_select = QCheckBox("SELECT")
             cb_select.setChecked("SELECT" in privs)
+            cb_select.stateChanged.connect(self._mark_dirty)
             row2.addWidget(cb_select)
             cb_insert = QCheckBox("INSERT")
             cb_insert.setChecked("INSERT" in privs)
+            cb_insert.stateChanged.connect(self._mark_dirty)
             row2.addWidget(cb_insert)
             cb_update = QCheckBox("UPDATE")
             cb_update.setChecked("UPDATE" in privs)
+            cb_update.stateChanged.connect(self._mark_dirty)
             row2.addWidget(cb_update)
             cb_delete = QCheckBox("DELETE")
             cb_delete.setChecked("DELETE" in privs)
+            cb_delete.stateChanged.connect(self._mark_dirty)
             row2.addWidget(cb_delete)
             if owner_role:
                 row2.addWidget(QLabel(f"owner: {owner_role}"))
@@ -215,6 +265,8 @@ class PrivilegesView(QWidget):
 
         self.treeDbPrivileges.expandAll()
         self.treeTablePrivileges.expandAll()
+        self._updating = False
+        self._dirty = False
 
     # ------------------------------------------------------------------
     # Ações
@@ -300,7 +352,7 @@ class PrivilegesView(QWidget):
     def _save_privileges(self):
         """Salva privilégios configurados manualmente."""
         if not self.controller:
-            return
+            return False
         role = self.cmbRole.currentText()
 
         progress = QProgressDialog(
@@ -381,14 +433,16 @@ class PrivilegesView(QWidget):
                     self, "Sucesso", "Permissões salvas com sucesso."
                 )
                 self._populate_tree()
+                self._dirty = False
             else:
                 QMessageBox.critical(
                     self, "Erro", "Falha ao salvar as permissões."
                 )
+            return ok
         except Exception as e:
             QMessageBox.critical(
                 self, "Erro", f"Não foi possível salvar as permissões: {e}"
             )
+            return False
         finally:
             progress.close()
-
