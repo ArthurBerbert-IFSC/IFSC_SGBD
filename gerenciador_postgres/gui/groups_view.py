@@ -344,7 +344,7 @@ class GroupsView(QWidget):
         if not state:
             return True
         ok1 = self.controller.grant_schema_privileges(
-            role, schema, state.schema_privs, skip_sweep=True, emit_signal=False
+            role, schema, state.schema_privs, emit_signal=False
         )
         ok2 = self.controller.alter_default_privileges(
             role, schema, "tables", state.default_privs, emit_signal=False
@@ -601,7 +601,7 @@ class GroupsView(QWidget):
         schema_perms = set(state.schema_privs) if state else set()
 
         def task():
-            return self.controller.grant_schema_privileges(role, schema, schema_perms, skip_sweep=True, emit_signal=False)
+            return self.controller.grant_schema_privileges(role, schema, schema_perms, emit_signal=False)
 
         def on_success(success):
             if success:
