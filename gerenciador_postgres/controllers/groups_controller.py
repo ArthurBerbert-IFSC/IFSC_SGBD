@@ -64,7 +64,7 @@ class GroupsController(QObject):
             return {}
         self._is_refreshing = True
         try:
-            data = self.role_manager.dao.get_default_privileges(group_name, "r")
+            data = self.role_manager.dao.get_default_privileges(objtype="r")
         except Exception:
             data = {}
         finally:
@@ -169,7 +169,7 @@ class GroupsController(QObject):
                 code_map = {"tables": "r", "sequences": "S", "functions": "f", "types": "T"}
                 code = code_map.get(obj_type, "r")
                 try:
-                    self.role_manager.dao.get_default_privileges(group_name, code)
+                    self.role_manager.dao.get_default_privileges(owner=owner, objtype=code)
                 except Exception:
                     pass
                 if emit_signal:

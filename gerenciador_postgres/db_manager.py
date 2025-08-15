@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from .data_models import User, Group
 from typing import Optional, List, Dict, Set, Callable
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 logger.propagate = True
@@ -527,62 +528,51 @@ class DBManager:
         logger.debug(f"=== get_schema_privileges END: {out} ===")
         return out
 
-    def get_default_privileges(self, role: str | None = None, objtype: str = "r") -> Dict[str, Dict[str, Set[str]]]:
+    def get_default_privileges(
+        self,
+        owner: str | None = None,
+        objtype: str = "r",
+        schema: str | None = None,
+    ) -> Dict[str, Dict[str, Set[str]]]:
         """Return default privileges for future objects.
 
         Parameters
         ----------
-        role: str | None
-            Filter by grantee role. If ``None`` return defaults for all grantees.
+        owner: str | None
+            Filter by future object owner (``defaclrole``). If ``None`` return
+            defaults for all owners.
         objtype: str
-            PostgreSQL object type (r: tables, S: sequences, f: functions,
-            T: types, n: schemas). Defaults to 'r'.
+            PostgreSQL object type code (r: tables, S: sequences, f: functions,
+            T: types, n: schemas). Defaults to ``'r'``.
+        schema: str | None
+            Filter by schema name (``defaclnamespace``) when ``IN SCHEMA`` is
+            used. If ``None`` return defaults for all schemas.
         """
 
-        params = {"objtype": objtype}
-        role_filter = ""
-        if role:
-            role_filter = " AND grantee_rol.rolname = %(role)s"
-            params["role"] = role
+        params: Dict[str, object] = {"objtype": objtype}
+        filters = ["d.defaclobjtype = %(objtype)s"]
+        if owner:
+            filters.append("r.rolname = %(owner)s")
+            params["owner"] = owner
+        if schema:
+            filters.append("n.nspname = %(schema)s")
+            params["schema"] = schema
 
-        ver = self.server_version_num()
-
-        if ver >= 120000:
-            sql_query = (
-                """
-                SELECT n.nspname AS schema,
-                       owner_rol.rolname AS owner_role,
-                       grantee_rol.rolname AS grantee_role,
-                       array_agg(priv.privilege_type ORDER BY priv.privilege_type) AS privileges
-                FROM pg_default_acl d
-                JOIN pg_namespace n ON n.oid = d.defaclnamespace
-                JOIN pg_roles owner_rol ON owner_rol.oid = d.defaclrole
-                CROSS JOIN LATERAL aclexplode(d.defaclacl) AS priv(grantee, grantor, privilege_type, is_grantable)
-                JOIN pg_roles grantee_rol ON grantee_rol.oid = priv.grantee
-                WHERE d.defaclobjtype = %(objtype)s
-                {role_filter}
-                GROUP BY n.nspname, owner_rol.rolname, grantee_rol.rolname
-                ORDER BY n.nspname, grantee_rol.rolname
-                """.format(role_filter=role_filter)
-            )
-        else:
-            sql_query = (
-                """
-                SELECT n.nspname AS schema,
-                       owner_rol.rolname AS owner_role,
-                       COALESCE(grantee_rol.rolname, m[1], m[2]) AS grantee_role,
-                       string_to_array(m[3], NULL) AS privcodes
-                FROM pg_default_acl d
-                JOIN pg_namespace n ON n.oid = d.defaclnamespace
-                JOIN pg_roles owner_rol ON owner_rol.oid = d.defaclrole
-                CROSS JOIN LATERAL unnest(d.defaclacl) AS a(aclitem)
-                CROSS JOIN LATERAL regexp_match(a.aclitem::text, '^(?:"([^"]+)"|([^=]+))=([a-zA-Z]*)/.+$') AS m
-                LEFT JOIN pg_roles grantee_rol ON grantee_rol.rolname = COALESCE(m[1], m[2])
-                WHERE d.defaclobjtype = %(objtype)s
-                {role_filter}
-                ORDER BY n.nspname, grantee_role
-                """.format(role_filter=role_filter)
-            )
+        sql_query = (
+            """
+            SELECT r.rolname AS owner_role,
+                   n.nspname AS schema,
+                   d.defaclacl
+            FROM (
+                SELECT defaclrole, defaclnamespace, defaclobjtype, defaclacl
+                FROM pg_default_acl
+            ) AS d
+            JOIN pg_roles r ON r.oid = d.defaclrole
+            JOIN pg_namespace n ON n.oid = d.defaclnamespace
+            WHERE {where}
+            ORDER BY n.nspname
+            """.format(where=" AND ".join(filters))
+        )
 
         result: Dict[str, Dict[str, Set[str]]] = {}
         meta_owner: Dict[str, str] = {}
@@ -592,16 +582,20 @@ class DBManager:
                 cur.execute(sql_query, params)
                 rows = cur.fetchall()
 
-            for row in rows:
-                schema, owner_role, grantee_role, privs = row
-                meta_owner[schema] = owner_role
-                result.setdefault(schema, {})
-                if ver >= 120000:
-                    privset = {p.upper() for p in privs}
-                else:
-                    privset = {PG_PRIVCODE_TO_NAME.get(p) for p in privs if p in PG_PRIVCODE_TO_NAME}
-                result[schema].setdefault(grantee_role, set()).update(privset)
-
+            for owner_role, schema_name, acl_list in rows:
+                meta_owner[schema_name] = owner_role
+                result.setdefault(schema_name, {})
+                if not acl_list:
+                    continue
+                for acl in acl_list:
+                    match = re.match(r'^(?:"([^"]+)"|([^=]+))=([a-zA-Z]*)/', acl)
+                    if not match:
+                        continue
+                    grantee = match.group(1) or match.group(2) or ""
+                    grantee = grantee or "PUBLIC"
+                    privcodes = match.group(3)
+                    privset = {PG_PRIVCODE_TO_NAME.get(c, c.upper()) for c in privcodes}
+                    result[schema_name].setdefault(grantee, set()).update(privset)
         except Exception as e:
             logger.warning("Erro ao consultar default privileges: %s", e)
             return {}
@@ -667,7 +661,11 @@ class DBManager:
         code = OBJECT_TYPE_CODES.get(obj_type)
 
         # Consulta privilégios atuais
-        existing = self.get_default_privileges(group, code).get(schema, {}).get(group, set())
+        existing = (
+            self.get_default_privileges(owner=for_role, objtype=code, schema=schema)
+            .get(schema, {})
+            .get(group, set())
+        )
         if existing == set(privileges):
             logger.debug("Default privileges already set; no-op.")
             return True
