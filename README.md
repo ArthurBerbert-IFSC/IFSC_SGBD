@@ -83,6 +83,23 @@ Após salvar permissões de schemas, tabelas ou padrões futuros, o sistema **n�
 - Na interface gráfica, utilize o botão **"Sincronizar (Full Sweep)"** disponível nas telas de grupos e de privilégios.
 - Pela linha de comando, execute `scripts/sweep_privileges.py --profile <perfil> [--group <grupo>]` para sincronizar todos os grupos ou apenas o grupo informado.
 
+## Contrato de Permissões
+
+A aplicação suporta definição de contratos de permissões no formato JSON para gerenciar papéis e privilégios no banco de dados.
+A versão atual do contrato é **1.4.4** e introduz os campos `contract_version`, `scope`, `managed_principals_mode`, `auto_onboard_creators` e `default_privileges`.
+
+Exemplos de contratos podem ser encontrados no diretório [`contracts/`](contracts/), como
+[`example_contract_basic.json`](contracts/example_contract_basic.json) e
+[`example_contract_default_privileges.json`](contracts/example_contract_default_privileges.json).
+Esses arquivos demonstram a estrutura mínima e o uso de `default_privileges` com a chave `for_role`.
+
+Para validar um contrato programaticamente:
+
+```python
+from contracts.permission_contract import load_contract
+contract = load_contract("contracts/example_contract_basic.json")
+```
+
 ## Testes
 Os testes automatizados estão no diretório `tests/`. Execute-os com:
 ```bash

@@ -1,0 +1,22 @@
+{
+  "contract_version": "1.4.4",
+  "scope": "database",
+  "managed_principals_mode": "regex",
+  "auto_onboard_creators": false,
+  "managed_principals": ["grp_role"],
+  "schema_privileges": {
+    "grp_role": {
+      "public": ["USAGE"]
+    }
+  },
+  "default_privileges": {
+    "grp_role": {
+      "public": {
+        "tables": {
+          "privileges": ["SELECT"],
+          "for_role": "owner_role"
+        }
+      }
+    }
+  }
+}
