@@ -51,16 +51,6 @@ class UsersController(QObject):
         results = self.role_manager.create_users_batch(
             users_data, valid_until, group_name, renew
         )
-        # Após importações em lote, executa um sweep de privilégios para
-        # garantir que usuários/grupos/esquemas/tabelas estejam sincronizados.
-        try:
-            if group_name:
-                self.role_manager.sweep_privileges(target_group=group_name)
-            else:
-                self.role_manager.sweep_privileges()
-        except Exception:
-            # Falhas no sweep não impedem o fluxo principal; o sistema segue funcional.
-            pass
         self.data_changed.emit()
         return results
 
@@ -91,37 +81,18 @@ class UsersController(QObject):
     def add_user_to_group(self, username: str, group_name: str) -> bool:
         success = self.role_manager.add_user_to_group(username, group_name)
         if success:
-            # Sincroniza privilégios após associação ao grupo
-            try:
-                self.role_manager.sweep_privileges(target_group=group_name)
-            except Exception:
-                pass
             self.data_changed.emit()
         return success
 
     def remove_user_from_group(self, username: str, group_name: str) -> bool:
         success = self.role_manager.remove_user_from_group(username, group_name)
         if success:
-            # Sincroniza privilégios após remoção do grupo
-            try:
-                self.role_manager.sweep_privileges(target_group=group_name)
-            except Exception:
-                pass
             self.data_changed.emit()
         return success
 
     def transfer_user_group(self, username: str, old_group: str, new_group: str) -> bool:
         success = self.role_manager.transfer_user_group(username, old_group, new_group)
         if success:
-            # Sincroniza privilégios para ambos os grupos envolvidos
-            try:
-                self.role_manager.sweep_privileges(target_group=old_group)
-            except Exception:
-                pass
-            try:
-                self.role_manager.sweep_privileges(target_group=new_group)
-            except Exception:
-                pass
             self.data_changed.emit()
         return success
 

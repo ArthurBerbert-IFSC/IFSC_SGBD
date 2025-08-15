@@ -82,14 +82,19 @@ class PrivilegesView(QWidget):
         )
         layout.addWidget(self.treeTablePrivileges)
 
+        btnLayout = QHBoxLayout()
         self.btnSave = QPushButton("Salvar Permissões")
-        layout.addWidget(self.btnSave)
+        self.btnSweep = QPushButton("Sincronizar (Full Sweep)")
+        btnLayout.addWidget(self.btnSave)
+        btnLayout.addWidget(self.btnSweep)
+        layout.addLayout(btnLayout)
 
         self.setLayout(layout)
 
     def _connect_signals(self):
         self.btnApplyTemplate.clicked.connect(self._apply_template)
         self.btnSave.clicked.connect(self._save_privileges)
+        self.btnSweep.clicked.connect(self._sweep_privileges)
         # Track checkbox changes to mark view as dirty
         self.treeDbPrivileges.itemChanged.connect(self._mark_dirty)
         self.treeTablePrivileges.itemChanged.connect(self._mark_dirty)
@@ -407,10 +412,7 @@ class PrivilegesView(QWidget):
             if db_privs:
                 ok &= self.controller.grant_database_privileges(role, db_privs)
             for schema, perms in schema_privs.items():
-                skip_sweep = bool(default_privs.get(schema))
-                ok &= self.controller.grant_schema_privileges(
-                    role, schema, perms, skip_sweep=skip_sweep
-                )
+                ok &= self.controller.grant_schema_privileges(role, schema, perms)
             defaults_applied = any(perms for perms in default_privs.values())
             for schema, perms in default_privs.items():
                 if perms:
@@ -426,8 +428,6 @@ class PrivilegesView(QWidget):
                 table_privileges,
                 defaults_applied=defaults_applied,
             )
-            if ok and not defaults_applied:
-                ok &= self.controller.sweep_group_privileges(role)
             if ok:
                 QMessageBox.information(
                     self, "Sucesso", "Permissões salvas com sucesso."
@@ -444,5 +444,48 @@ class PrivilegesView(QWidget):
                 self, "Erro", f"Não foi possível salvar as permissões: {e}"
             )
             return False
+        finally:
+            progress.close()
+
+    def _sweep_privileges(self):
+        """Executa sincronização manual de privilégios para o papel atual."""
+        if not self.controller:
+            return
+        role = self.cmbRole.currentText()
+        if not role:
+            QMessageBox.warning(
+                self,
+                "Seleção necessária",
+                "Escolha um usuário ou grupo para sincronizar.",
+            )
+            return
+
+        progress = QProgressDialog(
+            f"Sincronizando privilégios de '{role}'...", None, 0, 0, self
+        )
+        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        progress.setCancelButton(None)
+        progress.show()
+        QApplication.processEvents()
+        try:
+            ok = self.controller.sweep_group_privileges(role)
+            if ok:
+                QMessageBox.information(
+                    self,
+                    "Concluído",
+                    f"Privilégios de '{role}' sincronizados.",
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Erro",
+                    f"Falha ao sincronizar privilégios de '{role}'.",
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Erro",
+                f"Não foi possível sincronizar privilégios: {e}",
+            )
         finally:
             progress.close()

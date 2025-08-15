@@ -97,23 +97,13 @@ class GroupsController(QObject):
             obj_type=obj_type,
             defaults_applied=defaults_applied,
         )
-        if success:
-            if not defaults_applied:
-                try:
-                    self.role_manager.sweep_privileges(target_group=group_name)
-                except Exception:
-                    pass
-            if emit_signal:
-                self.data_changed.emit()
+        if success and emit_signal:
+            self.data_changed.emit()
         return success
 
     def apply_template_to_group(self, group_name: str, template: str):
         success = self.role_manager.apply_template_to_group(group_name, template)
         if success:
-            try:
-                self.role_manager.sweep_privileges(target_group=group_name)
-            except Exception:
-                pass
             self.data_changed.emit()
         return success
 
@@ -128,18 +118,11 @@ class GroupsController(QObject):
         group_name: str,
         schema: str,
         privileges,
-        skip_sweep: bool = False,
         emit_signal: bool = True,
     ):
         success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
-        if success:
-            if not skip_sweep:
-                try:
-                    self.role_manager.sweep_privileges(target_group=group_name)
-                except Exception:
-                    pass
-            if emit_signal:
-                self.data_changed.emit()
+        if success and emit_signal:
+            self.data_changed.emit()
         return success
 
     def alter_default_privileges(
