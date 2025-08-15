@@ -666,7 +666,11 @@ class DBManager:
             .get(schema, {})
             .get(group, set())
         )
-        if existing == set(privileges):
+        desired = set(privileges)
+        grant_set = desired - existing
+        revoke_set = existing - desired
+        logger.debug(f"existing={existing}, desired={desired}, grant_set={grant_set}, revoke_set={revoke_set}")
+        if not grant_set and not revoke_set:
             logger.debug("Default privileges already set; no-op.")
             return True
 
@@ -678,31 +682,31 @@ class DBManager:
             params.append(for_role)
 
         with self.conn.cursor() as cur:
-            # Revoga primeiro
-            revoke_sql = sql.SQL(
-                "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} REVOKE ALL ON {obj_type} FROM {group}"
-            ).format(
-                for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
-                schema=sql.Identifier(schema),
-                obj_type=sql.SQL(obj_sql_name),
-                group=sql.Identifier(group),
-            )
+            if revoke_set:
+                revoke_sql = sql.SQL(
+                    "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} REVOKE {privs} ON {obj_type} FROM {group}"
+                ).format(
+                    for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
+                    schema=sql.Identifier(schema),
+                    privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(revoke_set)),
+                    obj_type=sql.SQL(obj_sql_name),
+                    group=sql.Identifier(group),
+                )
 
-            try:
-                sql_text = revoke_sql.as_string(cur)
-            except Exception:
-                sql_text = str(revoke_sql)
-            logger.debug(f"Executing REVOKE: {sql_text}")
-            cur.execute(revoke_sql, params)
+                try:
+                    sql_text = revoke_sql.as_string(cur)
+                except Exception:
+                    sql_text = str(revoke_sql)
+                logger.debug(f"Executing REVOKE: {sql_text}")
+                cur.execute(revoke_sql, params)
 
-            # Concede os novos privilégios, se houver
-            if privileges:
+            if grant_set:
                 grant_sql = sql.SQL(
                     "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} GRANT {privs} ON {obj_type} TO {group}"
                 ).format(
                     for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
                     schema=sql.Identifier(schema),
-                    privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                    privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(grant_set)),
                     obj_type=sql.SQL(obj_sql_name),
                     group=sql.Identifier(group),
                 )
@@ -714,12 +718,11 @@ class DBManager:
                 logger.debug(f"Executing GRANT: {sql_text}")
                 cur.execute(grant_sql, params)
 
-        # Força commit para garantir que as alterações sejam persistidas
-        self.conn.commit()
-
-        logger.info(
-            f"\u2713 Applied default privileges {privileges} for {obj_type} in {schema} to {group}"
-        )
+        if grant_set or revoke_set:
+            self.conn.commit()
+            logger.info(
+                f"\u2713 Applied default privileges: grant {grant_set} revoke {revoke_set} for {obj_type} in {schema} to {group}"
+            )
         logger.debug(f"=== alter_default_privileges END ===")
         return True
 

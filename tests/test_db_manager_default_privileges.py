@@ -52,14 +52,26 @@ class DBManagerDefaultPrivTests(unittest.TestCase):
         self.conn = DummyConn()
         self.dbm = DBManager(self.conn)
 
-    def test_alter_default_privileges(self):
+    def test_alter_default_privileges_grant(self):
         self.dbm.alter_default_privileges("grp", "public", "tables", {"SELECT"})
         executed = [str(s) for s in self.conn.cursor_obj.executed]
+        self.assertEqual(len(executed), 1)
+        self.assertIn("GRANT", executed[0])
+        self.assertIn("SELECT", executed[0])
+        self.assertNotIn("REVOKE", executed[0])
+
+    def test_alter_default_privileges_grant_and_revoke(self):
+        def fake_get_default_privileges(owner=None, objtype="r", schema=None):
+            return {"public": {"grp": {"SELECT"}}}
+
+        self.dbm.get_default_privileges = fake_get_default_privileges
+        self.dbm.alter_default_privileges("grp", "public", "tables", {"INSERT"})
+        executed = [str(s) for s in self.conn.cursor_obj.executed]
         self.assertEqual(len(executed), 2)
-        self.assertIn("ALTER DEFAULT PRIVILEGES", executed[0])
-        self.assertIn("REVOKE ALL", executed[0])
+        self.assertIn("REVOKE", executed[0])
+        self.assertIn("SELECT", executed[0])
         self.assertIn("GRANT", executed[1])
-        self.assertIn("SELECT", executed[1])
+        self.assertIn("INSERT", executed[1])
 
     def test_alter_default_privileges_noop(self):
         def fake_get_default_privileges(owner=None, objtype="r", schema=None):
