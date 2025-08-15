@@ -295,12 +295,12 @@ class BatchInsertDialog(QDialog):
         validade = self.date.date().toString('yyyy-MM-dd') if self.chkValidade.isChecked() else None
         grupo = self.cmbGrupo.currentText()
         if grupo == "-- Criar novo grupo --":
-            grupo, ok = QInputDialog.getText(self, "Novo Grupo", "Nome do grupo (prefixo grp_ será adicionado se faltar)")
+            grupo, ok = QInputDialog.getText(self, "Novo Grupo", "Nome do grupo (prefixo turma_ será adicionado se faltar)")
             if not ok or not grupo.strip():
                 raise ValueError("Grupo inválido")
             grupo = grupo.strip()
-            if not grupo.lower().startswith('grp_'):
-                grupo = 'grp_' + grupo.lower()
+            if not grupo.lower().startswith('turma_'):
+                grupo = 'turma_' + grupo.lower()
         return usuarios, validade, grupo
 
 

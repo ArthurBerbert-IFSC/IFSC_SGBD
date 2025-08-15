@@ -38,12 +38,12 @@ def force_reload_and_test():
             
             # Testa com o grupo que estava dando erro
             print("\n🧪 Testando get_schema_privileges...")
-            result = db.get_schema_privileges('grp_Geo2_2025-2')
+            result = db.get_schema_privileges('turma_Geo2_2025-2')
             print(f"✅ Resultado: {result}")
             
             # Testa também default privileges
             print("\n🧪 Testando get_default_table_privileges...")
-            result2 = db.get_default_table_privileges('grp_Geo2_2025-2')
+            result2 = db.get_default_table_privileges('turma_Geo2_2025-2')
             print(f"✅ Resultado: {result2}")
             
         except Exception as e:

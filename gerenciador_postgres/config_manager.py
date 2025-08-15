@@ -17,7 +17,8 @@ else:
 DEFAULT_CONFIG = {
     "log_path": str(BASE_DIR / "logs" / "app.log"),
     "log_level": "INFO",
-    "group_prefix": "grp_",
+    "group_prefix": "turma_",
+    "user_prefix": "monitores_",
     "schema_creation_group": "Professores",
     "connect_timeout": 5,
 }

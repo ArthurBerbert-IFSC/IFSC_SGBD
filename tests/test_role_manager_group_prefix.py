@@ -45,15 +45,15 @@ class RoleManagerGroupPrefixTests(unittest.TestCase):
         self.rm = RoleManager(self.dao, logging.getLogger("test"))
 
     def test_create_group_respects_prefix(self):
-        with patch("gerenciador_postgres.role_manager.load_config", return_value={"group_prefix": "grp_"}):
-            created = self.rm.create_group("grp_valid")
-            self.assertEqual(created, "grp_valid")
-            self.assertIn("grp_valid", self.dao.groups)
+        with patch("gerenciador_postgres.role_manager.load_config", return_value={"group_prefix": "turma_"}):
+            created = self.rm.create_group("turma_valid")
+            self.assertEqual(created, "turma_valid")
+            self.assertIn("turma_valid", self.dao.groups)
 
     def test_create_group_invalid_prefix(self):
         with patch("gerenciador_postgres.role_manager.load_config", return_value={"group_prefix": "class_"}):
             with self.assertRaises(ValueError):
-                self.rm.create_group("grp_invalid")
+                self.rm.create_group("turma_invalid")
 
 
 if __name__ == "__main__":
