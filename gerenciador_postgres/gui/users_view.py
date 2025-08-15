@@ -24,6 +24,12 @@ from PyQt6.QtGui import QIcon
 from pathlib import Path
 from PyPDF2 import PdfReader
 import re
+import logging
+try:
+    # Reutiliza lógica mais robusta já existente; captura também SystemExit lançado pelo script
+    from tools.extract_alunos_pdf import extract_alunos_from_pdf  # type: ignore
+except BaseException:  # inclui SystemExit
+    extract_alunos_from_pdf = None  # type: ignore
 
 
 class BatchUserDialog(QDialog):
@@ -70,47 +76,62 @@ class BatchUserDialog(QDialog):
         self.btnImportPDF.clicked.connect(self.import_from_pdf)
 
     def import_from_pdf(self):
-        """Abre um seletor de arquivos para importar um PDF e extrai o texto."""
-        file_name, _ = QFileDialog.getOpenFileName(
-            self, "Selecionar PDF", "", "Arquivos PDF (*.pdf)"
-        )
+        """Abre um seletor, tenta extrair (usando extrator dedicado se disponível) e preenche a caixa."""
+        file_name, _ = QFileDialog.getOpenFileName(self, "Selecionar PDF", "", "Arquivos PDF (*.pdf)")
         if not file_name:
             return
-
         try:
-            reader = PdfReader(file_name)
-            text_lines = []
-            for page in reader.pages:
-                text = page.extract_text() or ""
-                text_lines.extend(text.splitlines())
+            logging.getLogger(__name__).info("Importando alunos de PDF: %s", file_name)
+            lines_output = []
+            # Caminho 1: usar extrator robusto baseado em pdfplumber, se importado
+            if extract_alunos_from_pdf:
+                try:
+                    alunos = extract_alunos_from_pdf(file_name)
+                except Exception as e:
+                    logging.getLogger(__name__).warning("Falha extrator pdfplumber: %s", e)
+                    alunos = []
+                for item in alunos:
+                    lines_output.append(f"{item['matricula']} {item['nome']}")
 
-            student_data = []
-            student_line_re = re.compile(r"^\d+\s+\d+\s+.*")
-            for line in text_lines:
-                if student_line_re.match(line):
-                    parts = line.strip().split(maxsplit=2)
-                    if len(parts) == 3:
-                        student_data.append(f"{parts[1]} {parts[2]}")
+            # Caminho 2 (fallback) se nada encontrado ou extrator indisponível: usar PyPDF2 + regex flexível
+            if not lines_output:
+                reader = PdfReader(file_name)
+                text_lines = []
+                for page in reader.pages:
+                    text = page.extract_text() or ""
+                    text_lines.extend(text.splitlines())
+                # Aceita formatos:
+                #  a) <seq> <matricula> <nome>
+                #  b) <matricula> <nome>
+                #  c) <matricula> - <nome>
+                #  d) <matricula>\t<nome>
+                pat = re.compile(r"^(?:\d+\s+)?(\d{4,})[\s\-\t]+(.+)$")
+                for line in text_lines:
+                    m = pat.match(line.strip())
+                    if not m:
+                        continue
+                    matricula, nome = m.group(1), m.group(2).strip()
+                    # Heurística para descartar cabeçalhos
+                    if re.search(r"nome|aluno|discente", nome, re.IGNORECASE):
+                        continue
+                    lines_output.append(f"{matricula} {nome}")
 
-            if not student_data:
-                QMessageBox.warning(
-                    self,
-                    "Nenhum Aluno Encontrado",
-                    "Não foi possível encontrar dados de alunos no formato esperado no PDF.",
-                )
+            if not lines_output:
+                QMessageBox.warning(self, "Nenhum Aluno Encontrado", "Não foi possível encontrar dados de alunos no PDF.")
                 return
-
-            self.txt.setPlainText("\n".join(student_data))
-            QMessageBox.information(
-                self,
-                "Sucesso",
-                f"{len(student_data)} alunos importados do PDF para a caixa de texto.",
-            )
-
+            # Remove duplicados preservando ordem
+            seen = set()
+            dedup = []
+            for ln in lines_output:
+                key = ln.lower()
+                if key not in seen:
+                    seen.add(key)
+                    dedup.append(ln)
+            self.txt.setPlainText("\n".join(dedup))
+            QMessageBox.information(self, "Sucesso", f"{len(dedup)} alunos importados.")
         except Exception as e:
-            QMessageBox.critical(
-                self, "Erro ao Ler PDF", f"Não foi possível processar o arquivo PDF.\nErro: {e}"
-            )
+            logging.getLogger(__name__).exception("Erro ao processar PDF")
+            QMessageBox.critical(self, "Erro ao Ler PDF", f"Não foi possível processar o arquivo PDF.\nErro: {e}")
 
     def get_data(self):
         text = self.txt.toPlainText()
