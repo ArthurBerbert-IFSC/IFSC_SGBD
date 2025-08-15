@@ -27,6 +27,31 @@ PERMISSION_CONTRACT_SCHEMA: dict[str, Any] = {
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
         },
+        "schema_privileges": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "minItems": 1,
+                },
+            },
+        },
+        "object_privileges": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "minItems": 1,
+                    },
+                },
+            },
+        },
     },
     "required": ["version", "managed_principals"],
     "additionalProperties": False,
@@ -41,6 +66,17 @@ def validate_contract(data: dict[str, Any]) -> dict[str, Any]:
     """
 
     Draft7Validator(PERMISSION_CONTRACT_SCHEMA).validate(data)
+
+    obj_privs = data.get("object_privileges", {})
+    schema_privs = data.get("schema_privileges", {})
+    for grantee, schemas in obj_privs.items():
+        grantee_schema_privs = schema_privs.get(grantee, {})
+        for schema in schemas:
+            if "USAGE" not in set(map(str.upper, grantee_schema_privs.get(schema, []))):
+                raise ValueError(
+                    f"Grantee '{grantee}' possui privilégios em objetos do schema '{schema}' sem USAGE em schema_privileges"
+                )
+
     return data
 
 
