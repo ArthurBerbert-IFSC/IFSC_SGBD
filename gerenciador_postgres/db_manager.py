@@ -358,6 +358,7 @@ class DBManager:
         group: str,
         privileges: Dict[str, Dict[str, Set[str]]],
         obj_type: str = "TABLE",
+        check_dependencies: bool = True,
     ):
         """Aplica GRANT/REVOKE para tabelas ou sequências.
 
@@ -396,6 +397,12 @@ class DBManager:
                     to_revoke = existing - desired
 
                     if to_revoke:
+                        if check_dependencies:
+                            deps = self.get_object_dependencies(schema, name)
+                            if deps:
+                                raise RuntimeError(
+                                    f"[WARN-DEPEND] {schema}.{name} possui dependências: {deps}"
+                                )
                         cur.execute(
                             sql.SQL("REVOKE {} ON {} {} FROM {}").format(
                                 sql.SQL(", ").join(sql.SQL(p) for p in sorted(to_revoke)),
