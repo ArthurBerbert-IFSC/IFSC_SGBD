@@ -3,5 +3,5 @@
   "scope": "database",
   "managed_principals_mode": "regex",
   "auto_onboard_creators": false,
-  "managed_principals": ["^grp_[A-Za-z0-9_]+$", "^usr_[A-Za-z0-9_]+$"]
+  "managed_principals": ["^turma_[A-Za-z0-9_]+$", "^monitores_[A-Za-z0-9_]+$"]
 }

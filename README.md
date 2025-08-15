@@ -30,7 +30,7 @@ O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possív
 
 - `log_level`: nível de detalhamento dos logs.
 - `log_path`: caminho do arquivo de log (relativo a `BASE_DIR`).
-- `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"grp_"`).
+- `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"turma_"`).
 - `schema_creation_group`: nome do grupo autorizado a criar schemas (padrão `"Professores"`).
 - `connect_timeout`: tempo máximo (segundos) para tentar conectar ao banco (padrão `5`).
 
