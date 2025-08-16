@@ -33,13 +33,14 @@ def test_default_privileges_require_usage():
         "contract_version": SCHEMA_VERSION,
         "managed_principals": ["grp_role"],
         "schema_privileges": {"grp_role": {"public": ["CREATE"]}},
-        "default_privileges": {
-            "grp_role": {
-                "public": {
-                    "tables": {"privileges": ["SELECT"], "for_role": "owner"}
-                }
+        "default_privileges": [
+            {
+                "for_role": "owner",
+                "in_schema": "public",
+                "on": "tables",
+                "grants": {"grp_role": ["SELECT"]},
             }
-        },
+        ],
     }
     with pytest.raises(ValueError):
         validate_contract(contract, pg_roles={"owner"})
@@ -50,13 +51,14 @@ def test_default_privileges_for_role_must_exist():
         "contract_version": SCHEMA_VERSION,
         "managed_principals": ["grp_role"],
         "schema_privileges": {"grp_role": {"public": ["USAGE"]}},
-        "default_privileges": {
-            "grp_role": {
-                "public": {
-                    "tables": {"privileges": ["SELECT"], "for_role": "missing"}
-                }
+        "default_privileges": [
+            {
+                "for_role": "missing",
+                "in_schema": "public",
+                "on": "tables",
+                "grants": {"grp_role": ["SELECT"]},
             }
-        },
+        ],
     }
     with pytest.raises(ValueError):
         validate_contract(contract, pg_roles={"owner"})
@@ -67,12 +69,13 @@ def test_default_privileges_with_usage_and_role_ok():
         "contract_version": SCHEMA_VERSION,
         "managed_principals": ["grp_role"],
         "schema_privileges": {"grp_role": {"public": ["USAGE"]}},
-        "default_privileges": {
-            "grp_role": {
-                "public": {
-                    "tables": {"privileges": ["SELECT"], "for_role": "owner"}
-                }
+        "default_privileges": [
+            {
+                "for_role": "owner",
+                "in_schema": "public",
+                "on": "tables",
+                "grants": {"grp_role": ["SELECT"]},
             }
-        },
+        ],
     }
     assert validate_contract(contract, pg_roles={"owner"}) == contract

@@ -22,10 +22,18 @@ PERMISSION_CONTRACT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "contract_version": {"type": "string", "const": SCHEMA_VERSION},
-        "scope": {"type": "string", "minLength": 1},
+        "scope": {
+            "type": "object",
+            "properties": {
+                "database": {"type": "string", "minLength": 1},
+                "schema": {"type": "string", "minLength": 1},
+            },
+            "required": ["database", "schema"],
+            "additionalProperties": False,
+        },
         "managed_principals_mode": {
             "type": "string",
-            "enum": ["regex", "literal"],
+            "enum": ["regex", "literal", "conservative"],
             "default": "regex",
         },
         "auto_onboard_creators": {"type": "boolean", "default": False},
@@ -60,25 +68,25 @@ PERMISSION_CONTRACT_SCHEMA: dict[str, Any] = {
             },
         },
         "default_privileges": {
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
                 "type": "object",
-                "additionalProperties": {
-                    "type": "object",
-                    "additionalProperties": {
+                "properties": {
+                    "for_role": {"type": "string", "minLength": 1},
+                    "in_schema": {"type": "string", "minLength": 1},
+                    "on": {"type": "string", "minLength": 1},
+                    "grants": {
                         "type": "object",
-                        "properties": {
-                            "privileges": {
-                                "type": "array",
-                                "items": {"type": "string", "minLength": 1},
-                                "minItems": 1,
-                            },
-                            "for_role": {"type": "string", "minLength": 1},
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                            "minItems": 1,
                         },
-                        "required": ["privileges"],
-                        "additionalProperties": False,
+                        "minProperties": 1,
                     },
                 },
+                "required": ["in_schema", "on", "grants"],
+                "additionalProperties": False,
             },
         },
     },
@@ -108,18 +116,18 @@ def validate_contract(data: dict[str, Any], pg_roles: Iterable[str] | None = Non
                     f"Grantee '{grantee}' possui privilégios em objetos do schema '{schema}' sem USAGE em schema_privileges"
                 )
 
-    def_privs = data.get("default_privileges", {})
-    for grantee, schemas in def_privs.items():
-        grantee_schema_privs = schema_privs.get(grantee, {})
-        for schema, objtypes in schemas.items():
+    def_privs = data.get("default_privileges", [])
+    for entry in def_privs:
+        schema = entry["in_schema"]
+        for grantee, _privs in entry["grants"].items():
+            grantee_schema_privs = schema_privs.get(grantee, {})
             if "USAGE" not in set(map(str.upper, grantee_schema_privs.get(schema, []))):
                 raise ValueError(
                     f"Grantee '{grantee}' possui default privileges em schema '{schema}' sem USAGE em schema_privileges"
                 )
-            for objtype, info in objtypes.items():
-                for_role = info.get("for_role")
-                if for_role and pg_roles is not None and for_role not in pg_role_set:
-                    raise ValueError(f"Role '{for_role}' não existe em pg_roles")
+        for_role = entry.get("for_role")
+        if for_role and pg_roles is not None and for_role not in pg_role_set:
+            raise ValueError(f"Role '{for_role}' não existe em pg_roles")
 
     return data
 
@@ -136,7 +144,7 @@ def load_contract(path: str | Path) -> dict[str, Any]:
 DEFAULT_CONTRACT = validate_contract(
     {
         "contract_version": SCHEMA_VERSION,
-        "scope": "database",
+        "scope": {"database": "default", "schema": "public"},
         "managed_principals_mode": "regex",
         "auto_onboard_creators": False,
         # Application-managed role name patterns
