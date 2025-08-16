@@ -54,6 +54,33 @@ class Executor:
         privileges = op.get("privileges", [])
         grantee = sql.Identifier(op["grantee"])
 
+        if target == "DEFAULT":
+            obj_type = sql.SQL(op["object_type"])
+            schema = sql.Identifier(op["schema"])
+            priv_part = (
+                sql.SQL(", ").join(sql.SQL(p) for p in privileges)
+                if privileges
+                else sql.SQL("ALL PRIVILEGES")
+            )
+            for_clause = (
+                sql.SQL("FOR ROLE {} ").format(sql.Identifier(op["owner"]))
+                if op.get("owner")
+                else sql.SQL("")
+            )
+            query = sql.SQL(
+                "ALTER DEFAULT PRIVILEGES {for_clause}IN SCHEMA {schema} {action} {privs} ON {obj_type} {to_from} {grantee}"
+            ).format(
+                for_clause=for_clause,
+                schema=schema,
+                action=sql.SQL(action),
+                privs=priv_part,
+                obj_type=obj_type,
+                to_from=sql.SQL("TO") if action == "GRANT" else sql.SQL("FROM"),
+                grantee=grantee,
+            )
+            cur.execute(query)
+            return
+
         if target == "SCHEMA":
             identifier = sql.Identifier(op["schema"])
             priv_part = (

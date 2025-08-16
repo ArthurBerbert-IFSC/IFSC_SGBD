@@ -2,11 +2,12 @@ from __future__ import annotations
 
 """Generate differences between current database state and a permission contract."""
 
-from typing import Dict, Iterable, List, Set
+from typing import Dict, Iterable, List, Set, Tuple
 
 from psycopg2.extensions import connection
 
 from . import state_reader
+from .db_manager import OBJECT_TYPE_CODES, OBJECT_TYPE_MAPS
 
 # Mapping from pg_class.relkind to keywords used in GRANT/REVOKE statements
 OBJTYPE_KEYWORDS = {
@@ -32,6 +33,79 @@ class Reconciler:
 
     def __init__(self, conn: connection):
         self.conn = conn
+
+    # ------------------------------------------------------------------
+    def diff_default_privileges(self, entries: Iterable[Dict[str, object]]) -> List[dict]:
+        """Return operations to reconcile default privileges.
+
+        Each entry in *entries* should follow the structure used in the
+        permission contract.  The current database state is obtained via
+        :func:`state_reader.get_default_privileges`.
+        """
+
+        desired_map: Dict[Tuple[str | None, str, str, str], Dict[str, Set[str]]] = {}
+        for entry in entries:
+            owner = entry.get("for_role")
+            schema = entry["in_schema"]
+            obj_key = entry["on"]
+            obj_keyword = OBJECT_TYPE_MAPS.get(obj_key, obj_key.upper())
+            code = OBJECT_TYPE_CODES.get(obj_key, obj_key)
+            grants = {
+                grantee: set(map(str.upper, privs))
+                for grantee, privs in entry.get("grants", {}).items()
+            }
+            desired_map[(owner, schema, obj_keyword, code)] = grants
+
+        current_map: Dict[Tuple[str | None, str, str, str], Dict[str, Set[str]]] = {}
+        for key, code in OBJECT_TYPE_CODES.items():
+            obj_keyword = OBJECT_TYPE_MAPS.get(key, key.upper())
+            state = state_reader.get_default_privileges(self.conn, objtype=code)
+            owners = state.get("_meta", {}).get("owner_roles", {})
+            for schema, privs in state.items():
+                if schema == "_meta":
+                    continue
+                owner = owners.get(schema)
+                current_map[(owner, schema, obj_keyword, code)] = {
+                    g: set(p) for g, p in privs.items()
+                }
+
+        ops: List[dict] = []
+        for key in sorted(set(current_map) | set(desired_map)):
+            owner, schema, obj_keyword, code = key
+            desired = desired_map.get(key, {})
+            current = current_map.get(key, {})
+            grantees = set(desired) | set(current)
+            for grantee in sorted(grantees):
+                desired_set = desired.get(grantee, set())
+                current_set = current.get(grantee, set())
+                to_grant = desired_set - current_set
+                to_revoke = current_set - desired_set
+                if to_revoke:
+                    ops.append(
+                        {
+                            "action": "revoke",
+                            "target": "DEFAULT",
+                            "object_type": obj_keyword,
+                            "schema": schema,
+                            "owner": owner,
+                            "grantee": grantee,
+                            "privileges": sorted(to_revoke),
+                        }
+                    )
+                if to_grant:
+                    ops.append(
+                        {
+                            "action": "grant",
+                            "target": "DEFAULT",
+                            "object_type": obj_keyword,
+                            "schema": schema,
+                            "owner": owner,
+                            "grantee": grantee,
+                            "privileges": sorted(to_grant),
+                        }
+                    )
+
+        return ops
 
     # ------------------------------------------------------------------
     def diff(self, contract: Dict[str, dict]) -> List[dict]:
@@ -108,6 +182,8 @@ class Reconciler:
                                 "grantee": role,
                                 "privileges": sorted(to_grant),
                             }
-                        )
+                    )
+
+        ops.extend(self.diff_default_privileges(contract.get("default_privileges", [])))
         return ops
 
