@@ -22,7 +22,7 @@ class DummyCursor:
         pass
 
     def execute(self, sql, params=None):
-        if "information_schema.schemata" in sql:
+        if "FROM pg_namespace" in sql:
             self.result = [(s,) for s in self.data["schemas"]]
         elif "FROM pg_catalog.pg_class" in sql:
             self.result = self.data["tables"]

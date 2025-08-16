@@ -36,12 +36,10 @@ class DummyCursor:
     def execute(self, sql, params=None):
         self.commands.append(sql)
         sql_str = str(sql)
-        if "information_schema.schema_privileges" in sql_str:
-            self.result = [
-                (schema, priv)
-                for schema, privs in self.conn.grants.items()
-                for priv in sorted(privs)
-            ]
+        if "FROM pg_namespace" in sql_str:
+            role, schema = params
+            privs = self.conn.grants.get(schema, set())
+            self.result = [(priv.rstrip("*"), priv.endswith("*")) for priv in sorted(privs)]
         else:
             self.result = []
 
