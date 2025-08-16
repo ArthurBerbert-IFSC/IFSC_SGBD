@@ -109,22 +109,22 @@ class PrivilegesEditorView(QWidget):
         for i in range(self.treeCreators.topLevelItemCount()):
             item = self.treeCreators.topLevelItem(i)
             role = item.text(0)
-            # simplistic mapping: checked columns -> GRANT default privilege
+            # simplistic mapping: checked columns -> ALTER DEFAULT PRIVILEGES
             if item.checkState(1) == Qt.CheckState.Checked:
                 ops.append({
-                    "action": "GRANT",
-                    "target": "TABLE",
+                    "action": "ALTER DEFAULT PRIVILEGES",
+                    "badge": "ALTER DEFAULT PRIVILEGES",
+                    "target": "TABLES",
                     "schema": "public",
-                    "object": "*",
                     "privileges": ["ALL"],
                     "grantee": role,
                 })
             if item.checkState(2) == Qt.CheckState.Checked:
                 ops.append({
-                    "action": "GRANT",
-                    "target": "SEQUENCE",
+                    "action": "ALTER DEFAULT PRIVILEGES",
+                    "badge": "ALTER DEFAULT PRIVILEGES",
+                    "target": "SEQUENCES",
                     "schema": "public",
-                    "object": "*",
                     "privileges": ["USAGE"],
                     "grantee": role,
                 })
@@ -163,21 +163,30 @@ class PrivilegesEditorView(QWidget):
         colours = {
             "GRANT": "#28a745",
             "REVOKE": "#dc3545",
+            "ALTER DEFAULT PRIVILEGES": "#007bff",
             "WARN-DEPEND": "#ffc107",
+            "PRESERVED-3rd-party": "#6f42c1",
         }
         return colours.get(badge, "#6c757d")
 
     # ------------------------------------------------------------------
     def _format_sql(self, op: Mapping[str, object]) -> str:
-        target = op["target"].upper()
+        action = op["action"].upper()
         grantee = op["grantee"]
         privs = ", ".join(op.get("privileges", [])) or "ALL PRIVILEGES"
+        if action == "ALTER DEFAULT PRIVILEGES":
+            target = op["target"].upper()
+            return (
+                f"ALTER DEFAULT PRIVILEGES IN SCHEMA {op['schema']} "
+                f"GRANT {privs} ON {target} TO {grantee};"
+            )
+        target = op["target"].upper()
         if target == "SCHEMA":
             obj = f"SCHEMA {op['schema']}"
         else:
             obj = f"{target} {op['schema']}.{op['object']}"
-        keyword = "TO" if op["action"].upper() == "GRANT" else "FROM"
-        return f"{op['action'].upper()} {privs} ON {obj} {keyword} {grantee};"
+        keyword = "TO" if action == "GRANT" else "FROM"
+        return f"{action} {privs} ON {obj} {keyword} {grantee};"
 
 
 __all__ = ["PrivilegesEditorView"]
