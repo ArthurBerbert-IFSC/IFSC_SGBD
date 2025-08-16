@@ -11,7 +11,7 @@ databases:
   port: 5432
   user: Bettina
 group_prefix: turma_
-user_prefix: monitores_
+user_prefix: "monitores_*"
 log_level: DEBUG
 log_path: D:\GitHub\IFSC_SGBD\logs\app.log
 schema_creation_group: Professores

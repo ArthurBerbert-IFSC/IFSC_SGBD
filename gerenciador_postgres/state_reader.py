@@ -18,6 +18,8 @@ from typing import Dict, Iterable, List, Set, Tuple
 from psycopg2.extensions import connection
 from psycopg2 import sql
 
+from contracts.permission_contract import filter_managed
+
 from .db_manager import DBManager
 
 # ---------------------------------------------------------------------------
@@ -33,7 +35,7 @@ def list_roles(conn: connection) -> List[str]:
     )
     with conn.cursor() as cur:
         cur.execute(query)
-        return [row[0] for row in cur.fetchall()]
+        return filter_managed([row[0] for row in cur.fetchall()])
 
 
 # ---------------------------------------------------------------------------
