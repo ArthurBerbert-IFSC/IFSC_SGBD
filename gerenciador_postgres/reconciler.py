@@ -162,16 +162,19 @@ class Reconciler:
                     to_grant = desired_set - current_set
                     to_revoke = current_set - desired_set
                     if to_revoke:
-                        ops.append(
-                            {
-                                "action": "revoke",
-                                "target": keyword,
-                                "schema": schema,
-                                "object": obj,
-                                "grantee": role,
-                                "privileges": sorted(to_revoke),
-                            }
-                        )
+                        op = {
+                            "action": "revoke",
+                            "target": keyword,
+                            "schema": schema,
+                            "object": obj,
+                            "grantee": role,
+                            "privileges": sorted(to_revoke),
+                        }
+                        deps = state_reader.get_dependencies(self.conn, schema, obj)
+                        if deps:
+                            op["badge"] = "WARN-DEPEND"
+                            op["dependencies"] = deps
+                        ops.append(op)
                     if to_grant:
                         ops.append(
                             {

@@ -30,8 +30,18 @@ class Executor:
         self.retry_interval = retry_interval
 
     # ------------------------------------------------------------------
-    def apply(self, operations: Iterable[Mapping[str, object]]):
+    def apply(self, operations: Iterable[Mapping[str, object]], *, check_warnings: bool = True):
         ops = list(operations)
+        if check_warnings:
+            for op in ops:
+                badge = op.get("badge")
+                if badge:
+                    schema = op.get("schema", "")
+                    obj = op.get("object", "")
+                    deps = op.get("dependencies")
+                    raise RuntimeError(
+                        f"[{badge}] {schema}.{obj} possui dependências: {deps}"
+                    )
         attempt = 0
         while True:
             attempt += 1
