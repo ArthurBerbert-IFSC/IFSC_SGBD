@@ -13,13 +13,16 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture(scope="module")
 def conn():
-    conn = psycopg2.connect(
-        host=os.getenv("PGHOST", "localhost"),
-        port=os.getenv("PGPORT", "5432"),
-        dbname=os.getenv("PGDATABASE", "postgres"),
-        user=os.getenv("PGUSER", "postgres"),
-        password=os.getenv("PGPASSWORD", "postgres"),
-    )
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv("PGHOST", "localhost"),
+            port=os.getenv("PGPORT", "5432"),
+            dbname=os.getenv("PGDATABASE", "postgres"),
+            user=os.getenv("PGUSER", "postgres"),
+            password=os.getenv("PGPASSWORD", "postgres"),
+        )
+    except psycopg2.OperationalError as e:
+        pytest.skip(f"PostgreSQL not available: {e}")
     yield conn
     conn.close()
 
