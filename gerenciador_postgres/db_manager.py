@@ -448,10 +448,14 @@ class DBManager:
     def grant_database_privileges(self, group: str, privileges: Set[str]):
         """Concede privilégios de banco ao grupo especificado.
 
-        Revoga primeiro todos os privilégios padrão e em seguida concede
-        aqueles informados em ``privileges``.
+        A implementação lê os privilégios atuais concedidos ao ``group`` e
+        calcula as diferenças em relação ao conjunto desejado. Somente as
+        diferenças são aplicadas via ``GRANT``/``REVOKE``, preservando quaisquer
+        privilégios fora da "fronteira" definida pelo ``PRIVILEGE_WHITELIST``.
         """
-        invalid = set(privileges) - PRIVILEGE_WHITELIST["DATABASE"]
+
+        base_privs = {p.rstrip("*") for p in privileges}
+        invalid = base_privs - PRIVILEGE_WHITELIST["DATABASE"]
         if invalid:
             raise ValueError(
                 f"Privilégios inválidos para DATABASE: {', '.join(sorted(invalid))}"
@@ -460,18 +464,60 @@ class DBManager:
         dbname = self.conn.get_dsn_parameters().get("dbname")
         with self.conn.cursor() as cur:
             cur.execute(
-                sql.SQL("REVOKE ALL PRIVILEGES ON DATABASE {} FROM {}" ).format(
-                    sql.Identifier(dbname), sql.Identifier(group)
-                )
+                """
+                SELECT a.privilege_type, a.is_grantable
+                FROM pg_database d
+                CROSS JOIN LATERAL aclexplode(
+                    COALESCE(d.datacl, acldefault('d', d.datdba))
+                ) AS a
+                JOIN pg_roles gr ON gr.oid = a.grantee
+                WHERE d.datname = current_database()
+                  AND gr.rolname = %s
+                """,
+                (group,),
             )
-            if privileges:
-                cur.execute(
-                    sql.SQL("GRANT {} ON DATABASE {} TO {}" ).format(
-                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
-                        sql.Identifier(dbname),
-                        sql.Identifier(group),
-                    )
+            current = {
+                priv + ("*" if grantable else "")
+                for priv, grantable in cur.fetchall()
+            }
+
+            managed_current = {
+                p for p in current if p.rstrip("*") in PRIVILEGE_WHITELIST["DATABASE"]
+            }
+            to_grant = privileges - managed_current
+            to_revoke = managed_current - privileges
+
+            if to_revoke:
+                revoke_sql = sql.SQL("REVOKE {} ON DATABASE {} FROM {}").format(
+                    sql.SQL(", ").join(
+                        sql.SQL(p.rstrip("*")) for p in sorted(to_revoke)
+                    ),
+                    sql.Identifier(dbname),
+                    sql.Identifier(group),
                 )
+                cur.execute(revoke_sql)
+
+            if to_grant:
+                plain = [p.rstrip("*") for p in sorted(to_grant) if not p.endswith("*")]
+                star = [p.rstrip("*") for p in sorted(to_grant) if p.endswith("*")]
+                if plain:
+                    cur.execute(
+                        sql.SQL("GRANT {} ON DATABASE {} TO {}").format(
+                            sql.SQL(", ").join(sql.SQL(p) for p in plain),
+                            sql.Identifier(dbname),
+                            sql.Identifier(group),
+                        )
+                    )
+                if star:
+                    cur.execute(
+                        sql.SQL(
+                            "GRANT {} ON DATABASE {} TO {} WITH GRANT OPTION"
+                        ).format(
+                            sql.SQL(", ").join(sql.SQL(p) for p in star),
+                            sql.Identifier(dbname),
+                            sql.Identifier(group),
+                        )
+                    )
 
     def grant_schema_privileges(self, group: str, schema: str, privileges: Set[str]):
         """Concede privilégios de schema ao grupo informado."""
