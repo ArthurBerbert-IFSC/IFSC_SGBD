@@ -24,6 +24,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 import logging
 
+from gerenciador_postgres.controllers.groups_controller import DependencyWarning
+
 
 class _TaskRunner(QThread):
     succeeded = pyqtSignal(object)
@@ -683,7 +685,41 @@ class GroupsView(QWidget):
                 QMessageBox.critical(self, "Erro", "Falha ao salvar privilégios de tabelas.")
 
         def on_error(e: Exception):
-            QMessageBox.critical(self, "Erro", f"Falha ao salvar privilégios de tabelas: {e}")
+            if isinstance(e, DependencyWarning):
+                resp = QMessageBox.question(
+                    self,
+                    "Dependências detectadas",
+                    f"{e}\nContinuar revogação com CASCADE?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if resp == QMessageBox.StandardButton.Yes:
+                    try:
+                        success = self.controller.apply_group_privileges(
+                            role,
+                            tables_privs,
+                            defaults_applied=True,
+                            emit_signal=False,
+                            check_dependencies=False,
+                        )
+                        if success:
+                            for (r, _), st in self._priv_cache.items():
+                                if r == role:
+                                    st.dirty_table = False
+                            QMessageBox.information(
+                                self, "Sucesso", "Privilégios de tabelas atualizados."
+                            )
+                        else:
+                            QMessageBox.critical(
+                                self, "Erro", "Falha ao salvar privilégios de tabelas."
+                            )
+                    except Exception as err:
+                        QMessageBox.critical(
+                            self, "Erro", f"Falha ao salvar privilégios de tabelas: {err}"
+                        )
+                # If user cancels, do nothing
+            else:
+                QMessageBox.critical(self, "Erro", f"Falha ao salvar privilégios de tabelas: {e}")
 
         self._execute_async(task, on_success, on_error, "Salvando privilégios de tabelas...")
 

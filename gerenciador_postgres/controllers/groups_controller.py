@@ -2,6 +2,10 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from config.permission_templates import PERMISSION_TEMPLATES
 
 
+class DependencyWarning(RuntimeError):
+    """Sinaliza que a operação requer REVOKE ... CASCADE."""
+
+
 class GroupsController(QObject):
     """Controller dedicado às operações de grupos e privilégios."""
 
@@ -92,13 +96,18 @@ class GroupsController(QObject):
         emit_signal: bool = True,
         check_dependencies: bool = True,
     ):
-        success = self.role_manager.set_group_privileges(
-            group_name,
-            privileges,
-            obj_type=obj_type,
-            defaults_applied=defaults_applied,
-            check_dependencies=check_dependencies,
-        )
+        try:
+            success = self.role_manager.set_group_privileges(
+                group_name,
+                privileges,
+                obj_type=obj_type,
+                defaults_applied=defaults_applied,
+                check_dependencies=check_dependencies,
+            )
+        except Exception as e:
+            if "[WARN-DEPEND]" in str(e):
+                raise DependencyWarning(str(e))
+            raise
         if success and emit_signal:
             self.data_changed.emit()
         return success

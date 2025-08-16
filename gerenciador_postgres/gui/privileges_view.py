@@ -18,6 +18,8 @@ from PyQt6.QtGui import QIcon
 from pathlib import Path
 from config.permission_templates import PERMISSION_TEMPLATES
 
+from gerenciador_postgres.controllers.groups_controller import DependencyWarning
+
 
 class PrivilegesView(QWidget):
     """Tela para gerenciamento de privilégios de usuários/grupos."""
@@ -423,11 +425,36 @@ class PrivilegesView(QWidget):
                         perms,
                         owner=default_owners.get(schema),
                     )
-            ok &= self.controller.apply_group_privileges(
-                role,
-                table_privileges,
-                defaults_applied=defaults_applied,
-            )
+            try:
+                ok &= self.controller.apply_group_privileges(
+                    role,
+                    table_privileges,
+                    defaults_applied=defaults_applied,
+                )
+            except DependencyWarning as warn:
+                progress.close()
+                resp = QMessageBox.question(
+                    self,
+                    "Dependências detectadas",
+                    f"{warn}\nContinuar revogação com CASCADE?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if resp == QMessageBox.StandardButton.Yes:
+                    try:
+                        ok &= self.controller.apply_group_privileges(
+                            role,
+                            table_privileges,
+                            defaults_applied=defaults_applied,
+                            check_dependencies=False,
+                        )
+                    except Exception as err:
+                        QMessageBox.critical(
+                            self, "Erro", f"Não foi possível salvar as permissões: {err}"
+                        )
+                        return False
+                else:
+                    return False
             if ok:
                 QMessageBox.information(
                     self, "Sucesso", "Permissões salvas com sucesso."
