@@ -84,24 +84,38 @@ def get_objects(
 def get_object_acls(
     conn: connection, schema: str, objname: str
 ) -> Dict[str, Set[str]]:
-    """Return privileges for *objname* within *schema* grouped by grantee."""
+    """Return privileges for *objname* within *schema* grouped by grantee.
+
+    The query inspects ``pg_catalog`` ACLs directly using ``aclexplode`` so
+    that privileges granted WITH GRANT OPTION are preserved (denoted by an
+    appended ``"*"`` in the privilege name).
+    """
 
     query = sql.SQL(
         """
-        SELECT grantee, privilege_type
-        FROM information_schema.role_table_grants
-        WHERE table_schema = %s AND table_name = %s
-        UNION ALL
-        SELECT grantee, privilege_type
-        FROM information_schema.role_usage_grants
-        WHERE object_schema = %s AND object_name = %s
+        SELECT
+            COALESCE(gr.rolname, 'PUBLIC') AS grantee,
+            a.privilege_type,
+            a.is_grantable
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN LATERAL aclexplode(
+            COALESCE(c.relacl,
+                     acldefault(
+                         CASE WHEN c.relkind = 'S' THEN 'S' ELSE 'r' END,
+                         c.relowner
+                     ))
+        ) AS a
+        LEFT JOIN pg_roles gr ON gr.oid = a.grantee
+        WHERE n.nspname = %s AND c.relname = %s
         """
     )
     with conn.cursor() as cur:
-        cur.execute(query, (schema, objname, schema, objname))
+        cur.execute(query, (schema, objname))
         result: Dict[str, Set[str]] = {}
-        for grantee, priv in cur.fetchall():
-            result.setdefault(grantee, set()).add(priv)
+        for grantee, priv, grantable in cur.fetchall():
+            privname = priv + ("*" if grantable else "")
+            result.setdefault(grantee, set()).add(privname)
     return result
 
 

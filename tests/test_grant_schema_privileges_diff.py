@@ -33,10 +33,10 @@ class DummyCursor:
 
         query = _to_str(sql_query)
         self.commands.append(query)
-        if "information_schema.schema_privileges" in query:
+        if "FROM pg_namespace" in query:
             role, schema = params
             privs = self.conn.grants.get((role, schema), set())
-            self.result = [(p,) for p in sorted(privs)]
+            self.result = [(p.rstrip("*"), p.endswith("*")) for p in sorted(privs)]
         elif query.strip().upper().startswith("GRANT"):
             import re
 

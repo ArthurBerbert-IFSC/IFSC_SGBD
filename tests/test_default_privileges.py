@@ -43,9 +43,14 @@ class DummyConn:
 
 def test_get_default_privileges_parsing():
     rows = [
-        ("postgres", "geo2", ['"grp_Geo2_2025-2"=arwd/postgres']),
-        ("postgres", "public", ['"grp_Geo2_2025-2"=r/postgres']),
-        ("postgres", "Teste_001_Esquema", ['"grp_Geo2_2025-2"=arw/postgres']),
+        ("postgres", "geo2", "grp_Geo2_2025-2", "DELETE", False),
+        ("postgres", "geo2", "grp_Geo2_2025-2", "INSERT", False),
+        ("postgres", "geo2", "grp_Geo2_2025-2", "SELECT", False),
+        ("postgres", "geo2", "grp_Geo2_2025-2", "UPDATE", False),
+        ("postgres", "public", "grp_Geo2_2025-2", "SELECT", False),
+        ("postgres", "Teste_001_Esquema", "grp_Geo2_2025-2", "INSERT", False),
+        ("postgres", "Teste_001_Esquema", "grp_Geo2_2025-2", "SELECT", False),
+        ("postgres", "Teste_001_Esquema", "grp_Geo2_2025-2", "UPDATE", False),
     ]
     conn = DummyConn(rows)
     db = DBManager(conn)

@@ -17,15 +17,17 @@ class DummyCursor:
 
     def execute(self, sql_query, params=None):
         query = str(sql_query)
-        if "information_schema.role_table_grants" in query:
+        if "FROM pg_class" in query and "aclexplode" in query:
             self.result = [
-                (schema, table, priv)
+                (schema, table, priv.rstrip("*"), priv.endswith("*"))
                 for schema, objs in self.current_privs.items()
                 for table, privs in objs.items()
                 for priv in privs
             ]
         elif self.record and ("GRANT" in query or "REVOKE" in query):
             self.executed.append(query)
+        else:
+            self.result = []
 
     def fetchall(self):
         return self.result
