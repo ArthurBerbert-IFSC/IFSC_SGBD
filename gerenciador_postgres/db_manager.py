@@ -461,28 +461,68 @@ class DBManager:
 
         identifier = sql.Identifier(schema)
         with self.conn.cursor() as cur:
-            # Revoga todos os privilégios primeiro
-            revoke_sql = sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {}").format(
-                identifier, sql.Identifier(group)
+            # Obtém os privilégios atuais diretamente no banco
+            cur.execute(
+                """
+                SELECT privilege_type
+                FROM information_schema.schema_privileges
+                WHERE grantee = %s AND schema_name = %s
+                """,
+                (group, schema),
             )
-            logger.debug(f"Executing REVOKE: {revoke_sql.as_string(cur)}")
-            cur.execute(revoke_sql)
-            
-            # Concede os novos privilégios se houver
-            if privileges:
-                grant_sql = sql.SQL("GRANT {} ON SCHEMA {} TO {}").format(
-                    sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+            current = {row[0] for row in cur.fetchall()}
+            logger.debug(
+                "Existing schema privileges for %s on %s: %s", group, schema, current
+            )
+
+            # Considera apenas privilégios gerenciados por este módulo
+            managed_current = current & PRIVILEGE_WHITELIST["SCHEMA"]
+            to_grant = privileges - managed_current
+            to_revoke = managed_current - privileges
+
+            if to_revoke:
+                revoke_sql = sql.SQL("REVOKE {} ON SCHEMA {} FROM {}").format(
+                    sql.SQL(", ").join(sql.SQL(p) for p in sorted(to_revoke)),
                     identifier,
                     sql.Identifier(group),
                 )
-                logger.debug(f"Executing GRANT: {grant_sql.as_string(cur)}")
+                try:
+                    debug_sql = revoke_sql.as_string(cur)
+                except Exception:
+                    debug_sql = str(revoke_sql)
+                logger.debug(f"Executing REVOKE: {debug_sql}")
+                cur.execute(revoke_sql)
+
+            if to_grant:
+                grant_sql = sql.SQL("GRANT {} ON SCHEMA {} TO {}").format(
+                    sql.SQL(", ").join(sql.SQL(p) for p in sorted(to_grant)),
+                    identifier,
+                    sql.Identifier(group),
+                )
+                try:
+                    debug_sql = grant_sql.as_string(cur)
+                except Exception:
+                    debug_sql = str(grant_sql)
+                logger.debug(f"Executing GRANT: {debug_sql}")
                 cur.execute(grant_sql)
-                logger.info(f"Granted schema privileges {privileges} on {schema} to {group}")
+
+            if to_grant or to_revoke:
+                logger.info(
+                    "Updated schema privileges on %s for %s: +%s -%s",
+                    schema,
+                    group,
+                    to_grant,
+                    to_revoke,
+                )
             else:
-                logger.info(f"Revoked all schema privileges on {schema} from {group}")
-                
+                logger.info(
+                    "No schema privilege changes required on %s for %s",
+                    schema,
+                    group,
+                )
+
         # Força commit se não estiver em transação
-        if not self.conn.autocommit:
+        if not getattr(self.conn, "autocommit", False):
             self.conn.commit()
     # ---------------------------------------------------------------
     # Consultas de privilégios de schema e default privileges futuros
