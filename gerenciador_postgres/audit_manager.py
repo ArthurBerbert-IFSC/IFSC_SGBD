@@ -64,7 +64,12 @@ class AuditManager:
         success: bool = True,
         error_message: Optional[str] = None,
     ):
-        """Registra uma operação de auditoria de permissões."""
+        """Registra uma operação de auditoria de permissões.
+
+        O registro é incluído na mesma transação da operação principal,
+        garantindo que ``contract_json`` e ``diff_sql`` sejam gravados antes
+        do ``COMMIT``.
+        """
         try:
             with self.dao.conn.cursor() as cur:
                 cur.execute(

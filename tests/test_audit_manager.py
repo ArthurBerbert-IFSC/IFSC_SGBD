@@ -75,10 +75,16 @@ class TestAuditManager(unittest.TestCase):
                 diff_sql="GRANT",
                 success=True,
             )
+            # commit ainda não executado dentro do bloco
+            self.assertFalse(self.mock_conn.committed)
 
-        queries = self.mock_conn.cursor_mock.executed_queries
-        self.assertTrue(len(queries) > 0)
-        self.assertIn("INSERT INTO auditoria_permissoes", queries[0][0])
+        query, params = self.mock_conn.cursor_mock.executed_queries[0]
+        self.assertIn("INSERT INTO auditoria_permissoes", query)
+        self.assertEqual(params[3].adapted, {"a": 1})
+        self.assertEqual(params[4], "GRANT")
+        self.assertTrue(params[5])
+        self.assertIsNone(params[6])
+        # commit realizado após saída do contexto
         self.assertTrue(self.mock_conn.committed)
 
     def test_log_operation_failure(self):
@@ -93,9 +99,12 @@ class TestAuditManager(unittest.TestCase):
                 success=False,
                 error_message="boom",
             )
+            self.assertFalse(self.mock_conn.committed)
 
         query, params = self.mock_conn.cursor_mock.executed_queries[0]
         self.assertIn("INSERT INTO auditoria_permissoes", query)
+        self.assertEqual(params[3].adapted, {"a": 1})
+        self.assertEqual(params[4], "GRANT")
         self.assertFalse(params[5])  # success flag
         self.assertEqual(params[6], "boom")
         self.assertTrue(self.mock_conn.committed)
