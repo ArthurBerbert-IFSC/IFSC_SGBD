@@ -3,5 +3,5 @@
   "scope": {"database": "example", "schema": "public"},
   "managed_principals_mode": "regex",
   "auto_onboard_creators": false,
-  "managed_principals": ["^turma_[A-Za-z0-9_]+$", "^monitores_[A-Za-z0-9_]+$"]
+  "managed_principals": ["^turma_.*$", "^monitores_.*$"]
 }

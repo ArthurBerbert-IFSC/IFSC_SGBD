@@ -23,7 +23,7 @@ def test_load_config_creates_file(tmp_path, monkeypatch):
     assert data["log_level"] == "INFO"
     assert "log_path" in data
     assert data["group_prefix"] == "turma_"
-    assert data["user_prefix"] == "monitores_"
+    assert data["user_prefix"] == "monitores_*"
     assert data["schema_creation_group"] == "Professores"
     assert data["connect_timeout"] == 5
 

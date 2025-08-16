@@ -133,3 +133,28 @@ def test_get_default_privileges_parsing():
         "UPDATE",
     }
     assert res["_meta"]["owner_roles"]["geo2"] == "postgres"
+
+
+class DummyCursorRoles:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        pass
+
+    def execute(self, sql, params=None):
+        pass
+
+    def fetchall(self):
+        return [("turma_teste",), ("monitores_abc",), ("outro",)]
+
+
+class DummyConnRoles:
+    def cursor(self):
+        return DummyCursorRoles()
+
+
+def test_list_roles_filters_managed():
+    conn = DummyConnRoles()
+    roles = state_reader.list_roles(conn)
+    assert roles == ["turma_teste", "monitores_abc"]
