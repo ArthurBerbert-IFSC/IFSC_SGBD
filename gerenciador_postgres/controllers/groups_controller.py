@@ -119,7 +119,12 @@ class GroupsController(QObject):
         return success
 
     def grant_database_privileges(self, group_name: str, privileges):
-        success = self.role_manager.grant_database_privileges(group_name, privileges)
+        try:
+            success = self.role_manager.grant_database_privileges(group_name, privileges)
+        except Exception as e:
+            if "[WARN-DEPEND]" in str(e):
+                raise DependencyWarning(str(e))
+            raise
         if success:
             self.data_changed.emit()
         return success
@@ -131,7 +136,12 @@ class GroupsController(QObject):
         privileges,
         emit_signal: bool = True,
     ):
-        success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
+        try:
+            success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
+        except Exception as e:
+            if "[WARN-DEPEND]" in str(e):
+                raise DependencyWarning(str(e))
+            raise
         if success and emit_signal:
             self.data_changed.emit()
         return success
@@ -155,9 +165,14 @@ class GroupsController(QObject):
         self._is_applying = True
         try:
             kwargs = {"for_role": owner} if owner else {}
-            success = self.role_manager.alter_default_privileges(
-                group_name, schema, obj_type, privileges, **kwargs
-            )
+            try:
+                success = self.role_manager.alter_default_privileges(
+                    group_name, schema, obj_type, privileges, **kwargs
+                )
+            except Exception as e:
+                if "[WARN-DEPEND]" in str(e):
+                    raise DependencyWarning(str(e))
+                raise
             if success:
                 # READ-BACK: reconsulta apenas os defaults do grupo/objeto-alvo
                 code_map = {"tables": "r", "sequences": "S", "functions": "f", "types": "T"}
@@ -180,7 +195,12 @@ class GroupsController(QObject):
     # ---------------------------------------------------------------
     def sweep_group_privileges(self, group_name: str) -> bool:
         """Reaplica GRANTs e ajusta default privileges para o grupo informado."""
-        success = self.role_manager.sweep_privileges(target_group=group_name)
+        try:
+            success = self.role_manager.sweep_privileges(target_group=group_name)
+        except Exception as e:
+            if "[WARN-DEPEND]" in str(e):
+                raise DependencyWarning(str(e))
+            raise
         if success:
             self.data_changed.emit()
         return success

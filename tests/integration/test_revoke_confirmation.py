@@ -96,3 +96,53 @@ def test_revoke_with_confirmation(conn, monkeypatch):
     cur.execute("DROP ROLE IF EXISTS dep_role")
     conn.commit()
     cur.close()
+
+
+def test_revoke_aborts_on_cancel(conn, monkeypatch):
+    db = DBManager(conn)
+    rm = RoleManager(db)
+    controller = GroupsController(rm)
+    cur = conn.cursor()
+    cur.execute("DROP VIEW IF EXISTS public.dep_view")
+    cur.execute("DROP TABLE IF EXISTS public.dep_base CASCADE")
+    cur.execute("DROP ROLE IF EXISTS dep_role")
+    cur.execute("CREATE ROLE dep_role NOLOGIN")
+    cur.execute("CREATE TABLE public.dep_base(id int)")
+    cur.execute("CREATE VIEW public.dep_view AS SELECT * FROM public.dep_base")
+    cur.execute("GRANT SELECT ON public.dep_base TO dep_role")
+    conn.commit()
+    cur.close()
+
+    view = _build_view(controller)
+    asked = []
+
+    monkeypatch.setattr(
+        "gerenciador_postgres.gui.groups_view.QMessageBox.question",
+        lambda *a, **k: asked.append(True) or QMessageBox.StandardButton.No,
+    )
+    monkeypatch.setattr(
+        "gerenciador_postgres.gui.groups_view.QMessageBox.information",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "gerenciador_postgres.gui.groups_view.QMessageBox.critical",
+        lambda *a, **k: None,
+    )
+
+    view._save_table_privileges()
+    assert asked, "confirmação não solicitada"
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT privilege_type
+        FROM information_schema.role_table_grants
+        WHERE grantee='dep_role' AND table_name='dep_base'
+        """
+    )
+    assert cur.fetchone() is not None
+    cur.execute("DROP VIEW IF EXISTS public.dep_view")
+    cur.execute("DROP TABLE IF EXISTS public.dep_base")
+    cur.execute("DROP ROLE IF EXISTS dep_role")
+    conn.commit()
+    cur.close()
