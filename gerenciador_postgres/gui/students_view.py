@@ -58,29 +58,29 @@ class StudentsView(QWidget):
             return None
         groups = self.controller.list_groups() or []
         groups = sorted(groups)
-        groups.append("Criar nova turma")
+        groups.append("Criar novo grupo")
         choice, ok = QInputDialog.getItem(
             self,
-            "Selecionar Turma",
-            "Escolha a turma:",
+            "Selecionar Grupo",
+            "Escolha o grupo:",
             groups,
             editable=False,
         )
         if not ok or not choice:
             return None
-        if choice == "Criar nova turma":
+        if choice == "Criar novo grupo":
             group_name, ok = QInputDialog.getText(
                 self,
-                "Nova Turma",
-                "Digite o nome da turma (o prefixo 'turma_' será adicionado automaticamente):",
+                "Novo Grupo",
+                "Digite o nome do grupo (o prefixo 'grp_' será adicionado automaticamente):",
                 QLineEdit.EchoMode.Normal,
                 "",
             )
             if not ok or not group_name.strip():
                 return None
             group_name = group_name.strip().lower()
-            if not group_name.startswith("turma_"):
-                group_name = f"turma_{group_name}"
+            if not group_name.startswith("grp_"):
+                group_name = f"grp_{group_name}"
             try:
                 self.controller.create_group(group_name)
                 self.controller.apply_template_to_group(group_name, DEFAULT_TEMPLATE)
@@ -88,7 +88,7 @@ class StudentsView(QWidget):
                 QMessageBox.critical(
                     self,
                     "Erro",
-                    f"Não foi possível criar a turma.\nMotivo: {e}",
+                    f"Não foi possível criar o grupo.\nMotivo: {e}",
                 )
                 return None
             return group_name

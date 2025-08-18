@@ -148,7 +148,7 @@ DEFAULT_CONTRACT = validate_contract(
         "managed_principals_mode": "regex",
         "auto_onboard_creators": False,
         # Application-managed role name patterns
-        "managed_principals": [r"^turma_.*$", r"^monitores_.*$"],
+    "managed_principals": [r"^grp_.*$"],
     }
 )
 

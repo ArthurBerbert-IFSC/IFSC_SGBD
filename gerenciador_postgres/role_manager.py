@@ -303,9 +303,7 @@ class RoleManager:
     def create_group(self, group_name: str) -> str:
         try:
             config = load_config()
-            prefix = config.get("group_prefix", "turma_")
-            if not prefix.startswith("turma_"):
-                raise ValueError("Prefixo de grupo inválido")
+            prefix = config.get("group_prefix", "grp_")
             # Sanitiza e aplica prefixo automaticamente
             group_name = self._sanitize_group_name(group_name, prefix=prefix)
             if group_name in self.dao.list_groups():
@@ -841,9 +839,6 @@ class RoleManager:
                     # ex: prefix=turma_ e name inicia com 'turma' sem underscore
                     group_name = group_name[len(prefix.rstrip('_')):]
                 group_name = f"{prefix}{group_name}" if not group_name.startswith(prefix) else group_name
-        else:
-            # fallback padrão
-            if not group_name.startswith('turma_'):
-                group_name = f"turma_{group_name}"
+    # Sem fallback antigo: sempre exige o prefixo configurado se fornecido
         group_name = self._truncate_identifier(group_name)
         return group_name
