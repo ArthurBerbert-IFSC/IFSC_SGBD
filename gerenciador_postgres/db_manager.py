@@ -850,11 +850,11 @@ class DBManager:
         try:
             with self.conn.cursor() as cur:
                 # Query direta usando aclexplode - muito mais confiável
-                query = """
-                    SELECT 
+                query = r"""
+                    SELECT
                         n.nspname AS schema_name,
                         a.privilege_type
-                    FROM 
+                    FROM
                         pg_default_acl t
                         JOIN pg_roles r ON t.defaclrole = r.oid
                         JOIN pg_namespace n ON t.defaclnamespace = n.oid,
@@ -862,7 +862,7 @@ class DBManager:
                     WHERE 
                         pg_get_userbyid(a.grantee) = %s
                         AND t.defaclobjtype = 'r'  -- 'r' para tabelas
-                        AND n.nspname NOT LIKE 'pg\\\_%%' ESCAPE '\\'
+                        AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\'
                         AND n.nspname <> 'information_schema'
                     ORDER BY 
                         n.nspname
