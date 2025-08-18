@@ -207,18 +207,20 @@ class GroupsView(QWidget):
         self.cmbTemplates.addItems(self.templates.keys())
 
     def _on_new_group(self):
+        from gerenciador_postgres.config_manager import load_config
+        prefix_cfg = load_config().get("group_prefix", "grp_")
         name, ok = QInputDialog.getText(
             self,
             "Novo Grupo",
-            "Digite o nome do grupo (o prefixo 'turma_' será adicionado automaticamente):",
+            f"Digite o nome do grupo (o prefixo '{prefix_cfg}' será adicionado automaticamente):",
             QLineEdit.EchoMode.Normal,
             "",
         )
         if not ok or not name.strip():
             return
         name = name.strip().lower()
-        if not name.startswith("turma_"):
-            name = f"turma_{name}"
+        if not name.startswith(prefix_cfg):
+            name = f"{prefix_cfg}{name}"
         try:
             self.controller.create_group(name)
             QMessageBox.information(self, "Sucesso", f"Grupo '{name}' criado.")
