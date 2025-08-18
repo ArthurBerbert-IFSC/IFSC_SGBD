@@ -18,6 +18,7 @@ import keyring
 from psycopg2 import OperationalError
 from psycopg2.extensions import connection
 from psycopg2.pool import SimpleConnectionPool
+from PyQt6.QtCore import QObject, pyqtSignal, QCoreApplication
 
 from .config_manager import load_config
 from .logger import setup_logger
@@ -74,7 +75,7 @@ def _friendly_error(exc: OperationalError) -> OperationalError:
     return OperationalError(new_msg)
 
 
-class ConnectionManager:
+class ConnectionManager(QObject):
     """Singleton para gerenciar conexões com escopo por *thread*.
 
     Cada *thread* recebe sua própria conexão para um perfil específico. As
@@ -82,15 +83,28 @@ class ConnectionManager:
     pool via ``disconnect``.
     """
 
-    _instance: ConnectionManager | None = None
+    connected = pyqtSignal(str, str)  # dbname, user
+    disconnected = pyqtSignal()
+    connection_lost = pyqtSignal()
 
-    def __new__(cls):
+    _instance: ConnectionManager | None = None
+    _initialized = False
+
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            # Dicionário de pools por nome de perfil
-            cls._instance._pools = {}
-            cls._instance._thread_local = threading.local()
         return cls._instance
+
+    def __init__(self) -> None:
+        if self.__class__._initialized:
+            return
+        # Garante que exista um QCoreApplication para registrar sinais PyQt
+        self._qapp = QCoreApplication.instance() or QCoreApplication([])
+        super().__init__()
+        # Dicionário de pools por nome de perfil
+        self._pools = {}
+        self._thread_local = threading.local()
+        self.__class__._initialized = True
 
     # ------------------------------------------------------------------
     def _get_thread_conns(self) -> dict[str, connection]:
@@ -148,6 +162,7 @@ class ConnectionManager:
             thread_conns[profile_name] = conn
             self._thread_local.current_conn = conn
             self._thread_local.current_profile = profile_name
+            self.connected.emit(params["dbname"], params["user"])
             return conn
         except OperationalError as e:
             logger.exception("Erro operacional ao conectar ao banco de dados")
@@ -187,6 +202,9 @@ class ConnectionManager:
             conn = psycopg2.connect(connect_timeout=timeout, **params)
             conn.autocommit = False
             logger.info("Conexão aberta.")
+            self._thread_local.current_conn = conn
+            self._thread_local.current_profile = profile_name
+            self.connected.emit(params.get("dbname", ""), params.get("user", ""))
             return conn
         except OperationalError as e:
             logger.exception("Erro operacional ao conectar ao banco de dados")
@@ -199,6 +217,8 @@ class ConnectionManager:
         conn = getattr(self._thread_local, "current_conn", None)
         if conn and getattr(conn, "closed", 1) == 0:
             return conn
+        if conn:
+            self.connection_lost.emit()
         raise ConnectionError("Conexão não ativa")
 
     # ------------------------------------------------------------------
@@ -215,6 +235,7 @@ class ConnectionManager:
             if getattr(self._thread_local, "current_profile", None) == profile_name:
                 self._thread_local.current_conn = None
                 self._thread_local.current_profile = None
+            self.disconnected.emit()
             return
 
         conn = getattr(self._thread_local, "current_conn", None)
@@ -229,6 +250,7 @@ class ConnectionManager:
                 conn.close()
         self._thread_local.current_conn = None
         self._thread_local.current_profile = None
+        self.disconnected.emit()
 
     # ------------------------------------------------------------------
     def __enter__(self) -> connection:

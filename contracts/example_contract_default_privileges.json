@@ -1,0 +1,22 @@
+{
+  "contract_version": "1.4.4",
+  "scope": {"database": "example", "schema": "public"},
+  "managed_principals_mode": "regex",
+  "auto_onboard_creators": false,
+  "managed_principals": ["turma_role"],
+  "schema_privileges": {
+    "turma_role": {
+      "public": ["USAGE"]
+    }
+  },
+  "default_privileges": [
+    {
+      "for_role": "owner_role",
+      "in_schema": "public",
+      "on": "tables",
+      "grants": {
+        "turma_role": ["SELECT"]
+      }
+    }
+  ]
+}

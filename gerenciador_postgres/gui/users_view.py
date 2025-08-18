@@ -1,544 +1,693 @@
+from __future__ import annotations
+
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QDate, QSortFilterProxyModel, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget,
-    QSplitter,
-    QLineEdit,
-    QListWidget,
-    QVBoxLayout,
-    QDialog,
     QHBoxLayout,
-    QToolBar,
+    QVBoxLayout,
+    QTableView,
+    QHeaderView,
+    QAbstractItemView,
     QPushButton,
-    QLabel,
-    QListWidgetItem,
-    QInputDialog,
+    QDialog,
+    QLineEdit,
+    QFormLayout,
+    QDialogButtonBox,
+    QTextEdit,
     QMessageBox,
     QCheckBox,
     QDateEdit,
-    QTextEdit,
-    QDialogButtonBox,
     QComboBox,
+    QFileDialog,
+    QLabel,
+    QListWidget,
+    QInputDialog,
+    QProgressDialog,
+    QApplication,
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QIcon
 from pathlib import Path
+import re
+import logging
+try:
+    # Reutiliza lógica mais robusta já existente; captura também SystemExit lançado pelo script
+    from tools.extract_alunos_pdf import extract_alunos_from_pdf  # type: ignore
+except BaseException:  # inclui SystemExit
+    extract_alunos_from_pdf = None  # type: ignore
 
 
 class BatchUserDialog(QDialog):
-    def __init__(self, parent=None, controller=None):
+    """Diálogo para inserção de usuários em lote (texto ou importação de PDF)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.controller = controller
-        self.setWindowTitle("Inserir Usuários em Lote")
+        self.setWindowTitle("Adicionar Usuários em Lote")
 
         layout = QVBoxLayout(self)
-        layout.addWidget(
-            QLabel(
-                "Cole a lista de alunos no formato: número matrícula nome completo (um por linha)"
-            )
-        )
-
         self.txt = QTextEdit()
         layout.addWidget(self.txt)
 
-        layout.addWidget(QLabel("Turma"))
-        self.cmbGroups = QComboBox()
-        if controller:
-            self.cmbGroups.addItems(controller.list_groups())
-        self.cmbGroups.addItem("-- Criar nova turma --")
-        layout.addWidget(self.cmbGroups)
+        self.btnImportPDF = QPushButton("Importar de PDF")
+        layout.addWidget(self.btnImportPDF)
+        self.btnImportPDF.clicked.connect(self.import_from_pdf)
 
-        self.chk = QCheckBox("Definir data de expiração para todos")
-        layout.addWidget(self.chk)
-        self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDate(QDate.currentDate())
-        self.date_edit.setEnabled(False)
-        self.chk.toggled.connect(self.date_edit.setEnabled)
-        layout.addWidget(self.date_edit)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
+    def import_from_pdf(self):
+        """Abre um seletor, tenta extrair (usando extrator dedicado se disponível) e preenche a caixa."""
+        file_name, _ = QFileDialog.getOpenFileName(self, "Selecionar PDF", "", "Arquivos PDF (*.pdf)")
+        if not file_name:
+            return
+        try:
+            progress = QProgressDialog("Lendo PDF...", None, 0, 0, self)
+            progress.setWindowTitle("Aguarde")
+            progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+            progress.setMinimumDuration(0)
+            progress.show(); QApplication.processEvents()
+            logging.getLogger(__name__).info("Importando alunos de PDF: %s", file_name)
+            lines_output = []
+            # Caminho 1: usar extrator robusto baseado em pdfplumber, se importado
+            if extract_alunos_from_pdf:
+                try:
+                    alunos = extract_alunos_from_pdf(file_name)
+                except Exception as e:
+                    logging.getLogger(__name__).warning("Falha extrator pdfplumber: %s", e)
+                    alunos = []
+                for item in alunos:
+                    lines_output.append(f"{item['matricula']} {item['nome']}")
+
+            # Sem fallback adicional: pdfplumber já cobriu; se vazio usuário será avisado
+
+            if not lines_output:
+                QMessageBox.warning(self, "Nenhum Aluno Encontrado", "Não foi possível encontrar dados de alunos no PDF.")
+                return
+            # Remove duplicados preservando ordem
+            seen = set()
+            dedup = []
+            for ln in lines_output:
+                key = ln.lower()
+                if key not in seen:
+                    seen.add(key)
+                    dedup.append(ln)
+            self.txt.setPlainText("\n".join(dedup))
+            QMessageBox.information(self, "Sucesso", f"{len(dedup)} alunos importados.")
+        except Exception as e:
+            logging.getLogger(__name__).exception("Erro ao processar PDF")
+            QMessageBox.critical(self, "Erro ao Ler PDF", f"Não foi possível processar o arquivo PDF.\nErro: {e}")
+        finally:
+            try:
+                progress.close()
+            except Exception:
+                pass
+
+    def get_data(self):
+        text = self.txt.toPlainText()
+        users: list[tuple[str, str]] = []
+        for idx, line in enumerate(text.splitlines(), start=1):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(maxsplit=1)
+            if len(parts) != 2:
+                raise ValueError(f"Linha {idx} inválida (esperado: <matricula> <nome>): '{line}'")
+            users.append((parts[0], parts[1]))
+        if not users:
+            raise ValueError("Nenhum usuário informado")
+        return users
+
+
+class UserTableModel(QAbstractTableModel):
+    COLUMNS = ["Usuário", "Validade"]
+
+    def __init__(self, users: list[tuple[str, str | None]] | None = None) -> None:
+        super().__init__()
+        self._users: list[tuple[str, str | None]] = users or []  # (username, validade)
+
+    # Qt model interface
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        return 0 if parent.isValid() else len(self._users)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        return 0 if parent.isValid() else len(self.COLUMNS)
+
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = int(Qt.ItemDataRole.DisplayRole)):  # type: ignore[override]
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation == Qt.Orientation.Horizontal and 0 <= section < len(self.COLUMNS):
+            return self.COLUMNS[section]
+        return section + 1
+
+    def data(self, index: QModelIndex, role: int = int(Qt.ItemDataRole.DisplayRole)):  # type: ignore[override]
+        if not index.isValid() or role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
+            return None
+        username, validade = self._users[index.row()]
+        if index.column() == 0:
+            return username
+        if index.column() == 1:
+            return validade or "Não expira"
+        return None
+
+    # Helpers
+    def set_users(self, users: list[tuple[str, str | None]]):
+        # users já normalizado como (username, validadeStr|None)
+        norm: list[tuple[str, str | None]] = users
+        self.beginResetModel()
+        self._users = norm
+        self.endResetModel()
+
+    def user_at(self, row: int) -> str | None:
+        if 0 <= row < len(self._users):
+            return self._users[row][0]
+        return None
+
+
+class UserDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None, username: str | None = None, valid_until: str | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Usuário")
+        layout = QFormLayout(self)
+        self.txtUsername = QLineEdit(username or "")
+        self.txtPassword = QLineEdit()
+        self.txtPassword.setEchoMode(QLineEdit.EchoMode.Password)
+        self.dateEdit = QDateEdit()
+        self.dateEdit.setCalendarPopup(True)
+        # Define data padrão como a data atual (antes ficava 2000-01-01)
+        self.dateEdit.setDate(QDate.currentDate())
+        if valid_until:
+            try:
+                y, m, d = map(int, valid_until.split('-'))
+                self.dateEdit.setDate(QDate(y, m, d))
+            except Exception:
+                pass
+        layout.addRow("Usuário", self.txtUsername)
+        layout.addRow("Senha", self.txtPassword)
+        layout.addRow("Validade", self.dateEdit)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
     def get_data(self):
-        text = self.txt.toPlainText()
-        users_data = []
-        for idx, line in enumerate(text.splitlines(), start=1):
-            if not line.strip():
-                continue
-            parts = line.strip().split(maxsplit=2)
-            if len(parts) < 3:
-                raise ValueError(f"Linha {idx} inválida: '{line}'")
-            users_data.append((parts[1], parts[2]))
-        if not users_data:
-            raise ValueError("Nenhum usuário válido informado.")
-        valid_until = (
-            self.date_edit.date().toString("yyyy-MM-dd") if self.chk.isChecked() else None
-        )
-        group_name = self.cmbGroups.currentText()
-        if group_name == "-- Criar nova turma --":
-            group_name, ok = QInputDialog.getText(
-                self,
-                "Nova Turma",
-                "Digite o nome da nova turma (o prefixo 'grp_' será adicionado automaticamente):",
-            )
-            if not ok or not group_name.strip():
-                raise ValueError("Nome da turma inválido.")
-            group_name = group_name.strip()
-            if not group_name.lower().startswith("grp_"):
-                group_name = f"grp_{group_name.lower()}"
-        return users_data, valid_until, group_name
+        username = self.txtUsername.text().strip()
+        password = self.txtPassword.text().strip()
+        valid_until = self.dateEdit.date().toString('yyyy-MM-dd') if self.dateEdit.date().isValid() else None
+        return username, password, valid_until
+
+class ExpirationDialog(QDialog):
+    """Diálogo simples para escolher nova data de expiração."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Nova Expiração")
+        layout = QVBoxLayout(self)
+        form = QFormLayout(); layout.addLayout(form)
+        self.date = QDateEdit(); self.date.setCalendarPopup(True); self.date.setDate(QDate.currentDate())
+        form.addRow(QLabel("Data"), self.date)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+    def get_date(self) -> str:
+        return self.date.date().toString('yyyy-MM-dd')
+
+
+class UsersFilterProxy(QSortFilterProxyModel):
+    def __init__(self):
+        super().__init__()
+        self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:  # type: ignore[override]
+        if not self.filterRegularExpression().pattern():
+            return True
+        model = self.sourceModel()
+        for col in range(model.columnCount()):
+            idx = model.index(source_row, col, source_parent)
+            val = model.data(idx, int(Qt.ItemDataRole.DisplayRole))
+            if val and self.filterRegularExpression().match(str(val)).hasMatch():
+                return True
+        return False
+
+
+class BatchInsertDialog(QDialog):
+    def __init__(self, parent=None, controller=None):
+        super().__init__(parent)
+        self.controller = controller
+        self.setWindowTitle("Inserir Usuários em Lote")
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Cole linhas: matricula nome completo"))
+        self.txt = QTextEdit()
+        layout.addWidget(self.txt)
+        self.btnImportPDF = QPushButton("Importar de PDF")
+        layout.addWidget(self.btnImportPDF)
+        self.btnImportPDF.clicked.connect(self._import_pdf)
+        form = QFormLayout()
+        self.date = QDateEdit(); self.date.setCalendarPopup(True); self.date.setDate(QDate.currentDate())
+        self.chkValidade = QCheckBox("Aplicar validade a todos")
+        self.chkValidade.toggled.connect(self.date.setEnabled)
+        self.date.setEnabled(False)
+        form.addRow(self.chkValidade, self.date)
+        self.cmbGrupo = QComboBox()
+        if controller:
+            try:
+                self.cmbGrupo.addItems(controller.list_groups())
+            except Exception:
+                pass
+        self.cmbGrupo.addItem("-- Criar novo grupo --")
+        form.addRow(QLabel("Grupo"), self.cmbGrupo)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+    def _import_pdf(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "Selecionar PDF", "", "Arquivos PDF (*.pdf)")
+        if not file_name:
+            return
+        progress = QProgressDialog("Lendo PDF...", None, 0, 0, self)
+        progress.setWindowTitle("Aguarde")
+        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        progress.setMinimumDuration(0)
+        progress.show(); QApplication.processEvents()
+        try:
+            alunos = extract_alunos_from_pdf(file_name) if extract_alunos_from_pdf else []  # type: ignore
+            lines = [f"{a['matricula']} {a['nome']}" for a in alunos]
+            if lines:
+                self.txt.setPlainText("\n".join(lines))
+                QMessageBox.information(self, "Importação", f"{len(lines)} linhas importadas.")
+            else:
+                QMessageBox.warning(self, "Importação", "Nenhum aluno encontrado.")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao ler PDF: {e}")
+        finally:
+            progress.close()
+
+    def get_batch_data(self):
+        raw = self.txt.toPlainText().strip().splitlines()
+        usuarios = []
+        for idx, line in enumerate(raw, 1):
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) != 2:
+                raise ValueError(f"Linha {idx} inválida: {line}")
+            usuarios.append((parts[0], parts[1]))
+        validade = self.date.date().toString('yyyy-MM-dd') if self.chkValidade.isChecked() else None
+        grupo = self.cmbGrupo.currentText()
+        if grupo == "-- Criar novo grupo --":
+            from gerenciador_postgres.config_manager import load_config
+            prefix_cfg = load_config().get("group_prefix", "grp_")
+            grupo, ok = QInputDialog.getText(self, "Novo Grupo", f"Nome do grupo (prefixo {prefix_cfg} será adicionado se faltar)")
+            if not ok or not grupo.strip():
+                raise ValueError("Grupo inválido")
+            grupo = grupo.strip()
+            if not grupo.lower().startswith(prefix_cfg):
+                grupo = prefix_cfg + grupo.lower()
+        return usuarios, validade, grupo
+
 
 
 class UsersView(QWidget):
-    def __init__(self, parent=None, controller=None):
+    """Tela principal para gerenciamento de usuários com painel lateral de ações.
+
+    Adiciona emissão de sinal global quando a conexão com o banco é perdida
+    para que a MainWindow possa tratar de forma centralizada.
+    """
+
+    connection_lost = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None, controller=None) -> None:
         super().__init__(parent)
-        assets_dir = Path(__file__).resolve().parents[2] / "assets"
-        self.setWindowIcon(QIcon(str(assets_dir / "usuarios.jpeg")))
         self.controller = controller
-        self.setWindowTitle("Gerenciador de Usuários")
-        # Controle de UX
-        self._select_username_on_refresh = None
-        self._setup_ui()
-        self._connect_signals()
+        # Flag para evitar múltiplas emissões do sinal de conexão perdida
+        self._connection_lost_emitted = False
+        self._build_ui()
         if self.controller:
-            self.controller.data_changed.connect(self.refresh_lists)
-        self.refresh_lists()
+            self.controller.data_changed.connect(self.load_users)
+        self.load_users()
 
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        self.toolbar = QToolBar()
-        self.btnNewUser = QPushButton("Novo Usuário")
-        self.btnBatchUsers = QPushButton("Inserir em Lote")
-        self.btnDelete = QPushButton("Excluir Selecionado")
-        self.btnChangePassword = QPushButton("Alterar Senha")
-        # Widgets para renovação de validade
-        self.renewDateEdit = QDateEdit()
-        self.renewDateEdit.setCalendarPopup(True)
-        self.renewDateEdit.setDate(QDate.currentDate())
-        self.btnRenew = QPushButton("Renovar")
-        self.btnRenew.setEnabled(False)
-        self.renewDateEdit.setEnabled(False)
-        self.btnDelete.setEnabled(False)
-        self.btnChangePassword.setEnabled(False)
-        self.toolbar.addWidget(self.btnNewUser)
-        self.toolbar.addWidget(self.btnBatchUsers)
-        self.toolbar.addWidget(self.btnDelete)
-        self.toolbar.addWidget(self.btnChangePassword)
-        self.toolbar.addWidget(self.renewDateEdit)
-        self.toolbar.addWidget(self.btnRenew)
-        layout.addWidget(self.toolbar)
-        self.splitter = QSplitter(Qt.Orientation.Vertical)
-        self.topPanel = QWidget()
-        leftLayout = QVBoxLayout(self.topPanel)
-        self.txtFilter = QLineEdit()
-        self.txtFilter.setPlaceholderText("Buscar usuário...")
-        self.lstEntities = QListWidget()
-        leftLayout.addWidget(self.txtFilter)
-        leftLayout.addWidget(self.lstEntities)
-        self.splitter.addWidget(self.topPanel)
+    def _build_ui(self) -> None:
+        root = QHBoxLayout(self)
 
-        # Bottom panel with details and group management
-        self.bottomPanel = QWidget()
-        bottomLayout = QVBoxLayout(self.bottomPanel)
-        self.detailSplitter = QSplitter(Qt.Orientation.Horizontal)
+        # Painel esquerdo (ações)
+        left = QVBoxLayout()
+        self.btnNovo = QPushButton("Novo Usuário")
+        self.btnEditar = QPushButton("Editar Usuário")
+        self.btnExcluir = QPushButton("Deletar Usuário")
+        self.btnInserirLote = QPushButton("Inserir Usuários em Lote")
+        self.btnExcluirLote = QPushButton("Deletar Usuários em Lote")
+        self.btnEditarExpLote = QPushButton("Editar Expiração em Lote")
+        for b in (
+            self.btnNovo,
+            self.btnEditar,
+            self.btnExcluir,
+            self.btnInserirLote,
+            self.btnExcluirLote,
+            self.btnEditarExpLote,
+        ):
+            left.addWidget(b)
+        left.addStretch()
+        root.addLayout(left, 0)
 
-        # Details section
-        self.detailSection = QWidget()
-        self.propLayout = QVBoxLayout(self.detailSection)
-        self.propLayout.addWidget(QLabel("Selecione um usuário para ver detalhes."))
-        self.detailSplitter.addWidget(self.detailSection)
+        # Área principal à direita
+        right = QVBoxLayout()
+        # Filtro
+        self.txtFiltro = QLineEdit()
+        self.txtFiltro.setPlaceholderText("Filtrar usuários...")
+        right.addWidget(self.txtFiltro)
 
-        # Group management section
-        self.groupSection = QWidget()
-        groupLayout = QVBoxLayout(self.groupSection)
-        lists_layout = QHBoxLayout()
-
-        left_groups_layout = QVBoxLayout()
-        left_groups_layout.addWidget(QLabel("Turmas do Aluno"))
-        self.lstUserGroups = QListWidget()
-        left_groups_layout.addWidget(self.lstUserGroups)
-        lists_layout.addLayout(left_groups_layout)
-
-        btns_layout = QVBoxLayout()
-        self.btnAddGroup = QPushButton("<- Adicionar")
-        self.btnRemoveGroup = QPushButton("Remover ->")
-        self.btnAddGroup.setEnabled(False)
-        self.btnRemoveGroup.setEnabled(False)
-        btns_layout.addStretch()
-        btns_layout.addWidget(self.btnAddGroup)
-        btns_layout.addWidget(self.btnRemoveGroup)
-        btns_layout.addStretch()
-        lists_layout.addLayout(btns_layout)
-
-        right_groups_layout = QVBoxLayout()
-        right_groups_layout.addWidget(QLabel("Turmas Disponíveis"))
-        self.lstAvailableGroups = QListWidget()
-        right_groups_layout.addWidget(self.lstAvailableGroups)
-        lists_layout.addLayout(right_groups_layout)
-
-        groupLayout.addLayout(lists_layout)
-        self.groupSection.setLayout(groupLayout)
-        self.detailSplitter.addWidget(self.groupSection)
-
-        bottomLayout.addWidget(self.detailSplitter)
-        self.splitter.addWidget(self.bottomPanel)
-
-        layout.addWidget(self.splitter)
-
-        # Apenas botão Fechar: todas as operações já são aplicadas imediatamente
-        # pelos controllers/managers. Não há um "Salvar" aqui.
-        self.buttonBox = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Close
+        # Tabela
+        self.baseModel = UserTableModel()
+        self.proxyModel = UsersFilterProxy()
+        self.proxyModel.setSourceModel(self.baseModel)
+        self.table = QTableView()
+        self.table.setModel(self.proxyModel)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Destaque mais forte para linha selecionada
+        self.table.setStyleSheet(
+            "QTableView::item:selected{background:#004080;color:white;}"
+            "QTableView::item:selected:active{background:#0059b3;}"
         )
-        layout.addWidget(self.buttonBox)
+        right.addWidget(self.table)
 
-        self.setLayout(layout)
+        # Painel de grupos
+        self.groupPanel = QWidget()
+        gp_layout = QVBoxLayout(self.groupPanel)
+        gp_layout.addWidget(QLabel("Gerenciamento de Grupos do Usuário Selecionado"))
+        lists_layout = QHBoxLayout()
+        # Grupos do usuário
+        col_user = QVBoxLayout()
+        col_user.addWidget(QLabel("Grupos do Usuário"))
+        self.lstUserGroups = QListWidget()
+        col_user.addWidget(self.lstUserGroups)
+        lists_layout.addLayout(col_user)
+        # Botões centrais
+        col_btns = QVBoxLayout()
+        self.btnAddGrupo = QPushButton("<< Adicionar")
+        self.btnRemGrupo = QPushButton("Remover >>")
+        self.btnTransferGrupo = QPushButton("Transferir")
+        col_btns.addStretch()
+        col_btns.addWidget(self.btnAddGrupo)
+        col_btns.addWidget(self.btnRemGrupo)
+        col_btns.addWidget(self.btnTransferGrupo)
+        col_btns.addStretch()
+        lists_layout.addLayout(col_btns)
+        # Grupos disponíveis
+        col_all = QVBoxLayout()
+        col_all.addWidget(QLabel("Outros Grupos"))
+        self.lstAllGroups = QListWidget()
+        col_all.addWidget(self.lstAllGroups)
+        lists_layout.addLayout(col_all)
+        gp_layout.addLayout(lists_layout)
+        self.groupPanel.setVisible(True)
+        right.addWidget(self.groupPanel)
 
-    def _connect_signals(self):
-        self.txtFilter.textChanged.connect(self.filter_list)
-        self.lstEntities.currentItemChanged.connect(self.on_entity_selected)
-        self.btnNewUser.clicked.connect(self.on_new_user_clicked)
-        self.btnBatchUsers.clicked.connect(self.on_new_user_batch_clicked)
-        self.btnDelete.clicked.connect(self.on_delete_user_clicked)
-        self.btnChangePassword.clicked.connect(self.on_change_password_clicked)
-        self.btnRenew.clicked.connect(self.on_renew_clicked)
-        self.btnAddGroup.clicked.connect(self.on_add_group_clicked)
-        self.btnRemoveGroup.clicked.connect(self.on_remove_group_clicked)
-        # Close fecha a janela; conectar diretamente o botão Close
-        close_btn = self.buttonBox.button(QDialogButtonBox.StandardButton.Close)
-        if close_btn is not None:
-            close_btn.clicked.connect(self.close)
-        else:
-            # Fallback defensivo
-            self.buttonBox.rejected.connect(self.close)
-            self.buttonBox.accepted.connect(self.close)
+        root.addLayout(right, 1)
 
-    def refresh_lists(self):
-        # Preserva seleção e posição de scroll atuais
-        selected_username = None
-        current_item = self.lstEntities.currentItem()
-        if current_item:
-            selected_username = current_item.data(Qt.ItemDataRole.UserRole)
-        current_row = self.lstEntities.currentRow()
-        scroll_val = self.lstEntities.verticalScrollBar().value()
+        # Conexões
+        self.txtFiltro.textChanged.connect(self._on_filter_changed)
+        self.table.selectionModel().currentChanged.connect(lambda *_: self._refresh_group_lists())
+        self.btnAddGrupo.clicked.connect(self._add_group_to_user)
+        self.btnRemGrupo.clicked.connect(self._remove_group_from_user)
+        self.btnTransferGrupo.clicked.connect(self._transfer_group_user)
+        self.btnNovo.clicked.connect(self.add_user)
+        self.btnEditar.clicked.connect(self.edit_user)
+        self.btnExcluir.clicked.connect(self.delete_user)
+        self.btnInserirLote.clicked.connect(self.add_user_batch)
+        self.btnExcluirLote.clicked.connect(self.batch_delete_users)
+        self.btnEditarExpLote.clicked.connect(self.batch_edit_expiration)
 
-        self.lstEntities.clear()
-        if not self.controller:
+    # ---------- Filtro ----------
+    def _on_filter_changed(self, text: str):
+        self.proxyModel.setFilterFixedString(text.strip())
+
+    # ---------- Painel de grupos sempre visível ----------
+
+    def _refresh_group_lists(self):
+        if not self.controller or not self.groupPanel.isVisible():
+            return
+        username = self._current_username()
+        # Guarda itens selecionados previamente
+        sel_user = self.lstUserGroups.currentItem().text() if self.lstUserGroups.currentItem() else None
+        sel_all = self.lstAllGroups.currentItem().text() if self.lstAllGroups.currentItem() else None
+        self.lstUserGroups.clear(); self.lstAllGroups.clear()
+        if not username:
             return
         try:
-            for user in self.controller.list_users():
-                item = QListWidgetItem(f"👤 {user}")
-                item.setData(Qt.ItemDataRole.UserRole, user)
-                self.lstEntities.addItem(item)
-            # Definir alvo de seleção: 1) seleção solicitada; 2) usuário anterior; 3) índice próximo
-            target_username = self._select_username_on_refresh or selected_username
-            selected = False
-            if target_username is not None:
-                for i in range(self.lstEntities.count()):
-                    it = self.lstEntities.item(i)
-                    if it.data(Qt.ItemDataRole.UserRole) == target_username:
-                        self.lstEntities.setCurrentItem(it)
-                        selected = True
-                        break
-            if not selected and self.lstEntities.count() > 0:
-                # Seleciona linha próxima do índice anterior
-                target_row = current_row if 0 <= current_row < self.lstEntities.count() else self.lstEntities.count() - 1
-                self.lstEntities.setCurrentRow(target_row)
-
-            # Restaurar scroll
-            self.lstEntities.verticalScrollBar().setValue(scroll_val)
-
-            # Limpa seleção pendente específica
-            self._select_username_on_refresh = None
+            user_groups = set(self.controller.list_user_groups(username))
+            all_groups = set(self.controller.list_groups())
         except Exception as e:
-            QMessageBox.critical(self, "Erro de Listagem", f"Não foi possível listar usuários: {e}")
-
-    def filter_list(self):
-        filter_text = self.txtFilter.text().lower()
-        for i in range(self.lstEntities.count()):
-            item = self.lstEntities.item(i)
-            item.setHidden(filter_text not in item.text().lower())
-
-    def on_entity_selected(self, current, previous):
-        while self.propLayout.count():
-            child = self.propLayout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-        self.lstUserGroups.clear()
-        self.lstAvailableGroups.clear()
-        self.btnAddGroup.setEnabled(False)
-        self.btnRemoveGroup.setEnabled(False)
-        self.btnRenew.setEnabled(False)
-        self.renewDateEdit.setEnabled(False)
-
-        if not current:
-            self.propLayout.addWidget(QLabel("Selecione um usuário para ver detalhes."))
-            self.btnChangePassword.setEnabled(False)
-            self.btnDelete.setEnabled(False)
+            msg = str(e)
+            if 'connection already closed' in msg or 'server closed the connection' in msg:
+                self._emit_connection_lost_once()
+            else:
+                QMessageBox.critical(self, "Erro", f"Falha ao carregar grupos: {e}")
             return
+        for g in sorted(user_groups):
+            self.lstUserGroups.addItem(g)
+        for g in sorted(all_groups - user_groups):
+            self.lstAllGroups.addItem(g)
+        # Restaura seleção se possível
+        if sel_user:
+            items = self.lstUserGroups.findItems(sel_user, Qt.MatchFlag.MatchExactly)
+            if items:
+                self.lstUserGroups.setCurrentItem(items[0])
+        if sel_all:
+            items = self.lstAllGroups.findItems(sel_all, Qt.MatchFlag.MatchExactly)
+            if items:
+                self.lstAllGroups.setCurrentItem(items[0])
 
-        username = current.data(Qt.ItemDataRole.UserRole)
-        user_details = self.controller.get_user(username) if self.controller else None
-        if user_details:
-            details_text = f"<b>Usuário:</b> {user_details.username}"
-            if user_details.valid_until:
-                details_text += f"<br><b>Expira em:</b> {user_details.valid_until.strftime('%d/%m/%Y')}"
-            self.lblUserDetails = QLabel(details_text)
-            self.propLayout.addWidget(self.lblUserDetails)
-        else:
-            self.propLayout.addWidget(QLabel(f"Nome: {username}"))
-        self.btnChangePassword.setEnabled(True)
-        self.btnDelete.setEnabled(True)
-        self.btnRenew.setEnabled(True)
-        self.renewDateEdit.setEnabled(True)
-
-        if user_details and getattr(user_details, "valid_until", None):
-            dt = user_details.valid_until
-            self.renewDateEdit.setDate(QDate(dt.year, dt.month, dt.day))
-        else:
-            self.renewDateEdit.setDate(QDate.currentDate())
-
-        self._update_group_lists(username)
-
-    def on_new_user_clicked(self):
-        username, ok1 = QInputDialog.getText(
-            self, "Novo Usuário", "Digite o nome do novo usuário:"
-        )
-        if ok1 and username:
-            username = username.lower()
-        else:
+    def _add_group_to_user(self):
+        username = self._current_username(); item = self.lstAllGroups.currentItem()
+        if not username or not item:
             return
+        grp = item.text()
+        if self.controller.add_user_to_group(username, grp):
+            self._refresh_group_lists()
+            # Mantém foco na lista de grupos do usuário no item recém adicionado
+            items = self.lstUserGroups.findItems(grp, Qt.MatchFlag.MatchExactly)
+            if items:
+                self.lstUserGroups.setCurrentItem(items[0])
+        else:
+            QMessageBox.critical(self, "Erro", "Não foi possível adicionar ao grupo.")
 
-        password, ok2 = QInputDialog.getText(
-            self,
-            "Nova Senha",
-            f"Senha para '{username}':",
-            QLineEdit.EchoMode.Password,
-        )
-        if not ok2 or not password:
+    def _remove_group_from_user(self):
+        username = self._current_username(); item = self.lstUserGroups.currentItem()
+        if not username or not item:
             return
+        grp = item.text()
+        if self.controller.remove_user_from_group(username, grp):
+            self._refresh_group_lists()
+            # Após remover, seleciona o grupo na lista da direita (se presente)
+            items = self.lstAllGroups.findItems(grp, Qt.MatchFlag.MatchExactly)
+            if items:
+                self.lstAllGroups.setCurrentItem(items[0])
+        else:
+            QMessageBox.critical(self, "Erro", "Não foi possível remover do grupo.")
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Validade do Usuário")
-        vlayout = QVBoxLayout(dlg)
-        chk = QCheckBox("Definir data de expiração")
-        date_edit = QDateEdit()
-        date_edit.setCalendarPopup(True)
-        date_edit.setDate(QDate.currentDate())
-        date_edit.setEnabled(False)
-        chk.toggled.connect(date_edit.setEnabled)
-        vlayout.addWidget(chk)
-        vlayout.addWidget(date_edit)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        vlayout.addWidget(buttons)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
+    def _transfer_group_user(self):
+        username = self._current_username(); item_old = self.lstUserGroups.currentItem(); item_new = self.lstAllGroups.currentItem()
+        if not username or not item_old or not item_new:
+            return
+        if self.controller.transfer_user_group(username, item_old.text(), item_new.text()):
+            self._refresh_group_lists()
+        else:
+            QMessageBox.critical(self, "Erro", "Não foi possível transferir.")
+
+    # ------------------------------------------------------------------
+    # Operações
+    # ------------------------------------------------------------------
+    def load_users(self, select_username: str | None = None) -> None:
+        # Guarda usuário atual se nenhum explicitamente solicitado
+        if select_username is None:
+            select_username = self._current_username()
+        if not self.controller:
+            self.baseModel.set_users([])
+            return
+        try:
+            usernames = self.controller.list_users()
+            users: list[tuple[str, str | None]] = []
+            for u in usernames:
+                detalhe = None
+                try:
+                    detalhe = self.controller.get_user(u)
+                except Exception:
+                    pass
+                validade = None
+                if detalhe and getattr(detalhe, 'valid_until', None):
+                    vu = detalhe.valid_until
+                    try:
+                        validade = vu.strftime('%Y-%m-%d') if vu else None
+                    except Exception:
+                        validade = None
+                users.append((u, validade))
+        except Exception as e:
+            msg = str(e)
+            if 'connection already closed' in msg or 'server closed the connection' in msg:
+                self._emit_connection_lost_once()
+            else:
+                QMessageBox.critical(self, "Erro", f"Não foi possível listar usuários: {e}")
+            users = []
+        self.baseModel.set_users(users)
+        # Reseleciona usuário, se existir
+        if select_username:
+            for row_idx, (uname, _) in enumerate(users):
+                if uname == select_username:
+                    source_index = self.baseModel.index(row_idx, 0)
+                    proxy_index = self.proxyModel.mapFromSource(source_index)
+                    if proxy_index.isValid():
+                        self.table.selectRow(proxy_index.row())
+                    break
+        # Se nada selecionado e houver linhas, seleciona primeira
+        if not self.table.currentIndex().isValid() and users:
+            self.table.selectRow(0)
+        self._refresh_group_lists()
+
+    def _current_username(self) -> str | None:
+        index = self.table.currentIndex()
+        if not index.isValid():
+            return None
+        source_index = self.proxyModel.mapToSource(index)
+        return self.baseModel.user_at(source_index.row())
+
+    def add_user(self) -> None:
+        dlg = UserDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        valid_until = (
-            date_edit.date().toString("yyyy-MM-dd") if chk.isChecked() else None
-        )
+        username, password, valid_until = dlg.get_data()
+        if not username or not password:
+            return
         try:
             self.controller.create_user(username, password, valid_until)
-            # Selecionar o usuário recém-criado após o refresh via sinal
-            self._select_username_on_refresh = username
-            QMessageBox.information(
-                self, "Sucesso", f"Usuário '{username}' criado com sucesso!"
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Erro", f"Não foi possível criar o usuário.\nMotivo: {e}"
-            )
+            self.load_users(select_username=username)
+        except Exception as e:  # pragma: no cover - interface
+            QMessageBox.critical(self, "Erro", str(e))
 
-    def on_new_user_batch_clicked(self):
-        dlg = BatchUserDialog(self, self.controller)
+    def edit_user(self) -> None:
+        username = self._current_username()
+        if not username:
+            return
+        user = None
+        if self.controller:
+            try:
+                user = self.controller.get_user(username)
+            except Exception:
+                pass
+        valid_until = user.valid_until.strftime("%Y-%m-%d") if getattr(user, "valid_until", None) else None
+        dlg = UserDialog(self, username, valid_until)
+        dlg.txtUsername.setEnabled(False)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
+        _username, password, new_valid = dlg.get_data()
         try:
-            users_data, valid_until, group_name = dlg.get_data()
-        except ValueError as e:
-            QMessageBox.warning(self, "Erro de Formato", str(e))
-            return
-        try:
-            created = self.controller.create_users_batch(users_data, valid_until, group_name)
-            # Seleciona o último criado, se houver
-            if created:
-                self._select_username_on_refresh = created[-1]
-            QMessageBox.information(
-                self, "Sucesso", f"{len(created)} usuários criados com sucesso!"
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Erro", f"Falha ao inserir usuários em lote.\nMotivo: {e}"
-            )
+            if password:
+                self.controller.change_password(username, password)
+            if new_valid:
+                self.controller.renew_user_validity(username, new_valid)
+            self.load_users()
+        except Exception as e:  # pragma: no cover - interface
+            QMessageBox.critical(self, "Erro", str(e))
 
-    def on_delete_user_clicked(self):
-        current_item = self.lstEntities.currentItem()
-        if not current_item:
+    def delete_user(self) -> None:
+        username = self._current_username()
+        if not username:
             return
-        username = current_item.data(Qt.ItemDataRole.UserRole)
-        
         reply = QMessageBox.question(
             self,
-            "Confirmar Deleção",
-            f"Tem certeza que deseja deletar o usuário '{username}'?",
+            "Confirmar",
+            f"Remover usuário '{username}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                success = self.controller.delete_user(username)
-                if success:
-                    QMessageBox.information(
-                        self,
-                        "Sucesso",
-                        f"Usuário '{username}' deletado com sucesso.",
-                    )
-                    # Após refresh, se o mesmo usuário não existir, a seleção vai para um vizinho
-                    # O método refresh_lists usa o índice anterior como fallback
-                else:
-                    QMessageBox.critical(
-                        self,
-                        "Erro",
-                        "Ocorreu um erro ao deletar o usuário. Verifique os logs.",
-                    )
-            except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Erro",
-                    f"Não foi possível deletar o usuário.\nMotivo: {e}",
-                )
-
-    def on_change_password_clicked(self):
-        current_item = self.lstEntities.currentItem()
-        if not current_item:
+        if reply != QMessageBox.StandardButton.Yes:
             return
-        username = current_item.data(Qt.ItemDataRole.UserRole)
-        password, ok = QInputDialog.getText(
+        try:
+            self.controller.delete_user(username)
+            self.load_users()
+        except Exception as e:  # pragma: no cover - interface
+            QMessageBox.critical(self, "Erro", str(e))
+
+    def add_user_batch(self) -> None:
+        dlg = BatchInsertDialog(self, self.controller)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            usuarios, validade, grupo = dlg.get_batch_data()
+        except ValueError as e:
+            QMessageBox.warning(self, "Erro", str(e))
+            return
+        try:
+            self.controller.create_users_batch(usuarios, validade, grupo)
+            self.load_users()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", str(e))
+
+    def batch_delete_users(self) -> None:
+        users = self._selected_usernames()
+        if not users:
+            QMessageBox.information(self, "Atenção", "Selecione usuários na tabela.")
+            return
+        if QMessageBox.question(
             self,
-            "Alterar Senha",
-            f"Nova senha para '{username}':",
-            QLineEdit.EchoMode.Password,
-        )
-        if ok and password:
+            "Confirmar",
+            f"Remover {len(users)} usuários?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        erros = []
+        for u in users:
             try:
-                self.controller.change_password(username, password)
-                QMessageBox.information(self, "Sucesso", "Senha alterada com sucesso!")
+                self.controller.delete_user(u)
             except Exception as e:
-                QMessageBox.critical(
-                    self, "Erro", f"Não foi possível alterar a senha.\nMotivo: {e}"
-                )
+                erros.append(f"{u}: {e}")
+        self.load_users()
+        if erros:
+            QMessageBox.warning(self, "Concluído com erros", "\n".join(erros))
+        else:
+            QMessageBox.information(self, "Sucesso", "Usuários removidos.")
 
-    def on_renew_clicked(self):
-        current_item = self.lstEntities.currentItem()
-        if not current_item:
+    def batch_edit_expiration(self) -> None:
+        users = self._selected_usernames()
+        if not users:
+            QMessageBox.information(self, "Atenção", "Selecione usuários na tabela.")
             return
-        username = current_item.data(Qt.ItemDataRole.UserRole)
-        new_date = self.renewDateEdit.date().toString("yyyy-MM-dd")
-        try:
-            success = self.controller.renew_user_validity(username, new_date)
-            if success:
-                self._select_username_on_refresh = username
-                QMessageBox.information(self, "Sucesso", "Validade atualizada!")
-            else:
-                QMessageBox.critical(self, "Erro", "Falha ao renovar validade.")
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Erro", f"Não foi possível renovar a validade.\nMotivo: {e}"
-            )
-
-    def _update_group_lists(self, username):
-        # Guardar seleção e posição de scroll atuais
-        sel_user_group = (
-            self.lstUserGroups.currentItem().text()
-            if self.lstUserGroups.currentItem()
-            else None
-        )
-        sel_available_group = (
-            self.lstAvailableGroups.currentItem().text()
-            if self.lstAvailableGroups.currentItem()
-            else None
-        )
-        ug_scroll = self.lstUserGroups.verticalScrollBar().value()
-        av_scroll = self.lstAvailableGroups.verticalScrollBar().value()
-
-        self.lstUserGroups.clear()
-        self.lstAvailableGroups.clear()
-        if self.controller:
+        dlg = ExpirationDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_date = dlg.get_date()
+        erros = []
+        for u in users:
             try:
-                user_groups = set(self.controller.list_user_groups(username))
-                all_groups = set(self.controller.list_groups())
-                for g in sorted(user_groups):
-                    self.lstUserGroups.addItem(g)
-                for g in sorted(all_groups - user_groups):
-                    self.lstAvailableGroups.addItem(g)
-                self.btnAddGroup.setEnabled(True)
-                self.btnRemoveGroup.setEnabled(True)
-
-                # Restaurar seleção anterior, se possível
-                if sel_user_group is not None:
-                    matches = self.lstUserGroups.findItems(sel_user_group, Qt.MatchFlag.MatchExactly)
-                    if matches:
-                        self.lstUserGroups.setCurrentItem(matches[0])
-                if sel_available_group is not None:
-                    matches = self.lstAvailableGroups.findItems(sel_available_group, Qt.MatchFlag.MatchExactly)
-                    if matches:
-                        self.lstAvailableGroups.setCurrentItem(matches[0])
-
-                # Restaurar posição de scroll
-                self.lstUserGroups.verticalScrollBar().setValue(ug_scroll)
-                self.lstAvailableGroups.verticalScrollBar().setValue(av_scroll)
+                self.controller.renew_user_validity(u, new_date)
             except Exception as e:
-                QMessageBox.critical(
-                    self, "Erro", f"Não foi possível carregar turmas do usuário.\nMotivo: {e}"
-                )
+                erros.append(f"{u}: {e}")
+        self.load_users()
+        if erros:
+            QMessageBox.warning(self, "Concluído com erros", "\n".join(erros))
+        else:
+            QMessageBox.information(self, "Sucesso", "Validade atualizada.")
 
-    def on_add_group_clicked(self):
-        user_item = self.lstEntities.currentItem()
-        group_item = self.lstAvailableGroups.currentItem()
-        if not user_item or not group_item:
+    def _selected_usernames(self) -> list[str]:
+        sel = self.table.selectionModel().selectedRows()
+        users = []
+        for proxy_idx in sel:
+            source_idx = self.proxyModel.mapToSource(proxy_idx)
+            u = self.baseModel.user_at(source_idx.row())
+            if u:
+                users.append(u)
+        return users
+
+    # ---------- Conexão perdida (sinal global) ----------
+    def _emit_connection_lost_once(self):
+        if self._connection_lost_emitted:
             return
-        username = user_item.data(Qt.ItemDataRole.UserRole)
-        group = group_item.text()
-        try:
-            if not self.controller.add_user_to_group(username, group):
-                QMessageBox.critical(
-                    self,
-                    "Erro",
-                    f"Não foi possível adicionar o aluno à turma '{group}'.",
-                )
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Erro", f"Falha ao adicionar o aluno à turma.\nMotivo: {e}"
-            )
-        self._update_group_lists(username)
+        self._connection_lost_emitted = True
+        # Emite sinal para MainWindow assumir o tratamento global
+        self.connection_lost.emit()
 
-    def on_remove_group_clicked(self):
-        user_item = self.lstEntities.currentItem()
-        group_item = self.lstUserGroups.currentItem()
-        if not user_item or not group_item:
-            return
-        username = user_item.data(Qt.ItemDataRole.UserRole)
-        group = group_item.text()
-        try:
-            if not self.controller.remove_user_from_group(username, group):
-                QMessageBox.critical(
-                    self,
-                    "Erro",
-                    f"Não foi possível remover o aluno da turma '{group}'.",
-                )
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Erro", f"Falha ao remover o aluno da turma.\nMotivo: {e}"
-            )
-        self._update_group_lists(username)
-
-    # Não há on_save_clicked: mantido por compatibilidade se existir ligação externa
-    def on_save_clicked(self):
-        self.close()
 

@@ -10,7 +10,7 @@ class DummyDAO:
         self.conn = DummyConn()
         self.default_privs = []
 
-    def apply_group_privileges(self, group, privileges, obj_type="TABLE"):
+    def apply_group_privileges(self, group, privileges, obj_type="TABLE", check_dependencies=True):
         pass
 
     def alter_default_privileges(self, group, schema, obj_type, privileges):

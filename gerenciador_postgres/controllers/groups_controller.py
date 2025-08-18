@@ -2,6 +2,10 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from config.permission_templates import PERMISSION_TEMPLATES
 
 
+class DependencyWarning(RuntimeError):
+    """Sinaliza que a operação requer REVOKE ... CASCADE."""
+
+
 class GroupsController(QObject):
     """Controller dedicado às operações de grupos e privilégios."""
 
@@ -64,7 +68,7 @@ class GroupsController(QObject):
             return {}
         self._is_refreshing = True
         try:
-            data = self.role_manager.dao.get_default_privileges(group_name, "r")
+            data = self.role_manager.dao.get_default_privileges(objtype="r")
         except Exception:
             data = {}
         finally:
@@ -89,34 +93,38 @@ class GroupsController(QObject):
         privileges,
         obj_type: str = "TABLE",
         defaults_applied: bool = False,
+        emit_signal: bool = True,
+        check_dependencies: bool = True,
     ):
-        success = self.role_manager.set_group_privileges(
-            group_name,
-            privileges,
-            obj_type=obj_type,
-            defaults_applied=defaults_applied,
-        )
-        if success:
-            if not defaults_applied:
-                try:
-                    self.role_manager.sweep_privileges(target_group=group_name)
-                except Exception:
-                    pass
+        try:
+            success = self.role_manager.set_group_privileges(
+                group_name,
+                privileges,
+                obj_type=obj_type,
+                defaults_applied=defaults_applied,
+                check_dependencies=check_dependencies,
+            )
+        except Exception as e:
+            if "[WARN-DEPEND]" in str(e):
+                raise DependencyWarning(str(e))
+            raise
+        if success and emit_signal:
             self.data_changed.emit()
         return success
 
     def apply_template_to_group(self, group_name: str, template: str):
         success = self.role_manager.apply_template_to_group(group_name, template)
         if success:
-            try:
-                self.role_manager.sweep_privileges(target_group=group_name)
-            except Exception:
-                pass
             self.data_changed.emit()
         return success
 
     def grant_database_privileges(self, group_name: str, privileges):
-        success = self.role_manager.grant_database_privileges(group_name, privileges)
+        try:
+            success = self.role_manager.grant_database_privileges(group_name, privileges)
+        except Exception as e:
+            if "[WARN-DEPEND]" in str(e):
+                raise DependencyWarning(str(e))
+            raise
         if success:
             self.data_changed.emit()
         return success
@@ -126,15 +134,15 @@ class GroupsController(QObject):
         group_name: str,
         schema: str,
         privileges,
-        skip_sweep: bool = False,
+        emit_signal: bool = True,
     ):
-        success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
-        if success:
-            if not skip_sweep:
-                try:
-                    self.role_manager.sweep_privileges(target_group=group_name)
-                except Exception:
-                    pass
+        try:
+            success = self.role_manager.grant_schema_privileges(group_name, schema, privileges)
+        except Exception as e:
+            if "[WARN-DEPEND]" in str(e):
+                raise DependencyWarning(str(e))
+            raise
+        if success and emit_signal:
             self.data_changed.emit()
         return success
 
@@ -145,6 +153,7 @@ class GroupsController(QObject):
         obj_type: str,
         privileges,
         owner: str | None = None,
+    emit_signal: bool = True,
     ):
         """Aplica ``ALTER DEFAULT PRIVILEGES`` com trava de reentrância.
 
@@ -156,18 +165,24 @@ class GroupsController(QObject):
         self._is_applying = True
         try:
             kwargs = {"for_role": owner} if owner else {}
-            success = self.role_manager.alter_default_privileges(
-                group_name, schema, obj_type, privileges, **kwargs
-            )
+            try:
+                success = self.role_manager.alter_default_privileges(
+                    group_name, schema, obj_type, privileges, **kwargs
+                )
+            except Exception as e:
+                if "[WARN-DEPEND]" in str(e):
+                    raise DependencyWarning(str(e))
+                raise
             if success:
                 # READ-BACK: reconsulta apenas os defaults do grupo/objeto-alvo
                 code_map = {"tables": "r", "sequences": "S", "functions": "f", "types": "T"}
                 code = code_map.get(obj_type, "r")
                 try:
-                    self.role_manager.dao.get_default_privileges(group_name, code)
+                    self.role_manager.dao.get_default_privileges(owner=owner, objtype=code)
                 except Exception:
                     pass
-                self.data_changed.emit()
+                if emit_signal:
+                    self.data_changed.emit()
             return success
         finally:
             self._is_applying = False
@@ -180,7 +195,12 @@ class GroupsController(QObject):
     # ---------------------------------------------------------------
     def sweep_group_privileges(self, group_name: str) -> bool:
         """Reaplica GRANTs e ajusta default privileges para o grupo informado."""
-        success = self.role_manager.sweep_privileges(target_group=group_name)
+        try:
+            success = self.role_manager.sweep_privileges(target_group=group_name)
+        except Exception as e:
+            if "[WARN-DEPEND]" in str(e):
+                raise DependencyWarning(str(e))
+            raise
         if success:
             self.data_changed.emit()
         return success

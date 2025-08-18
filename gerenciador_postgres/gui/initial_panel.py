@@ -13,8 +13,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..app_metadata import AppMetadata
 from ..config_manager import load_config, CONFIG_FILE
+from .app_info_panel import AppInfoPanel
 
 
 def _mask(value: str) -> str:
@@ -40,6 +40,20 @@ class InitialPanel(QWidget):
         self.setLayout(layout)
 
         assets_dir = Path(__file__).resolve().parents[2] / "assets"
+
+        info = QLabel(
+            "Painel inicial – sempre acessível via menu 'Exibir > Dashboard'",
+            self,
+        )
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info, 0, 0, 1, 2)
+
+        docs_path = (assets_dir / "docs" / "index.html").resolve()
+        docs_link = QLabel(f'<a href="{docs_path.as_uri()}">Documentação</a>', self)
+        docs_link.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        docs_link.setOpenExternalLinks(True)
+        layout.addWidget(docs_link, 1, 0, 1, 2)
+
         banner = QLabel(self)
         pixmap = QPixmap(str(assets_dir / "principal.jpeg"))
         if not pixmap.isNull():
@@ -47,7 +61,7 @@ class InitialPanel(QWidget):
                 pixmap.scaledToHeight(140, Qt.TransformationMode.SmoothTransformation)
             )
         banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(banner, 0, 0, 1, 2)
+        layout.addWidget(banner, 2, 0, 1, 2)
 
         self.app_box = QGroupBox("Aplicativo", self)
         self.env_box = QGroupBox("Ambiente", self)
@@ -60,10 +74,10 @@ class InitialPanel(QWidget):
             v.setContentsMargins(8, 8, 8, 8)
             box.setLayout(v)
 
-        layout.addWidget(self.app_box, 1, 0)
-        layout.addWidget(self.env_box, 1, 1)
-        layout.addWidget(self.db_box, 2, 0)
-        layout.addWidget(self.check_box, 2, 1)
+        layout.addWidget(self.app_box, 3, 0)
+        layout.addWidget(self.env_box, 3, 1)
+        layout.addWidget(self.db_box, 4, 0)
+        layout.addWidget(self.check_box, 4, 1)
         layout.setColumnStretch(0, 1)
         layout.setColumnStretch(1, 1)
 
@@ -108,18 +122,10 @@ class InitialPanel(QWidget):
             )
 
     def _populate(self) -> None:
-        meta = AppMetadata()
         cfg = load_config()
 
         # Aplicativo
-        self.app_box.layout().addWidget(QLabel(f"Nome: {meta.name}"))
-        self.app_box.layout().addWidget(QLabel(f"Versão: {meta.version}"))
-        self.app_box.layout().addWidget(QLabel(f"Data de lançamento: {meta.release_date}"))
-        self.app_box.layout().addWidget(QLabel(f"Licença: {meta.license}"))
-        self.app_box.layout().addWidget(QLabel(f"Maintainer: {meta.maintainer} ({meta.contact_email})"))
-        github = QLabel(f'<a href="{meta.github_url}">GitHub</a>')
-        github.setOpenExternalLinks(True)
-        self.app_box.layout().addWidget(github)
+        self.app_box.layout().addWidget(AppInfoPanel())
 
         # Ambiente
         python_ver = platform.python_version()

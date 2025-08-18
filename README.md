@@ -30,7 +30,7 @@ O arquivo `config/config.yml` centraliza parâmetros do sistema. Nele é possív
 
 - `log_level`: nível de detalhamento dos logs.
 - `log_path`: caminho do arquivo de log (relativo a `BASE_DIR`).
-- `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"grp_"`).
+- `group_prefix`: prefixo obrigatório para nomes de grupos (padrão `"turma_"`).
 - `schema_creation_group`: nome do grupo autorizado a criar schemas (padrão `"Professores"`).
 - `connect_timeout`: tempo máximo (segundos) para tentar conectar ao banco (padrão `5`).
 
@@ -75,6 +75,30 @@ python Rodar.py
 - Testar conexão: botão dedicado "Testar conexão".
 
 Senhas nunca são salvas; use variável de ambiente `<PERFIL>_PASSWORD` ou o keyring (`IFSC_SGBD`, conta = usuário).
+
+## Sincronização de privilégios
+
+Após salvar permissões de schemas, tabelas ou padrões futuros, o sistema **não executa mais** a sincronização automática de privilégios. Caso seja necessário alinhar privilégios antigos com o estado atual do banco:
+
+- Na interface gráfica, utilize o botão **"Sincronizar (Full Sweep)"** disponível nas telas de grupos e de privilégios.
+- Pela linha de comando, execute `scripts/sweep_privileges.py --profile <perfil> [--group <grupo>]` para sincronizar todos os grupos ou apenas o grupo informado.
+
+## Contrato de Permissões
+
+A aplicação suporta definição de contratos de permissões no formato JSON para gerenciar papéis e privilégios no banco de dados.
+A versão atual do contrato é **1.4.4** e introduz os campos `contract_version`, `scope`, `managed_principals_mode`, `auto_onboard_creators` e `default_privileges`.
+
+Exemplos de contratos podem ser encontrados no diretório [`contracts/`](contracts/), como
+[`example_contract_basic.json`](contracts/example_contract_basic.json) e
+[`example_contract_default_privileges.json`](contracts/example_contract_default_privileges.json).
+Esses arquivos demonstram a estrutura mínima e o uso de `default_privileges` com a chave `for_role`.
+
+Para validar um contrato programaticamente:
+
+```python
+from contracts.permission_contract import load_contract
+contract = load_contract("contracts/example_contract_basic.json")
+```
 
 ## Testes
 Os testes automatizados estão no diretório `tests/`. Execute-os com:

@@ -120,10 +120,11 @@ class RoleManager:
             while True:
                 if tentativa == 0:
                     candidate = first
-                elif tentativa == 1:
-                    candidate = f"{first}.{last}" if last else first
+                elif tentativa == 1 and last:
+                    candidate = f"{first}.{last}"
                 else:
-                    candidate = f"{first}.{last}{tentativa}" if last else f"{first}{tentativa}"
+                    base = f"{first}.{last}" if last else first
+                    candidate = f"{base}{tentativa if last else tentativa+1}"
                 username = self._sanitize_username(candidate)
                 # Checagem prévia para evitar exceção de duplicidade e acelerar a próxima tentativa
                 try:
@@ -137,7 +138,7 @@ class RoleManager:
                             )
                         else:
                             tentativa += 1
-                            if tentativa > 100:
+                            if tentativa > 100:  # segurança para não loopar indefinidamente
                                 self.logger.error(
                                     f"[{self.operador}] Muitas tentativas para gerar username baseado em '{first} {last}'. Abortando este usuário."
                                 )
@@ -303,8 +304,6 @@ class RoleManager:
         try:
             config = load_config()
             prefix = config.get("group_prefix", "grp_")
-            if not prefix.startswith("grp_"):
-                raise ValueError("Prefixo de grupo inválido")
             # Sanitiza e aplica prefixo automaticamente
             group_name = self._sanitize_group_name(group_name, prefix=prefix)
             if group_name in self.dao.list_groups():
@@ -509,6 +508,7 @@ class RoleManager:
         privileges: Dict[str, Dict[str, Set[str]]],
         obj_type: str = "TABLE",
         defaults_applied: bool = False,
+        check_dependencies: bool = True,
     ) -> bool:
         try:
             with self.dao.transaction():
@@ -528,7 +528,12 @@ class RoleManager:
 
                 # Aplica privilégios reais (tabelas/sequências existentes)
                 if real_privs:
-                    self.dao.apply_group_privileges(group_name, real_privs, obj_type=obj_type)
+                    self.dao.apply_group_privileges(
+                        group_name,
+                        real_privs,
+                        obj_type=obj_type,
+                        check_dependencies=check_dependencies,
+                    )
 
                 # Ajusta default privileges para futuros objetos conforme FUTURE explícito
                 if obj_type_upper == 'TABLE':
@@ -831,12 +836,9 @@ class RoleManager:
             if not group_name.startswith(prefix):
                 # Evita duplicar prefixo se usuário digitou algo parecido
                 if group_name.startswith(prefix.rstrip('_')):
-                    # ex: prefix=grp_ e name inicia com 'grp' sem underscore
+                    # ex: prefix=turma_ e name inicia com 'turma' sem underscore
                     group_name = group_name[len(prefix.rstrip('_')):]
                 group_name = f"{prefix}{group_name}" if not group_name.startswith(prefix) else group_name
-        else:
-            # fallback padrão
-            if not group_name.startswith('grp_'):
-                group_name = f"grp_{group_name}"
+    # Sem fallback antigo: sempre exige o prefixo configurado se fornecido
         group_name = self._truncate_identifier(group_name)
         return group_name

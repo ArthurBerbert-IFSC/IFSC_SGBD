@@ -21,7 +21,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from pathlib import Path
+from dataclasses import dataclass, field
 import logging
+
+from gerenciador_postgres.controllers.groups_controller import DependencyWarning
+logger = logging.getLogger(__name__)
 
 
 class _TaskRunner(QThread):
@@ -38,6 +42,20 @@ class _TaskRunner(QThread):
             self.succeeded.emit(result)
         except Exception as e:  # pragma: no cover
             self.failed.emit(e)
+
+
+@dataclass
+class PrivilegesState:
+    schema_privs: set[str] = field(default_factory=set)
+    table_privs: dict[str, set[str]] = field(default_factory=dict)
+    default_privs: set[str] = field(default_factory=set)
+    dirty_schema: bool = False
+    dirty_table: bool = False
+    dirty_default: bool = False
+
+    @property
+    def dirty(self) -> bool:
+        return self.dirty_schema or self.dirty_table or self.dirty_default
 
 
 class GroupsView(QWidget):
@@ -58,6 +76,8 @@ class GroupsView(QWidget):
         self.cb_default_update = None
         self.cb_default_delete = None
         self._threads = []  # type: list[QThread]
+        # Cache de privilégios em memória por (role, schema)
+        self._priv_cache: dict[tuple[str, str], PrivilegesState] = {}
         self._setup_ui()
         self._connect_signals()
         if self.controller:
@@ -69,7 +89,7 @@ class GroupsView(QWidget):
         layout = QVBoxLayout(self)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left panel: list of groups
+        # Left panel
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         self.toolbar = QToolBar()
@@ -85,7 +105,7 @@ class GroupsView(QWidget):
         left_layout.addWidget(self.lstMembers)
         self.splitter.addWidget(left_panel)
 
-        # Right panel: privileges
+        # Right panel
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         top = QHBoxLayout()
@@ -96,63 +116,63 @@ class GroupsView(QWidget):
         top.addWidget(self.btnApplyTemplate)
         right_layout.addLayout(top)
 
-        # Container para privilégios de schema no padrão mestre-detalhe
+        # Schema management (master-detail)
         self.schema_group = QGroupBox("Gerenciamento de Schemas")
         schema_management_layout = QVBoxLayout()
         detail_layout = QHBoxLayout()
-
         self.schema_list = QListWidget()
         self.schema_list.setMaximumWidth(250)
         detail_layout.addWidget(self.schema_list)
-
         self.schema_details_panel = QWidget()
         self.schema_details_layout = QVBoxLayout(self.schema_details_panel)
         detail_layout.addWidget(self.schema_details_panel, 1)
-
         schema_management_layout.addLayout(detail_layout)
         self.schema_group.setLayout(schema_management_layout)
         right_layout.addWidget(self.schema_group)
 
+        # Table privileges tree
         self.treePrivileges = QTreeWidget()
         self.treePrivileges.setHeaderLabels([
-            "Schema/Tabela",
-            "SELECT",
-            "INSERT",
-            "UPDATE",
-            "DELETE",
+            "Schema/Tabela", "SELECT", "INSERT", "UPDATE", "DELETE"
         ])
         right_layout.addWidget(self.treePrivileges)
 
-        self.btnSave = QPushButton("Salvar")
-        self.btnSweep = QPushButton("Sincronizar privilégios")
+        # Action buttons
+        self.btnSaveSchema = QPushButton("Salvar Schema")
+        self.btnSaveDefaults = QPushButton("Salvar Defaults")
+        self.btnSaveTables = QPushButton("Salvar Tabelas")
+        self.btnSaveAll = QPushButton("Salvar Tudo")
+        self.btnReloadTables = QPushButton("Recarregar Tabelas")
+        self.btnSweep = QPushButton("Sincronizar (Full Sweep)")
         actions_layout = QHBoxLayout()
-        actions_layout.addWidget(self.btnSave)
-        actions_layout.addWidget(self.btnSweep)
+        for btn in [self.btnSaveSchema, self.btnSaveDefaults, self.btnSaveTables, self.btnSaveAll, self.btnReloadTables, self.btnSweep]:
+            actions_layout.addWidget(btn)
         actions_layout.addStretch(1)
         right_layout.addLayout(actions_layout)
-        self.splitter.addWidget(right_panel)
 
+        self.splitter.addWidget(right_panel)
         layout.addWidget(self.splitter)
         self.setLayout(layout)
 
-        # Disable privilege controls until a group is selected
-        self.schema_group.setEnabled(False)
-        self.treePrivileges.setEnabled(False)
-        self.btnApplyTemplate.setEnabled(False)
-        self.btnSave.setEnabled(False)
-        self.btnSweep.setEnabled(False)
-        self.lstMembers.setEnabled(False)
+        # Initial disabled state
+        for w in [self.schema_group, self.treePrivileges, self.btnApplyTemplate,
+                  self.btnSaveSchema, self.btnSaveDefaults, self.btnSaveTables, self.btnSaveAll,
+                  self.btnReloadTables, self.btnSweep, self.lstMembers]:
+            w.setEnabled(False)
 
     def _connect_signals(self):
         self.btnNewGroup.clicked.connect(self._on_new_group)
         self.btnDeleteGroup.clicked.connect(self._on_delete_group)
         self.lstGroups.currentItemChanged.connect(self._on_group_selected)
-        self.schema_list.currentItemChanged.connect(
-            self._update_schema_details
-        )
+        self.schema_list.currentItemChanged.connect(self._update_schema_details)
         self.btnApplyTemplate.clicked.connect(self._apply_template)
-        self.btnSave.clicked.connect(self._save_privileges)
+        self.btnSaveSchema.clicked.connect(self._save_schema_privileges)
+        self.btnSaveDefaults.clicked.connect(self._save_default_privileges)
+        self.btnSaveTables.clicked.connect(self._save_table_privileges)
+        self.btnSaveAll.clicked.connect(self._save_all_privileges)
+        self.btnReloadTables.clicked.connect(self._reload_tables)
         self.btnSweep.clicked.connect(self._sweep_privileges)
+        self.treePrivileges.itemChanged.connect(self._on_table_priv_changed)
 
     # ------------------------------------------------------------------
     def refresh_groups(self):
@@ -187,23 +207,110 @@ class GroupsView(QWidget):
         self.cmbTemplates.addItems(self.templates.keys())
 
     def _on_new_group(self):
+        from gerenciador_postgres.config_manager import load_config
+        prefix_cfg = load_config().get("group_prefix", "grp_")
         name, ok = QInputDialog.getText(
             self,
             "Novo Grupo",
-            "Digite o nome do grupo (o prefixo 'grp_' será adicionado automaticamente):",
+            f"Digite o nome do grupo (o prefixo '{prefix_cfg}' será adicionado automaticamente):",
             QLineEdit.EchoMode.Normal,
             "",
         )
         if not ok or not name.strip():
             return
         name = name.strip().lower()
-        if not name.startswith("grp_"):
-            name = f"grp_{name}"
+        if not name.startswith(prefix_cfg):
+            name = f"{prefix_cfg}{name}"
         try:
             self.controller.create_group(name)
             QMessageBox.information(self, "Sucesso", f"Grupo '{name}' criado.")
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Não foi possível criar o grupo.\nMotivo: {e}")
+
+    # ------------------------------------------------------------------
+    # Métodos utilitários de estado / indicadores (reintroduzidos)
+    # ------------------------------------------------------------------
+    def _schema_item_name(self, item: QListWidgetItem) -> str:
+        """Retorna o nome base do schema (sem indicador de modificação)."""
+        if not item:
+            return ""
+        text = item.text().strip()
+        # remove sufixo ' *' se presente
+        if text.endswith(" *"):
+            return text[:-2]
+        return text
+
+    def _refresh_schema_dirty_indicators(self):
+        """Atualiza a exibição (asterisco) dos schemas com alterações pendentes."""
+        self.schema_list.blockSignals(True)
+        try:
+            for i in range(self.schema_list.count()):
+                item = self.schema_list.item(i)
+                base = self._schema_item_name(item)
+                state = self._priv_cache.get((self.current_group, base)) if self.current_group else None
+                dirty = bool(state and state.dirty)
+                desired = base + (" *" if dirty else "")
+                if item.text() != desired:
+                    item.setText(desired)
+        finally:
+            self.schema_list.blockSignals(False)
+
+    def _get_state(self, role: str, schema: str) -> PrivilegesState:
+        state = self._priv_cache.get((role, schema))
+        if not state:
+            state = PrivilegesState()
+            self._priv_cache[(role, schema)] = state
+        return state
+
+    def _update_schema_priv(self, role: str, schema: str, priv: str, checked: bool):
+        state = self._get_state(role, schema)
+        before = set(state.schema_privs)
+        if checked:
+            state.schema_privs.add(priv)
+        else:
+            state.schema_privs.discard(priv)
+        if before != state.schema_privs:
+            state.dirty_schema = True
+            logger.debug("[GroupsView] schema_priv_changed role=%s schema=%s priv=%s now=%s", role, schema, priv, state.schema_privs)
+            self._refresh_schema_dirty_indicators()
+
+    def _update_default_priv(self, role: str, schema: str, priv: str, checked: bool):
+        state = self._get_state(role, schema)
+        before = set(state.default_privs)
+        if checked:
+            state.default_privs.add(priv)
+        else:
+            state.default_privs.discard(priv)
+        if before != state.default_privs:
+            state.dirty_default = True
+            logger.debug("[GroupsView] default_priv_changed role=%s schema=%s priv=%s now=%s", role, schema, priv, state.default_privs)
+            self._refresh_schema_dirty_indicators()
+
+    def _on_table_priv_changed(self, item: QTreeWidgetItem, column: int):
+        """Atualiza cache ao marcar/desmarcar privilégios de tabela."""
+        # Ignora se não há grupo selecionado ou item inválido
+        if not self.current_group or not item:
+            return
+        parent = item.parent()
+        # Somente processa linhas de tabelas (que possuem pai = schema)
+        if parent is None:
+            return
+        schema = parent.text(0)
+        role = self.current_group
+        state = self._get_state(role, schema)
+        table = item.text(0)
+        col_map = {1: "SELECT", 2: "INSERT", 3: "UPDATE", 4: "DELETE"}
+        # Calcula conjunto após mudança
+        new_perms = set()
+        for col, label in col_map.items():
+            if item.checkState(col) == Qt.CheckState.Checked:
+                new_perms.add(label)
+        old_perms = state.table_privs.get(table, set())
+        if new_perms != old_perms:
+            state.table_privs[table] = new_perms
+            state.dirty_table = True
+            logger.debug("[GroupsView] table_priv_changed role=%s schema=%s table=%s old=%s new=%s", role, schema, table, old_perms, new_perms)
+            self._refresh_schema_dirty_indicators()
 
     def _on_delete_group(self):
         item = self.lstGroups.currentItem()
@@ -248,27 +355,99 @@ class GroupsView(QWidget):
             )
 
     def _on_group_selected(self, current, previous):
+        if previous and not self._check_dirty_for_group(previous.text()):
+            self.lstGroups.blockSignals(True)
+            self.lstGroups.setCurrentItem(previous)
+            self.lstGroups.blockSignals(False)
+            return
         if not current:
+            # Limpa estado quando nada selecionado
             self.current_group = None
             self.schema_group.setEnabled(False)
             self.treePrivileges.setEnabled(False)
             self.btnApplyTemplate.setEnabled(False)
-            self.btnSave.setEnabled(False)
+            self.btnSaveSchema.setEnabled(False)
+            self.btnSaveDefaults.setEnabled(False)
+            self.btnSaveTables.setEnabled(False)
             self.btnSweep.setEnabled(False)
             self.lstMembers.setEnabled(False)
             self.lstMembers.clear()
             self.schema_list.clear()
             self._clear_layout(self.schema_details_layout)
             return
+
+        # Novo grupo selecionado
         self.current_group = current.text()
-        self.schema_group.setEnabled(True)
-        self.treePrivileges.setEnabled(True)
-        self.btnApplyTemplate.setEnabled(True)
-        self.btnSave.setEnabled(True)
-        self.btnSweep.setEnabled(True)
-        self.lstMembers.setEnabled(True)
+        for w in [self.schema_group, self.treePrivileges, self.btnApplyTemplate,
+                  self.btnSaveSchema, self.btnSaveDefaults, self.btnSaveTables,
+                  self.btnReloadTables, self.btnSweep, self.lstMembers]:
+            w.setEnabled(True)
         self._populate_privileges()
         self._refresh_members()
+
+    # ------------------------------------------------------------------
+    def _check_dirty_for_group(self, group: str) -> bool:
+        dirty_keys = [k for k, st in self._priv_cache.items() if k[0] == group and st.dirty]
+        if not dirty_keys:
+            return True
+        resp = QMessageBox.question(
+            self,
+            "Alterações não salvas",
+            "Salvar alterações antes de mudar de grupo?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if resp == QMessageBox.StandardButton.Save:
+            for key in dirty_keys:
+                if not self._save_state_sync(*key):
+                    return False
+            return True
+        if resp == QMessageBox.StandardButton.Discard:
+            for key in dirty_keys:
+                self._priv_cache.pop(key, None)
+            return True
+        return False
+
+    def _check_dirty_for_schema(self, role: str, schema: str) -> bool:
+        key = (role, schema)
+        state = self._priv_cache.get(key)
+        if not state or not state.dirty:
+            return True
+        resp = QMessageBox.question(
+            self,
+            "Alterações não salvas",
+            f"Salvar alterações de '{schema}'?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if resp == QMessageBox.StandardButton.Save:
+            return self._save_state_sync(role, schema)
+        if resp == QMessageBox.StandardButton.Discard:
+            self._priv_cache.pop(key, None)
+            return True
+        return False
+
+    def _save_state_sync(self, role: str, schema: str) -> bool:
+        state = self._priv_cache.get((role, schema))
+        if not state:
+            return True
+        ok1 = self.controller.grant_schema_privileges(
+            role, schema, state.schema_privs, emit_signal=False
+        )
+        ok2 = self.controller.alter_default_privileges(
+            role, schema, "tables", state.default_privs, emit_signal=False
+        )
+        ok3 = self.controller.apply_group_privileges(
+            role, {schema: state.table_privs}, defaults_applied=True, emit_signal=False
+        )
+        if ok1 and ok2 and ok3:
+            state.dirty_schema = state.dirty_default = state.dirty_table = False
+            return True
+        return False
 
     def _populate_privileges(self):
         if not self.controller or not self.current_group:
@@ -289,15 +468,24 @@ class GroupsView(QWidget):
         self.schema_list.blockSignals(True)
         self.schema_list.clear()
         for schema in sorted(self.schema_tables.keys()):
-            self.schema_list.addItem(QListWidgetItem(schema))
+            item = QListWidgetItem(schema)
+            item.setData(Qt.ItemDataRole.UserRole, schema)
+            self.schema_list.addItem(item)
         self.schema_list.blockSignals(False)
         if self.schema_list.count() > 0:
             self.schema_list.setCurrentRow(0)
+        self._refresh_schema_dirty_indicators()
 
+        self.treePrivileges.blockSignals(True)
         self.treePrivileges.clear()
         for schema, tables in self.schema_tables.items():
             schema_item = QTreeWidgetItem([schema])
             self.treePrivileges.addTopLevelItem(schema_item)
+            key = (role, schema)
+            state = self._priv_cache.get(key)
+            if not state:
+                state = PrivilegesState()
+                self._priv_cache[key] = state
             for table in tables:
                 table_item = QTreeWidgetItem([table, "", "", "", ""])
                 table_item.setFlags(
@@ -305,18 +493,24 @@ class GroupsView(QWidget):
                     | Qt.ItemFlag.ItemIsUserCheckable
                     | Qt.ItemFlag.ItemIsSelectable
                 )
-                perms = table_privs.get(schema, {}).get(table, set())
+                perms_db = table_privs.get(schema, {}).get(table, set())
+                perms = state.table_privs.get(table, set(perms_db))
+                state.table_privs[table] = set(perms)
                 for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
-                    state = (
-                        Qt.CheckState.Checked
-                        if label in perms
-                        else Qt.CheckState.Unchecked
+                    table_item.setCheckState(
+                        col,
+                        Qt.CheckState.Checked if label in perms else Qt.CheckState.Unchecked,
                     )
-                    table_item.setCheckState(col, state)
                 schema_item.addChild(table_item)
+        self.treePrivileges.blockSignals(False)
         self.treePrivileges.expandAll()
 
     def _update_schema_details(self, current_item, previous_item):
+        if previous_item and not self._check_dirty_for_schema(self.current_group, previous_item.text()):
+            self.schema_list.blockSignals(True)
+            self.schema_list.setCurrentItem(previous_item)
+            self.schema_list.blockSignals(False)
+            return
         if not current_item or not self.controller or not self.current_group:
             return
         schema_name = current_item.text()
@@ -325,14 +519,32 @@ class GroupsView(QWidget):
         self._clear_layout(self.schema_details_layout)
 
         try:
-            schema_privs = self.controller.get_schema_level_privileges(role).get(
-                schema_name, set()
-            )
-            default_info = self.controller.get_default_table_privileges(role).get(
-                schema_name, {}
-            )
-            default_privs = default_info.get("privileges", set())
+            schema_privs_all = self.controller.get_schema_level_privileges(role)
+            schema_privs_db = schema_privs_all.get(schema_name, set())
+            default_all = self.controller.get_default_table_privileges(role)
+            default_info = default_all.get(schema_name, {})
+            default_privs_db = default_info.get("privileges", set())
             owner_role = default_info.get("owner")
+            key = (role, schema_name)
+            state = self._priv_cache.get(key)
+            if not state:
+                state = PrivilegesState()
+                self._priv_cache[key] = state
+            if not state.schema_privs:
+                state.schema_privs = set(schema_privs_db)
+            if not state.default_privs:
+                state.default_privs = set(default_privs_db)
+            schema_privs = state.schema_privs
+            default_privs = state.default_privs
+            logger.debug(
+                "[GroupsView] _update_schema_details role=%s schema=%s db_schema_privs=%s db_default_privs=%s cached_schema=%s cached_default=%s",
+                role,
+                schema_name,
+                schema_privs_db,
+                default_privs_db,
+                schema_privs,
+                default_privs,
+            )
         except Exception as e:  # pragma: no cover
             logging.exception("Erro ao ler privilégios de schema")
             QMessageBox.warning(
@@ -346,9 +558,17 @@ class GroupsView(QWidget):
         usage_create_layout = QHBoxLayout()
         self.cb_usage = QCheckBox("USAGE")
         self.cb_usage.setChecked("USAGE" in schema_privs)
+        try:
+            self.cb_usage.setTristate(False)
+        except Exception:
+            pass
         usage_create_layout.addWidget(self.cb_usage)
         self.cb_create = QCheckBox("CREATE")
         self.cb_create.setChecked("CREATE" in schema_privs)
+        try:
+            self.cb_create.setTristate(False)
+        except Exception:
+            pass
         usage_create_layout.addWidget(self.cb_create)
         usage_create_box.setLayout(usage_create_layout)
         self.schema_details_layout.addWidget(usage_create_box)
@@ -369,6 +589,66 @@ class GroupsView(QWidget):
         defaults_layout.addWidget(self.cb_default_delete)
         defaults_box.setLayout(defaults_layout)
         self.schema_details_layout.addWidget(defaults_box)
+
+        # Conecta mudanças aos caches
+        self.cb_usage.stateChanged.connect(
+            lambda st, r=role, s=schema_name: self._update_schema_priv(
+                r,
+                s,
+                "USAGE",
+                Qt.CheckState(st) == Qt.CheckState.Checked,
+            )
+        )
+        self.cb_usage.toggled.connect(
+            lambda checked, r=role, s=schema_name: logger.debug(
+                "[GroupsView] usage.toggled role=%s schema=%s checked=%s", r, s, checked
+            )
+        )
+        self.cb_create.stateChanged.connect(
+            lambda st, r=role, s=schema_name: self._update_schema_priv(
+                r,
+                s,
+                "CREATE",
+                Qt.CheckState(st) == Qt.CheckState.Checked,
+            )
+        )
+        self.cb_create.toggled.connect(
+            lambda checked, r=role, s=schema_name: logger.debug(
+                "[GroupsView] create.toggled role=%s schema=%s checked=%s", r, s, checked
+            )
+        )
+        self.cb_default_select.stateChanged.connect(
+            lambda st, r=role, s=schema_name: self._update_default_priv(
+                r,
+                s,
+                "SELECT",
+                Qt.CheckState(st) == Qt.CheckState.Checked,
+            )
+        )
+        self.cb_default_insert.stateChanged.connect(
+            lambda st, r=role, s=schema_name: self._update_default_priv(
+                r,
+                s,
+                "INSERT",
+                Qt.CheckState(st) == Qt.CheckState.Checked,
+            )
+        )
+        self.cb_default_update.stateChanged.connect(
+            lambda st, r=role, s=schema_name: self._update_default_priv(
+                r,
+                s,
+                "UPDATE",
+                Qt.CheckState(st) == Qt.CheckState.Checked,
+            )
+        )
+        self.cb_default_delete.stateChanged.connect(
+            lambda st, r=role, s=schema_name: self._update_default_priv(
+                r,
+                s,
+                "DELETE",
+                Qt.CheckState(st) == Qt.CheckState.Checked,
+            )
+        )
 
         if owner_role:
             owner_label = QLabel(f"owner: {owner_role}")
@@ -417,77 +697,228 @@ class GroupsView(QWidget):
 
         self._execute_async(task, on_success, on_error, "Aplicando template...")
 
-    def _save_privileges(self):
-        current_schema_item = self.schema_list.currentItem()
-        if not self.current_group or not current_schema_item:
-            QMessageBox.warning(
-                self, "Atenção", "Selecione um grupo e um schema primeiro."
+    # ------------------------ Salvamentos separados ---------------------
+    def _current_schema_checked(self):
+        item = self.schema_list.currentItem()
+        if not self.current_group or not item:
+            QMessageBox.warning(self, "Atenção", "Selecione um grupo e um schema primeiro.")
+            return None, None
+        return self.current_group, self._schema_item_name(item)
+
+    def _save_schema_privileges(self):
+        role, schema = self._current_schema_checked()
+        if not role:
+            return
+        state = self._priv_cache.get((role, schema))
+        schema_perms = set(state.schema_privs) if state else set()
+        # Consulta estado atual no banco para feedback ao usuário
+        try:
+            current_db = self.controller.get_schema_level_privileges(role).get(schema, set())
+        except Exception:
+            current_db = set()
+        if not schema_perms and not current_db:
+            QMessageBox.information(
+                self,
+                "Nada a salvar",
+                "Nenhum privilégio selecionado e o schema já não possui USAGE/CREATE para este grupo.",
+            )
+            logger.debug(
+                "[GroupsView] Abort save (nothing to do) role=%s schema=%s perms_ui=%s perms_db=%s",
+                role,
+                schema,
+                schema_perms,
+                current_db,
             )
             return
-
-        role = self.current_group
-        schema = current_schema_item.text()
-
-        schema_perms_to_set = set()
-        if self.cb_usage and self.cb_usage.isChecked():
-            schema_perms_to_set.add("USAGE")
-        if self.cb_create and self.cb_create.isChecked():
-            schema_perms_to_set.add("CREATE")
-
-        default_perms_to_set = set()
-        if self.cb_default_select and self.cb_default_select.isChecked():
-            default_perms_to_set.add("SELECT")
-        if self.cb_default_insert and self.cb_default_insert.isChecked():
-            default_perms_to_set.add("INSERT")
-        if self.cb_default_update and self.cb_default_update.isChecked():
-            default_perms_to_set.add("UPDATE")
-        if self.cb_default_delete and self.cb_default_delete.isChecked():
-            default_perms_to_set.add("DELETE")
-
-        table_privs: dict[str, dict[str, set[str]]] = {}
-        for i in range(self.treePrivileges.topLevelItemCount()):
-            schema_item = self.treePrivileges.topLevelItem(i)
-            schema_name = schema_item.text(0)
-            for j in range(schema_item.childCount()):
-                table_item = schema_item.child(j)
-                table = table_item.text(0)
-                perms = set()
-                for col, label in enumerate(["SELECT", "INSERT", "UPDATE", "DELETE"], start=1):
-                    if table_item.checkState(col) == Qt.CheckState.Checked:
-                        perms.add(label)
-                table_privs.setdefault(schema_name, {})[table] = perms
+        logger.debug(
+            "[GroupsView] _save_schema_privileges role=%s schema=%s to_save=%s state=%s",
+            role,
+            schema,
+            schema_perms,
+            state.schema_privs if state else None,
+        )
 
         def task():
-            self.controller.grant_schema_privileges(role, schema, schema_perms_to_set)
-            self.controller.alter_default_privileges(
-                role, schema, "tables", default_perms_to_set
-            )
-            return self.controller.apply_group_privileges(
-                role,
-                table_privs,
-                defaults_applied=True,
-            )
+            return self.controller.grant_schema_privileges(role, schema, schema_perms, emit_signal=False)
 
         def on_success(success):
             if success:
-                QMessageBox.information(
-                    self,
-                    "Sucesso",
-                    f"Privilégios para o schema '{schema}' foram atualizados.",
+                if state:
+                    state.dirty_schema = False
+                QMessageBox.information(self, "Sucesso", f"Schema '{schema}' atualizado (USAGE/CREATE).")
+                logger.debug(
+                    "[GroupsView] Saved schema privileges ok role=%s schema=%s saved=%s",
+                    role,
+                    schema,
+                    schema_perms,
                 )
-                self._populate_privileges()
-                self._refresh_members()
+                # Re-read from DB to confirm and refresh panel
+                try:
+                    fresh = self.controller.get_schema_level_privileges(role)
+                    new_set = fresh.get(schema, set())
+                    logger.debug(
+                        "[GroupsView] Post-save recheck role=%s schema=%s db_now=%s",
+                        role,
+                        schema,
+                        new_set,
+                    )
+                    if state:
+                        state.schema_privs = set(new_set)
+                    # Force refresh of detail panel (without losing selection)
+                    current_item = self.schema_list.currentItem()
+                    if current_item and current_item.text() == schema:
+                        self._update_schema_details(current_item, None)
+                except Exception as e2:
+                    logger.debug("[GroupsView] Post-save refresh failed: %s", e2)
             else:
-                QMessageBox.critical(
-                    self, "Erro", "Falha ao salvar os privilégios do grupo."
+                QMessageBox.critical(self, "Erro", "Falha ao salvar privilégios de schema.")
+                logger.debug(
+                    "[GroupsView] Failed saving schema privileges role=%s schema=%s intended=%s",
+                    role,
+                    schema,
+                    schema_perms,
                 )
 
         def on_error(e: Exception):
-            QMessageBox.critical(
-                self, "Erro", f"Falha ao salvar os privilégios: {e}"
-            )
+            QMessageBox.critical(self, "Erro", f"Falha ao salvar privilégios de schema: {e}")
 
-        self._execute_async(task, on_success, on_error, "Salvando privilégios...")
+        self._execute_async(task, on_success, on_error, "Salvando privilégios de schema...")
+
+    def _reload_tables(self):
+        """Recarrega apenas a árvore de tabelas sem mexer nos checkboxes de defaults/schema."""
+        if not self.current_group:
+            return
+        def task():
+            # Apenas força reconsulta das tabelas e privilégios de tabela
+            return True
+        def on_success(_):
+            self._populate_privileges()
+            # Reaplicar painel atual sem perder defaults (cache já mantém)
+            current_item = self.schema_list.currentItem()
+            if current_item:
+                self._update_schema_details(current_item, None)
+        def on_error(e: Exception):
+            QMessageBox.critical(self, "Erro", f"Falha ao recarregar tabelas: {e}")
+        self._execute_async(task, on_success, on_error, "Recarregando tabelas...")
+
+    def _save_default_privileges(self):
+        role, schema = self._current_schema_checked()
+        if not role:
+            return
+        state = self._priv_cache.get((role, schema))
+        default_perms = set(state.default_privs) if state else set()
+
+        def task():
+            return self.controller.alter_default_privileges(role, schema, "tables", default_perms, emit_signal=False)
+
+        def on_success(success):
+            if success:
+                if state:
+                    state.dirty_default = False
+                QMessageBox.information(self, "Sucesso", f"Defaults de tabelas em '{schema}' atualizados.")
+            else:
+                QMessageBox.critical(self, "Erro", "Falha ao salvar defaults.")
+
+        def on_error(e: Exception):
+            QMessageBox.critical(self, "Erro", f"Falha ao salvar defaults: {e}")
+
+        self._execute_async(task, on_success, on_error, "Salvando defaults...")
+
+    def _collect_table_privs(self):
+        tables: dict[str, dict[str, set[str]]] = {}
+        for (role, schema), state in self._priv_cache.items():
+            if role == self.current_group:
+                tables[schema] = state.table_privs
+        return tables
+
+    def _save_table_privileges(self):
+        if not self.current_group:
+            QMessageBox.warning(self, "Atenção", "Selecione um grupo primeiro.")
+            return
+        role = self.current_group
+        tables_privs = self._collect_table_privs()
+
+        def task():
+            return self.controller.apply_group_privileges(role, tables_privs, defaults_applied=True, emit_signal=False)
+
+        def on_success(success):
+            if success:
+                for (r, _), st in self._priv_cache.items():
+                    if r == role:
+                        st.dirty_table = False
+                QMessageBox.information(self, "Sucesso", "Privilégios de tabelas atualizados.")
+            else:
+                QMessageBox.critical(self, "Erro", "Falha ao salvar privilégios de tabelas.")
+
+        def on_error(e: Exception):
+            if isinstance(e, DependencyWarning):
+                resp = QMessageBox.question(
+                    self,
+                    "Dependências detectadas",
+                    f"{e}\nContinuar revogação com CASCADE?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if resp == QMessageBox.StandardButton.Yes:
+                    try:
+                        success = self.controller.apply_group_privileges(
+                            role,
+                            tables_privs,
+                            defaults_applied=True,
+                            emit_signal=False,
+                            check_dependencies=False,
+                        )
+                        if success:
+                            for (r, _), st in self._priv_cache.items():
+                                if r == role:
+                                    st.dirty_table = False
+                            QMessageBox.information(
+                                self, "Sucesso", "Privilégios de tabelas atualizados."
+                            )
+                        else:
+                            QMessageBox.critical(
+                                self, "Erro", "Falha ao salvar privilégios de tabelas."
+                            )
+                    except Exception as err:
+                        QMessageBox.critical(
+                            self, "Erro", f"Falha ao salvar privilégios de tabelas: {err}"
+                        )
+                # If user cancels, do nothing
+            else:
+                QMessageBox.critical(self, "Erro", f"Falha ao salvar privilégios de tabelas: {e}")
+
+        self._execute_async(task, on_success, on_error, "Salvando privilégios de tabelas...")
+
+    def _save_all_privileges(self):
+        if not self.current_group:
+            QMessageBox.warning(self, "Atenção", "Selecione um grupo primeiro.")
+            return
+        role = self.current_group
+        dirty_keys = [k for k, st in self._priv_cache.items() if k[0] == role and st.dirty]
+        if not dirty_keys:
+            QMessageBox.information(self, "Nada a salvar", "Não há alterações pendentes para este grupo.")
+            return
+        def task():
+            ok_all = True
+            for _, schema in dirty_keys:
+                if not self._save_state_sync(role, schema):
+                    ok_all = False
+            return ok_all
+        def on_success(success):
+            if success:
+                QMessageBox.information(self, "Sucesso", "Todas as alterações foram salvas.")
+            else:
+                QMessageBox.warning(self, "Parcial", "Algumas alterações não puderam ser salvas.")
+            self._refresh_schema_dirty_indicators()
+        def on_error(e: Exception):
+            QMessageBox.critical(self, "Erro", f"Falha ao salvar tudo: {e}")
+        self._execute_async(task, on_success, on_error, "Salvando tudo...")
+
+    # Mantém método antigo para compatibilidade interna, chamando os três (se necessário)
+    def _save_privileges(self):  # legacy
+        self._save_schema_privileges()
+        self._save_default_privileges()
+        self._save_table_privileges()
 
     def _sweep_privileges(self):
         # Determina o grupo selecionado no momento do clique
@@ -502,8 +933,21 @@ class GroupsView(QWidget):
 
         def on_success(success):
             if success:
+                # Após sincronizar no banco, descartamos cache antigo para o grupo
+                removed_any = False
+                for key in list(self._priv_cache.keys()):
+                    if key[0] == group_name:
+                        self._priv_cache.pop(key, None)
+                        removed_any = True
+                # Se ainda estamos visualizando este grupo, repopula privilégios
+                if self.current_group == group_name:
+                    self._populate_privileges()
+                    current_item = self.schema_list.currentItem()
+                    if current_item:
+                        self._update_schema_details(current_item, None)
+                self._refresh_schema_dirty_indicators()
                 QMessageBox.information(
-                    self, "Concluído", f"Privilégios do grupo '{group_name}' sincronizados."
+                    self, "Concluído", f"Privilégios do grupo '{group_name}' sincronizados." + (" (cache atualizado)" if removed_any else "")
                 )
             else:
                 QMessageBox.critical(

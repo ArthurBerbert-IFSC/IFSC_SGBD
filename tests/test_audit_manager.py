@@ -16,29 +16,23 @@ class MockCursor:
         self.executed_queries = []
         self.rowcount = 5
         self._result = []
-    
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
-    
+
     def execute(self, query, params=None):
         self.executed_queries.append((query, params))
-        if "COUNT(*)" in query:
-            self._result = [(100,)]
-        elif "GROUP BY operacao" in query:
-            self._result = [("CREATE_USER", 10), ("DELETE_USER", 5)]
-        elif "GROUP BY operador" in query:
-            self._result = [("arthur", 20), ("maria", 15)]
-        elif "INTERVAL '24 hours'" in query:
-            self._result = [(25,)]
+        if "SUM(CASE WHEN success" in query:
+            self._result = [(100, 80)]
         else:
             self._result = []
-    
+
     def fetchone(self):
         return self._result[0] if self._result else None
-    
+
     def fetchall(self):
         return self._result
 
@@ -71,62 +65,71 @@ class TestAuditManager(unittest.TestCase):
             self.audit_manager = AuditManager(self.db_manager, self.mock_logger)
 
     def test_log_operation_success(self):
-        """Testa o registro de uma operação bem-sucedida."""
+        """Registra operação bem-sucedida."""
         with self.db_manager.transaction():
             self.audit_manager.log_operation(
-                operador='arthur',
-                operacao='CREATE_USER',
-                objeto_tipo='USER',
-                objeto_nome='joao',
-                detalhes={'password_set': True},
-                sucesso=True
+                actor="arthur",
+                database_name="db",
+                schema_name="public",
+                contract_json={"a": 1},
+                diff_sql="GRANT",
+                success=True,
             )
+            # commit ainda não executado dentro do bloco
+            self.assertFalse(self.mock_conn.committed)
 
-        # Verificar se a query foi executada
-        queries = self.mock_conn.cursor_mock.executed_queries
-        self.assertTrue(len(queries) > 0)
+        query, params = self.mock_conn.cursor_mock.executed_queries[0]
+        self.assertIn("INSERT INTO auditoria_permissoes", query)
+        self.assertEqual(params[3].adapted, {"a": 1})
+        self.assertEqual(params[4], "GRANT")
+        self.assertTrue(params[5])
+        self.assertIsNone(params[6])
+        # commit realizado após saída do contexto
+        self.assertTrue(self.mock_conn.committed)
 
-        # Verificar se commit foi chamado pelo contexto de transação
+    def test_log_operation_failure(self):
+        """Registra operação com falha."""
+        with self.db_manager.transaction():
+            self.audit_manager.log_operation(
+                actor="arthur",
+                database_name="db",
+                schema_name="public",
+                contract_json={"a": 1},
+                diff_sql="GRANT",
+                success=False,
+                error_message="boom",
+            )
+            self.assertFalse(self.mock_conn.committed)
+
+        query, params = self.mock_conn.cursor_mock.executed_queries[0]
+        self.assertIn("INSERT INTO auditoria_permissoes", query)
+        self.assertEqual(params[3].adapted, {"a": 1})
+        self.assertEqual(params[4], "GRANT")
+        self.assertFalse(params[5])  # success flag
+        self.assertEqual(params[6], "boom")
         self.assertTrue(self.mock_conn.committed)
 
     def test_log_operation_rollback(self):
-        """Garante rollback da auditoria se a transação principal falhar."""
+        """Garante rollback se a transação falhar após a auditoria."""
         with self.assertRaises(ValueError):
             with self.db_manager.transaction():
                 self.audit_manager.log_operation(
-                    operador='arthur',
-                    operacao='CREATE_USER',
-                    objeto_tipo='USER',
-                    objeto_nome='joao',
-                    detalhes={'password_set': True},
-                    sucesso=True
+                    actor="arthur",
+                    database_name="db",
+                    schema_name="public",
+                    contract_json={"a": 1},
+                    diff_sql="GRANT",
+                    success=True,
                 )
-                raise ValueError('fail')
+                raise ValueError("fail")
 
         self.assertTrue(self.mock_conn.rolled_back)
         self.assertFalse(self.mock_conn.committed)
-    
-    def test_get_audit_stats(self):
-        """Testa a obtenção de estatísticas de auditoria."""
-        stats = self.audit_manager.get_audit_stats()
-        
-        expected_stats = {
-            'total_registros': 100,
-            'operacoes_por_tipo': {"CREATE_USER": 10, "DELETE_USER": 5},
-            'atividade_operadores': {"arthur": 20, "maria": 15},
-            'atividade_24h': 25
-        }
-        
-        self.assertEqual(stats, expected_stats)
-    
+
     def test_cleanup_old_logs(self):
-        """Testa a limpeza de logs antigos."""
-        deleted_count = self.audit_manager.cleanup_old_logs(90)
-
-        # Verificar se retornou o número correto de linhas deletadas
-        self.assertEqual(deleted_count, 5)  # rowcount do mock
-
-        # Verificar se commit foi chamado
+        """Testa a remoção de logs antigos."""
+        deleted = self.audit_manager.cleanup_old_logs(90)
+        self.assertEqual(deleted, 5)
         self.assertTrue(self.mock_conn.committed)
 
 

@@ -6,6 +6,8 @@ from .data_models import User, Group
 from typing import Optional, List, Dict, Set, Callable
 import logging
 
+from contracts.permission_contract import filter_managed
+
 logger = logging.getLogger(__name__)
 logger.propagate = True
 
@@ -73,6 +75,24 @@ class DBManager:
     def conn(self) -> connection:
         return self._conn_provider()
 
+    # ------------------------------------------------------------------
+    def _reset_if_aborted(self):
+        """Efetua rollback silencioso se a conexão estiver em estado de erro.
+
+        Situações como "current transaction is aborted" deixam a conexão
+        inutilizável até um ``ROLLBACK``. Este helper é chamado no início
+        de operações de leitura para recuperar automaticamente após falhas
+        anteriores.
+        """
+        try:
+            from psycopg2 import extensions as _ext
+            status = self.conn.get_transaction_status()
+            if status == _ext.TRANSACTION_STATUS_INERROR:
+                logger.warning("Transação anterior abortada detectada; executando rollback automático.")
+                self.conn.rollback()
+        except Exception:
+            pass
+
     @contextmanager
     def transaction(self):
         """Contexto para controle de transações.
@@ -100,6 +120,7 @@ class DBManager:
                 return 0
 
     def find_user_by_name(self, username: str) -> Optional[User]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT rolname, oid, rolvaliduntil, rolcanlogin
@@ -152,6 +173,7 @@ class DBManager:
             cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(username)))
 
     def list_users(self) -> List[str]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT rolname FROM pg_roles
@@ -161,6 +183,9 @@ class DBManager:
                   AND rolname <> 'postgres'
                 ORDER BY rolname
             """)
+            # Anteriormente filtrava por padrões do permission_contract (filter_managed),
+            # o que ocultava usuários gerados no formato primeiro.ultimo.
+            # Agora retornamos todos os roles de login não-sistema.
             return [row[0] for row in cur.fetchall()]
 
     def create_group(self, group_name: str):
@@ -245,6 +270,7 @@ class DBManager:
             )
 
     def list_group_members(self, group_name: str) -> List[str]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT u.rolname
@@ -257,6 +283,7 @@ class DBManager:
             return [row[0] for row in cur.fetchall()]
 
     def list_user_groups(self, username: str) -> List[str]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT g.rolname
@@ -266,9 +293,11 @@ class DBManager:
                 WHERE u.rolname = %s
                 ORDER BY g.rolname
             """, (username,))
+            # Removido filter_managed para exibir todos os grupos atribuídos
             return [row[0] for row in cur.fetchall()]
 
     def list_groups(self) -> List[str]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT rolname FROM pg_roles
@@ -278,10 +307,12 @@ class DBManager:
                   AND rolname <> 'postgres'
                 ORDER BY rolname
             """)
+            # Removido filter_managed para permitir visualizar todos os grupos
             return [row[0] for row in cur.fetchall()]
 
     def list_roles(self) -> List[str]:
         """Retorna todos os roles disponíveis (usuários e grupos)."""
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -291,7 +322,7 @@ class DBManager:
                 ORDER BY rolname
                 """
             )
-            return [row[0] for row in cur.fetchall()]
+            return filter_managed([row[0] for row in cur.fetchall()])
 
     # Métodos de tabelas e privilégios ------------------------------------
 
@@ -329,6 +360,7 @@ class DBManager:
         sql_query = "\n".join(query)
         params: list[object] = [list(include_types), schemas]
 
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute(sql_query, params)
             result: Dict[str, List[str]] = {schema: [] for schema in schemas}
@@ -337,24 +369,60 @@ class DBManager:
             return result
 
     def get_group_privileges(self, group: str) -> Dict[str, Dict[str, Set[str]]]:
-        """Retorna os privilégios de tabela concedidos a um grupo."""
+        """Retorna os privilégios de tabela concedidos a um grupo.
+
+        A consulta utiliza ``pg_catalog`` diretamente com ``aclexplode`` para
+        que o resultado preserve informações de ``GRANT OPTION`` (sinalizadas
+        por ``"*"`` ao final do nome do privilégio).
+        """
+
+        # Importante: "acldefault" espera primeiro argumento do tipo "char",
+        # portanto fazemos cast explícito ( 'S'::"char" / 'r'::"char" ) para
+        # evitar erro "function acldefault(text, oid) does not exist" em alguns
+        # servidores / versões.
         query = (
-            "SELECT table_schema, table_name, privilege_type "
-            "FROM information_schema.role_table_grants "
-            "WHERE grantee = %s"
+            """
+            SELECT
+                n.nspname AS table_schema,
+                c.relname AS table_name,
+                a.privilege_type,
+                a.is_grantable
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            CROSS JOIN LATERAL aclexplode(
+                COALESCE(
+                    c.relacl,
+                    acldefault(
+                        (CASE WHEN c.relkind = 'S' THEN 'S'::"char" ELSE 'r'::"char" END),
+                        c.relowner
+                    )
+                )
+            ) AS a
+            JOIN pg_roles gr ON gr.oid = a.grantee
+            WHERE gr.rolname = %s
+            """
         )
-        with self.conn.cursor() as cur:
-            cur.execute(query, (group,))
-            result: Dict[str, Dict[str, Set[str]]] = {}
-            for schema, table, priv in cur.fetchall():
-                result.setdefault(schema, {}).setdefault(table, set()).add(priv)
-            return result
+        self._reset_if_aborted()
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(query, (group,))
+                result: Dict[str, Dict[str, Set[str]]] = {}
+                for schema, table, priv, grantable in cur.fetchall():
+                    privname = priv + ("*" if grantable else "")
+                    result.setdefault(schema, {}).setdefault(table, set()).add(privname)
+                return result
+        except Exception as e:
+            logger.error("Erro ao obter privilégios de grupo '%s': %s", group, e)
+            # Garante que um erro aqui não deixe a transação em estado abortado
+            self._reset_if_aborted()
+            return {}
 
     def apply_group_privileges(
         self,
         group: str,
         privileges: Dict[str, Dict[str, Set[str]]],
         obj_type: str = "TABLE",
+        check_dependencies: bool = True,
     ):
         """Aplica GRANT/REVOKE para tabelas ou sequências.
 
@@ -374,24 +442,47 @@ class DBManager:
             raise ValueError(f"Tipo de objeto '{obj_type}' não suportado")
         keyword = sql.SQL(obj_type)
 
+        # Obtém os privilégios atuais para comparar com os desejados
+        current = self.get_group_privileges(group)
+
         with self.conn.cursor() as cur:
             for schema, objects in privileges.items():
                 for name, perms in objects.items():
-                    invalid = set(perms) - allowed
+                    desired = set(perms)
+                    invalid = desired - allowed
                     if invalid:
                         raise ValueError(
                             f"Privilégios inválidos para {obj_type}: {', '.join(sorted(invalid))}"
                         )
+
                     identifier = sql.Identifier(schema, name)
-                    cur.execute(
-                        sql.SQL(
-                            "REVOKE ALL PRIVILEGES ON {} {} FROM {}"
-                        ).format(keyword, identifier, sql.Identifier(group))
-                    )
-                    if perms:
+                    existing = current.get(schema, {}).get(name, set())
+                    to_grant = desired - existing
+                    to_revoke = existing - desired
+
+                    if to_revoke:
+                        if check_dependencies:
+                            deps = self.get_object_dependencies(schema, name)
+                            if deps:
+                                raise RuntimeError(
+                                    f"[WARN-DEPEND] {schema}.{name} possui dependências: {deps}"
+                                )
+                        cur.execute(
+                            sql.SQL("REVOKE {} ON {} {} FROM {}").format(
+                                sql.SQL(", ").join(
+                                    sql.SQL(p.rstrip("*")) for p in sorted(to_revoke)
+                                ),
+                                keyword,
+                                identifier,
+                                sql.Identifier(group),
+                            )
+                        )
+                    if to_grant:
                         cur.execute(
                             sql.SQL("GRANT {} ON {} {} TO {}").format(
-                                sql.SQL(", ").join(sql.SQL(p) for p in sorted(perms)),
+                                sql.SQL(", ").join(
+                                    sql.SQL(p.rstrip("*")) for p in sorted(to_grant)
+                                ),
                                 keyword,
                                 identifier,
                                 sql.Identifier(group),
@@ -401,10 +492,14 @@ class DBManager:
     def grant_database_privileges(self, group: str, privileges: Set[str]):
         """Concede privilégios de banco ao grupo especificado.
 
-        Revoga primeiro todos os privilégios padrão e em seguida concede
-        aqueles informados em ``privileges``.
+        A implementação lê os privilégios atuais concedidos ao ``group`` e
+        calcula as diferenças em relação ao conjunto desejado. Somente as
+        diferenças são aplicadas via ``GRANT``/``REVOKE``, preservando quaisquer
+        privilégios fora da "fronteira" definida pelo ``PRIVILEGE_WHITELIST``.
         """
-        invalid = set(privileges) - PRIVILEGE_WHITELIST["DATABASE"]
+
+        base_privs = {p.rstrip("*") for p in privileges}
+        invalid = base_privs - PRIVILEGE_WHITELIST["DATABASE"]
         if invalid:
             raise ValueError(
                 f"Privilégios inválidos para DATABASE: {', '.join(sorted(invalid))}"
@@ -413,24 +508,67 @@ class DBManager:
         dbname = self.conn.get_dsn_parameters().get("dbname")
         with self.conn.cursor() as cur:
             cur.execute(
-                sql.SQL("REVOKE ALL PRIVILEGES ON DATABASE {} FROM {}" ).format(
-                    sql.Identifier(dbname), sql.Identifier(group)
-                )
+                """
+                SELECT a.privilege_type, a.is_grantable
+                FROM pg_database d
+                CROSS JOIN LATERAL aclexplode(
+                    COALESCE(d.datacl, acldefault('d', d.datdba))
+                ) AS a
+                JOIN pg_roles gr ON gr.oid = a.grantee
+                WHERE d.datname = current_database()
+                  AND gr.rolname = %s
+                """,
+                (group,),
             )
-            if privileges:
-                cur.execute(
-                    sql.SQL("GRANT {} ON DATABASE {} TO {}" ).format(
-                        sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
-                        sql.Identifier(dbname),
-                        sql.Identifier(group),
-                    )
+            current = {
+                priv + ("*" if grantable else "")
+                for priv, grantable in cur.fetchall()
+            }
+
+            managed_current = {
+                p for p in current if p.rstrip("*") in PRIVILEGE_WHITELIST["DATABASE"]
+            }
+            to_grant = privileges - managed_current
+            to_revoke = managed_current - privileges
+
+            if to_revoke:
+                revoke_sql = sql.SQL("REVOKE {} ON DATABASE {} FROM {}").format(
+                    sql.SQL(", ").join(
+                        sql.SQL(p.rstrip("*")) for p in sorted(to_revoke)
+                    ),
+                    sql.Identifier(dbname),
+                    sql.Identifier(group),
                 )
+                cur.execute(revoke_sql)
+
+            if to_grant:
+                plain = [p.rstrip("*") for p in sorted(to_grant) if not p.endswith("*")]
+                star = [p.rstrip("*") for p in sorted(to_grant) if p.endswith("*")]
+                if plain:
+                    cur.execute(
+                        sql.SQL("GRANT {} ON DATABASE {} TO {}").format(
+                            sql.SQL(", ").join(sql.SQL(p) for p in plain),
+                            sql.Identifier(dbname),
+                            sql.Identifier(group),
+                        )
+                    )
+                if star:
+                    cur.execute(
+                        sql.SQL(
+                            "GRANT {} ON DATABASE {} TO {} WITH GRANT OPTION"
+                        ).format(
+                            sql.SQL(", ").join(sql.SQL(p) for p in star),
+                            sql.Identifier(dbname),
+                            sql.Identifier(group),
+                        )
+                    )
 
     def grant_schema_privileges(self, group: str, schema: str, privileges: Set[str]):
         """Concede privilégios de schema ao grupo informado."""
         logger.debug(f"grant_schema_privileges called: group={group}, schema={schema}, privileges={privileges}")
         
-        invalid = set(privileges) - PRIVILEGE_WHITELIST["SCHEMA"]
+        base_privs = {p.rstrip("*") for p in privileges}
+        invalid = base_privs - PRIVILEGE_WHITELIST["SCHEMA"]
         if invalid:
             raise ValueError(
                 f"Privilégios inválidos para SCHEMA: {', '.join(sorted(invalid))}"
@@ -438,28 +576,95 @@ class DBManager:
 
         identifier = sql.Identifier(schema)
         with self.conn.cursor() as cur:
-            # Revoga todos os privilégios primeiro
-            revoke_sql = sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {}").format(
-                identifier, sql.Identifier(group)
+            # Obtém os privilégios atuais diretamente no banco via pg_catalog
+            cur.execute(
+                """
+                SELECT a.privilege_type, a.is_grantable
+                FROM pg_namespace n
+                CROSS JOIN LATERAL aclexplode(
+                    COALESCE(n.nspacl, acldefault('n', n.nspowner))
+                ) AS a
+                JOIN pg_roles r ON r.oid = a.grantee
+                WHERE r.rolname = %s AND n.nspname = %s
+                """,
+                (group, schema),
             )
-            logger.debug(f"Executing REVOKE: {revoke_sql.as_string(cur)}")
-            cur.execute(revoke_sql)
-            
-            # Concede os novos privilégios se houver
-            if privileges:
-                grant_sql = sql.SQL("GRANT {} ON SCHEMA {} TO {}").format(
-                    sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+            current = {
+                priv + ("*" if grantable else "") for priv, grantable in cur.fetchall()
+            }
+            logger.debug(
+                "Existing schema privileges for %s on %s: %s", group, schema, current
+            )
+
+            # Considera apenas privilégios gerenciados por este módulo
+            managed_current = {
+                p for p in current if p.rstrip("*") in PRIVILEGE_WHITELIST["SCHEMA"]
+            }
+            to_grant = privileges - managed_current
+            to_revoke = managed_current - privileges
+
+            if to_revoke:
+                revoke_sql = sql.SQL("REVOKE {} ON SCHEMA {} FROM {}").format(
+                    sql.SQL(", ").join(
+                        sql.SQL(p.rstrip("*")) for p in sorted(to_revoke)
+                    ),
                     identifier,
                     sql.Identifier(group),
                 )
-                logger.debug(f"Executing GRANT: {grant_sql.as_string(cur)}")
-                cur.execute(grant_sql)
-                logger.info(f"Granted schema privileges {privileges} on {schema} to {group}")
+                try:
+                    debug_sql = revoke_sql.as_string(cur)
+                except Exception:
+                    debug_sql = str(revoke_sql)
+                logger.debug(f"Executing REVOKE: {debug_sql}")
+                cur.execute(revoke_sql)
+
+            if to_grant:
+                plain = [p.rstrip("*") for p in sorted(to_grant) if not p.endswith("*")]
+                star = [p.rstrip("*") for p in sorted(to_grant) if p.endswith("*")]
+                if plain:
+                    grant_sql = sql.SQL("GRANT {} ON SCHEMA {} TO {}").format(
+                        sql.SQL(", ").join(sql.SQL(p) for p in plain),
+                        identifier,
+                        sql.Identifier(group),
+                    )
+                    try:
+                        debug_sql = grant_sql.as_string(cur)
+                    except Exception:
+                        debug_sql = str(grant_sql)
+                    logger.debug(f"Executing GRANT: {debug_sql}")
+                    cur.execute(grant_sql)
+                if star:
+                    grant_sql = sql.SQL(
+                        "GRANT {} ON SCHEMA {} TO {} WITH GRANT OPTION"
+                    ).format(
+                        sql.SQL(", ").join(sql.SQL(p) for p in star),
+                        identifier,
+                        sql.Identifier(group),
+                    )
+                    try:
+                        debug_sql = grant_sql.as_string(cur)
+                    except Exception:
+                        debug_sql = str(grant_sql)
+                    logger.debug(f"Executing GRANT (WGO): {debug_sql}")
+                    cur.execute(grant_sql)
+
+            if to_grant or to_revoke:
+                logger.info(
+                    "Updated schema privileges on %s for %s: +%s -%s",
+                    schema,
+                    group,
+                    to_grant,
+                    to_revoke,
+                )
             else:
-                logger.info(f"Revoked all schema privileges on {schema} from {group}")
-                
+                logger.info(
+                    "No schema privilege changes required on %s for %s",
+                    schema,
+                    group,
+                )
+
         # Força commit se não estiver em transação
-        if not self.conn.autocommit:
+        if not getattr(self.conn, "autocommit", False):
             self.conn.commit()
     # ---------------------------------------------------------------
     # Consultas de privilégios de schema e default privileges futuros
@@ -527,62 +732,52 @@ class DBManager:
         logger.debug(f"=== get_schema_privileges END: {out} ===")
         return out
 
-    def get_default_privileges(self, role: str | None = None, objtype: str = "r") -> Dict[str, Dict[str, Set[str]]]:
+    def get_default_privileges(
+        self,
+        owner: str | None = None,
+        objtype: str = "r",
+        schema: str | None = None,
+    ) -> Dict[str, Dict[str, Set[str]]]:
         """Return default privileges for future objects.
 
         Parameters
         ----------
-        role: str | None
-            Filter by grantee role. If ``None`` return defaults for all grantees.
+        owner: str | None
+            Filter by future object owner (``defaclrole``). If ``None`` return
+            defaults for all owners.
         objtype: str
-            PostgreSQL object type (r: tables, S: sequences, f: functions,
-            T: types, n: schemas). Defaults to 'r'.
+            PostgreSQL object type code (r: tables, S: sequences, f: functions,
+            T: types, n: schemas). Defaults to ``'r'``.
+        schema: str | None
+            Filter by schema name (``defaclnamespace``) when ``IN SCHEMA`` is
+            used. If ``None`` return defaults for all schemas.
         """
 
-        params = {"objtype": objtype}
-        role_filter = ""
-        if role:
-            role_filter = " AND grantee_rol.rolname = %(role)s"
-            params["role"] = role
+        params: Dict[str, object] = {"objtype": objtype}
+        filters = ["d.defaclobjtype = %(objtype)s"]
+        if owner:
+            filters.append("r.rolname = %(owner)s")
+            params["owner"] = owner
+        if schema:
+            filters.append("n.nspname = %(schema)s")
+            params["schema"] = schema
 
-        ver = self.server_version_num()
-
-        if ver >= 120000:
-            sql_query = (
-                """
-                SELECT n.nspname AS schema,
-                       owner_rol.rolname AS owner_role,
-                       grantee_rol.rolname AS grantee_role,
-                       array_agg(priv.privilege_type ORDER BY priv.privilege_type) AS privileges
-                FROM pg_default_acl d
-                JOIN pg_namespace n ON n.oid = d.defaclnamespace
-                JOIN pg_roles owner_rol ON owner_rol.oid = d.defaclrole
-                CROSS JOIN LATERAL aclexplode(d.defaclacl) AS priv(grantee, grantor, privilege_type, is_grantable)
-                JOIN pg_roles grantee_rol ON grantee_rol.oid = priv.grantee
-                WHERE d.defaclobjtype = %(objtype)s
-                {role_filter}
-                GROUP BY n.nspname, owner_rol.rolname, grantee_rol.rolname
-                ORDER BY n.nspname, grantee_rol.rolname
-                """.format(role_filter=role_filter)
-            )
-        else:
-            sql_query = (
-                """
-                SELECT n.nspname AS schema,
-                       owner_rol.rolname AS owner_role,
-                       COALESCE(grantee_rol.rolname, m[1], m[2]) AS grantee_role,
-                       string_to_array(m[3], NULL) AS privcodes
-                FROM pg_default_acl d
-                JOIN pg_namespace n ON n.oid = d.defaclnamespace
-                JOIN pg_roles owner_rol ON owner_rol.oid = d.defaclrole
-                CROSS JOIN LATERAL unnest(d.defaclacl) AS a(aclitem)
-                CROSS JOIN LATERAL regexp_match(a.aclitem::text, '^(?:"([^"]+)"|([^=]+))=([a-zA-Z]*)/.+$') AS m
-                LEFT JOIN pg_roles grantee_rol ON grantee_rol.rolname = COALESCE(m[1], m[2])
-                WHERE d.defaclobjtype = %(objtype)s
-                {role_filter}
-                ORDER BY n.nspname, grantee_role
-                """.format(role_filter=role_filter)
-            )
+        sql_query = (
+            """
+            SELECT r.rolname AS owner_role,
+                   n.nspname AS schema,
+                   COALESCE(gr.rolname, 'PUBLIC') AS grantee,
+                   a.privilege_type,
+                   a.is_grantable
+            FROM pg_default_acl d
+            JOIN pg_roles r ON r.oid = d.defaclrole
+            JOIN pg_namespace n ON n.oid = d.defaclnamespace
+            CROSS JOIN LATERAL aclexplode(d.defaclacl) AS a
+            LEFT JOIN pg_roles gr ON gr.oid = a.grantee
+            WHERE {where}
+            ORDER BY n.nspname
+            """.format(where=" AND ".join(filters))
+        )
 
         result: Dict[str, Dict[str, Set[str]]] = {}
         meta_owner: Dict[str, str] = {}
@@ -592,22 +787,60 @@ class DBManager:
                 cur.execute(sql_query, params)
                 rows = cur.fetchall()
 
-            for row in rows:
-                schema, owner_role, grantee_role, privs = row
-                meta_owner[schema] = owner_role
-                result.setdefault(schema, {})
-                if ver >= 120000:
-                    privset = {p.upper() for p in privs}
-                else:
-                    privset = {PG_PRIVCODE_TO_NAME.get(p) for p in privs if p in PG_PRIVCODE_TO_NAME}
-                result[schema].setdefault(grantee_role, set()).update(privset)
-
+            for owner_role, schema_name, grantee, priv, grantable in rows:
+                meta_owner[schema_name] = owner_role
+                privname = priv + ("*" if grantable else "")
+                result.setdefault(schema_name, {}).setdefault(grantee, set()).add(
+                    privname
+                )
         except Exception as e:
             logger.warning("Erro ao consultar default privileges: %s", e)
             return {}
 
         result["_meta"] = {"owner_roles": meta_owner}
         return result
+
+    def get_object_dependencies(self, schema: str, objname: str) -> List[tuple[str, str]]:
+        """Return list of dependent objects for a given table/view.
+
+        The function queries ``pg_depend`` joined with ``pg_rewrite`` and
+        ``pg_class`` to find views (or other objects) that depend on the
+        target object. It is intentionally minimal and returns a list of
+        ``(schema, name)`` tuples for each dependent object found. Any rows
+        that do not contain both schema and object name are ignored so the
+        method is robust against unexpected adapter behaviour.
+        """
+
+        query = """
+            SELECT dep_n.nspname, dep_c.relname
+            FROM pg_depend d
+            JOIN pg_rewrite r ON r.oid = d.objid
+            JOIN pg_class dep_c ON dep_c.oid = r.ev_class
+            JOIN pg_namespace dep_n ON dep_n.oid = dep_c.relnamespace
+            WHERE d.refobjid = (
+                SELECT c.oid
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = %s AND c.relname = %s
+            )
+        """
+
+        deps: List[tuple[str, str]] = []
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(query, (schema, objname))
+                for row in cur.fetchall():
+                    try:
+                        dep_schema, dep_name = row[0], row[1]
+                    except Exception:
+                        continue
+                    if dep_schema and dep_name:
+                        deps.append((dep_schema, dep_name))
+        except Exception as e:
+            logger.warning("Erro ao consultar dependências de %s.%s: %s", schema, objname, e)
+            return []
+
+        return deps
 
     def get_default_table_privileges(self, role: str) -> Dict[str, Set[str]]:
         """Retorna os privilégios padrão para tabelas futuramente criadas em cada schema."""
@@ -667,44 +900,51 @@ class DBManager:
         code = OBJECT_TYPE_CODES.get(obj_type)
 
         # Consulta privilégios atuais
-        existing = self.get_default_privileges(group, code).get(schema, {}).get(group, set())
-        if existing == set(privileges):
+        existing = (
+            self.get_default_privileges(owner=for_role, objtype=code, schema=schema)
+            .get(schema, {})
+            .get(group, set())
+        )
+        desired = set(privileges)
+        grant_set = desired - existing
+        revoke_set = existing - desired
+        logger.debug(f"existing={existing}, desired={desired}, grant_set={grant_set}, revoke_set={revoke_set}")
+        if not grant_set and not revoke_set:
             logger.debug("Default privileges already set; no-op.")
             return True
 
-        # Define clausula FOR ROLE
-        for_clause = ""
-        params: List[object] = []
+        # Define cláusula FOR ROLE corretamente (identificador, não literal)
         if for_role:
-            for_clause = "FOR ROLE %s"
-            params.append(for_role)
+            for_role_sql = sql.SQL("FOR ROLE {}" ).format(sql.Identifier(for_role))
+        else:
+            for_role_sql = sql.SQL("")
 
         with self.conn.cursor() as cur:
-            # Revoga primeiro
-            revoke_sql = sql.SQL(
-                "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} REVOKE ALL ON {obj_type} FROM {group}"
-            ).format(
-                for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
-                schema=sql.Identifier(schema),
-                obj_type=sql.SQL(obj_sql_name),
-                group=sql.Identifier(group),
-            )
+            if revoke_set:
+                revoke_sql = sql.SQL(
+                    "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} REVOKE {privs} ON {obj_type} FROM {group}"
+                ).format(
+                    for_role=for_role_sql,
+                    schema=sql.Identifier(schema),
+                    privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(revoke_set)),
+                    obj_type=sql.SQL(obj_sql_name),
+                    group=sql.Identifier(group),
+                )
 
-            try:
-                sql_text = revoke_sql.as_string(cur)
-            except Exception:
-                sql_text = str(revoke_sql)
-            logger.debug(f"Executing REVOKE: {sql_text}")
-            cur.execute(revoke_sql, params)
+                try:
+                    sql_text = revoke_sql.as_string(cur)
+                except Exception:
+                    sql_text = str(revoke_sql)
+                logger.debug(f"Executing REVOKE: {sql_text}")
+                cur.execute(revoke_sql)
 
-            # Concede os novos privilégios, se houver
-            if privileges:
+            if grant_set:
                 grant_sql = sql.SQL(
                     "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} GRANT {privs} ON {obj_type} TO {group}"
                 ).format(
-                    for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
+                    for_role=for_role_sql,
                     schema=sql.Identifier(schema),
-                    privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(privileges)),
+                    privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(grant_set)),
                     obj_type=sql.SQL(obj_sql_name),
                     group=sql.Identifier(group),
                 )
@@ -714,14 +954,13 @@ class DBManager:
                 except Exception:
                     sql_text = str(grant_sql)
                 logger.debug(f"Executing GRANT: {sql_text}")
-                cur.execute(grant_sql, params)
+                cur.execute(grant_sql)
 
-        # Força commit para garantir que as alterações sejam persistidas
-        self.conn.commit()
-
-        logger.info(
-            f"\u2713 Applied default privileges {privileges} for {obj_type} in {schema} to {group}"
-        )
+        if grant_set or revoke_set:
+            self.conn.commit()
+            logger.info(
+                f"\u2713 Applied default privileges: grant {grant_set} revoke {revoke_set} for {obj_type} in {schema} to {group}"
+            )
         logger.debug(f"=== alter_default_privileges END ===")
         return True
 
@@ -772,12 +1011,14 @@ class DBManager:
 
     def list_schemas(self) -> List[str]:
         with self.conn.cursor() as cur:
-            cur.execute("""
-                SELECT schema_name
-                FROM information_schema.schemata
-                WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-                ORDER BY schema_name
-            """)
+            cur.execute(
+                """
+                SELECT nspname
+                FROM pg_namespace
+                WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+                ORDER BY nspname
+                """
+            )
             return [row[0] for row in cur.fetchall()]
 
     def enable_postgis(self, schema_name: str):
