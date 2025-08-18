@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QDate, QSortFilterProxyModel
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QDate, QSortFilterProxyModel, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget,
     QHBoxLayout,
@@ -175,6 +175,8 @@ class UserDialog(QDialog):
         self.txtPassword.setEchoMode(QLineEdit.EchoMode.Password)
         self.dateEdit = QDateEdit()
         self.dateEdit.setCalendarPopup(True)
+        # Define data padrão como a data atual (antes ficava 2000-01-01)
+        self.dateEdit.setDate(QDate.currentDate())
         if valid_until:
             try:
                 y, m, d = map(int, valid_until.split('-'))
@@ -306,11 +308,19 @@ class BatchInsertDialog(QDialog):
 
 
 class UsersView(QWidget):
-    """Tela principal para gerenciamento de usuários com painel lateral de ações."""
+    """Tela principal para gerenciamento de usuários com painel lateral de ações.
+
+    Adiciona emissão de sinal global quando a conexão com o banco é perdida
+    para que a MainWindow possa tratar de forma centralizada.
+    """
+
+    connection_lost = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None, controller=None) -> None:
         super().__init__(parent)
         self.controller = controller
+        # Flag para evitar múltiplas emissões do sinal de conexão perdida
+        self._connection_lost_emitted = False
         self._build_ui()
         if self.controller:
             self.controller.data_changed.connect(self.load_users)
@@ -429,7 +439,11 @@ class UsersView(QWidget):
             user_groups = set(self.controller.list_user_groups(username))
             all_groups = set(self.controller.list_groups())
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Falha ao carregar grupos: {e}")
+            msg = str(e)
+            if 'connection already closed' in msg or 'server closed the connection' in msg:
+                self._emit_connection_lost_once()
+            else:
+                QMessageBox.critical(self, "Erro", f"Falha ao carregar grupos: {e}")
             return
         for g in sorted(user_groups):
             self.lstUserGroups.addItem(g)
@@ -485,7 +499,10 @@ class UsersView(QWidget):
     # ------------------------------------------------------------------
     # Operações
     # ------------------------------------------------------------------
-    def load_users(self) -> None:
+    def load_users(self, select_username: str | None = None) -> None:
+        # Guarda usuário atual se nenhum explicitamente solicitado
+        if select_username is None:
+            select_username = self._current_username()
         if not self.controller:
             self.baseModel.set_users([])
             return
@@ -507,9 +524,25 @@ class UsersView(QWidget):
                         validade = None
                 users.append((u, validade))
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Não foi possível listar usuários: {e}")
+            msg = str(e)
+            if 'connection already closed' in msg or 'server closed the connection' in msg:
+                self._emit_connection_lost_once()
+            else:
+                QMessageBox.critical(self, "Erro", f"Não foi possível listar usuários: {e}")
             users = []
         self.baseModel.set_users(users)
+        # Reseleciona usuário, se existir
+        if select_username:
+            for row_idx, (uname, _) in enumerate(users):
+                if uname == select_username:
+                    source_index = self.baseModel.index(row_idx, 0)
+                    proxy_index = self.proxyModel.mapFromSource(source_index)
+                    if proxy_index.isValid():
+                        self.table.selectRow(proxy_index.row())
+                    break
+        # Se nada selecionado e houver linhas, seleciona primeira
+        if not self.table.currentIndex().isValid() and users:
+            self.table.selectRow(0)
         self._refresh_group_lists()
 
     def _current_username(self) -> str | None:
@@ -528,7 +561,7 @@ class UsersView(QWidget):
             return
         try:
             self.controller.create_user(username, password, valid_until)
-            self.load_users()
+            self.load_users(select_username=username)
         except Exception as e:  # pragma: no cover - interface
             QMessageBox.critical(self, "Erro", str(e))
 
@@ -646,4 +679,13 @@ class UsersView(QWidget):
             if u:
                 users.append(u)
         return users
+
+    # ---------- Conexão perdida (sinal global) ----------
+    def _emit_connection_lost_once(self):
+        if self._connection_lost_emitted:
+            return
+        self._connection_lost_emitted = True
+        # Emite sinal para MainWindow assumir o tratamento global
+        self.connection_lost.emit()
+
 

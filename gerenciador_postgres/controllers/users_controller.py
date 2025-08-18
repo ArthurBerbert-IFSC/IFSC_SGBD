@@ -79,22 +79,16 @@ class UsersController(QObject):
         return self.role_manager.list_user_groups(username)
 
     def add_user_to_group(self, username: str, group_name: str) -> bool:
-        success = self.role_manager.add_user_to_group(username, group_name)
-        if success:
-            self.data_changed.emit()
-        return success
+            """Adiciona usuário a um grupo sem emitir data_changed (preserva seleção na UI)."""
+            return self.role_manager.add_user_to_group(username, group_name)
 
     def remove_user_from_group(self, username: str, group_name: str) -> bool:
-        success = self.role_manager.remove_user_from_group(username, group_name)
-        if success:
-            self.data_changed.emit()
-        return success
+            """Remove usuário de um grupo sem emitir data_changed."""
+            return self.role_manager.remove_user_from_group(username, group_name)
 
     def transfer_user_group(self, username: str, old_group: str, new_group: str) -> bool:
-        success = self.role_manager.transfer_user_group(username, old_group, new_group)
-        if success:
-            self.data_changed.emit()
-        return success
+            """Transfere usuário de old_group para new_group (remove + adiciona)."""
+            return self.role_manager.transfer_user_group(username, old_group, new_group)
 
     # --------------------------------------------------------------
     # Compat: algumas views podem chamar flush(); aqui não há buffer,

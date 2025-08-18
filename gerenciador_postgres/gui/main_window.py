@@ -54,6 +54,7 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._setup_statusbar()
         self._setup_central()
+        # Controladores e managers serão inicializados após conexão
         self.db_manager = None
         self.role_manager = None
         self.users_controller = None
@@ -63,6 +64,8 @@ class MainWindow(QMainWindow):
         self.schema_controller = None
         self.logger = setup_logger()
         self.opened_windows = []
+        # Flag para evitar múltiplas notificações de conexão perdida
+        self._handled_connection_lost = False
 
     def _setup_menu(self):
         menubar = self.menuBar()
@@ -130,6 +133,10 @@ class MainWindow(QMainWindow):
             self.stacked_widget.setCurrentWidget(self.mdi)
             users_window = UsersView(controller=self.users_controller)
             users_window.setWindowTitle("Gerenciador de Usuários")
+            try:
+                users_window.connection_lost.connect(self.on_connection_lost)
+            except Exception:
+                pass
             sub_window = self.mdi.addSubWindow(users_window)
             self.opened_windows.append(sub_window)
             sub_window.show()
@@ -264,6 +271,7 @@ class MainWindow(QMainWindow):
         self._connect_thread.start()
 
     def on_desconectar(self):
+        """Desconecta e reseta o estado da aplicação."""
         ConnectionManager().disconnect()
         self.db_manager = None
         self.role_manager = None
@@ -277,6 +285,8 @@ class MainWindow(QMainWindow):
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
+        # Permite novas notificações se reconectar no futuro
+        self._handled_connection_lost = False
 
     def show_help(self):
         from .help_dialog import HelpDialog
@@ -326,4 +336,26 @@ class MainWindow(QMainWindow):
                 "Não Conectado",
                 "Você precisa estar conectado a um banco de dados para executar SQL.",
             )
+
+    def on_connection_lost(self):
+        """Tratamento centralizado quando qualquer view detecta perda de conexão."""
+        if self._handled_connection_lost:
+            return
+        self._handled_connection_lost = True
+        # Fecha conexão e reseta estado sem mostrar diálogo 'Desconectado'
+        try:
+            ConnectionManager().disconnect()
+        except Exception:
+            pass
+        self.db_manager = None
+        self.role_manager = None
+        self.users_controller = None
+        self.schema_manager = None
+        self.schema_controller = None
+        self.groups_view = None
+        self.initial_panel.refresh()
+        self.stacked_widget.setCurrentWidget(self.initial_panel)
+        self.menuGerenciar.setEnabled(False)
+        self.statusbar.showMessage("Conexão perdida")
+        QMessageBox.critical(self, "Conexão Perdida", "A conexão com o banco foi perdida. Reconecte-se para continuar.")
     

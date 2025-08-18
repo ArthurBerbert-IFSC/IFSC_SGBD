@@ -75,6 +75,24 @@ class DBManager:
     def conn(self) -> connection:
         return self._conn_provider()
 
+    # ------------------------------------------------------------------
+    def _reset_if_aborted(self):
+        """Efetua rollback silencioso se a conexão estiver em estado de erro.
+
+        Situações como "current transaction is aborted" deixam a conexão
+        inutilizável até um ``ROLLBACK``. Este helper é chamado no início
+        de operações de leitura para recuperar automaticamente após falhas
+        anteriores.
+        """
+        try:
+            from psycopg2 import extensions as _ext
+            status = self.conn.get_transaction_status()
+            if status == _ext.TRANSACTION_STATUS_INERROR:
+                logger.warning("Transação anterior abortada detectada; executando rollback automático.")
+                self.conn.rollback()
+        except Exception:
+            pass
+
     @contextmanager
     def transaction(self):
         """Contexto para controle de transações.
@@ -102,6 +120,7 @@ class DBManager:
                 return 0
 
     def find_user_by_name(self, username: str) -> Optional[User]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT rolname, oid, rolvaliduntil, rolcanlogin
@@ -154,6 +173,7 @@ class DBManager:
             cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(username)))
 
     def list_users(self) -> List[str]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT rolname FROM pg_roles
@@ -163,7 +183,10 @@ class DBManager:
                   AND rolname <> 'postgres'
                 ORDER BY rolname
             """)
-            return filter_managed([row[0] for row in cur.fetchall()])
+            # Anteriormente filtrava por padrões do permission_contract (filter_managed),
+            # o que ocultava usuários gerados no formato primeiro.ultimo.
+            # Agora retornamos todos os roles de login não-sistema.
+            return [row[0] for row in cur.fetchall()]
 
     def create_group(self, group_name: str):
         with self.conn.cursor() as cur:
@@ -247,6 +270,7 @@ class DBManager:
             )
 
     def list_group_members(self, group_name: str) -> List[str]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT u.rolname
@@ -259,6 +283,7 @@ class DBManager:
             return [row[0] for row in cur.fetchall()]
 
     def list_user_groups(self, username: str) -> List[str]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT g.rolname
@@ -268,9 +293,11 @@ class DBManager:
                 WHERE u.rolname = %s
                 ORDER BY g.rolname
             """, (username,))
-            return filter_managed([row[0] for row in cur.fetchall()])
+            # Removido filter_managed para exibir todos os grupos atribuídos
+            return [row[0] for row in cur.fetchall()]
 
     def list_groups(self) -> List[str]:
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute("""
                 SELECT rolname FROM pg_roles
@@ -280,10 +307,12 @@ class DBManager:
                   AND rolname <> 'postgres'
                 ORDER BY rolname
             """)
-            return filter_managed([row[0] for row in cur.fetchall()])
+            # Removido filter_managed para permitir visualizar todos os grupos
+            return [row[0] for row in cur.fetchall()]
 
     def list_roles(self) -> List[str]:
         """Retorna todos os roles disponíveis (usuários e grupos)."""
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -331,6 +360,7 @@ class DBManager:
         sql_query = "\n".join(query)
         params: list[object] = [list(include_types), schemas]
 
+        self._reset_if_aborted()
         with self.conn.cursor() as cur:
             cur.execute(sql_query, params)
             result: Dict[str, List[str]] = {schema: [] for schema in schemas}
@@ -346,6 +376,10 @@ class DBManager:
         por ``"*"`` ao final do nome do privilégio).
         """
 
+        # Importante: "acldefault" espera primeiro argumento do tipo "char",
+        # portanto fazemos cast explícito ( 'S'::"char" / 'r'::"char" ) para
+        # evitar erro "function acldefault(text, oid) does not exist" em alguns
+        # servidores / versões.
         query = (
             """
             SELECT
@@ -356,22 +390,32 @@ class DBManager:
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             CROSS JOIN LATERAL aclexplode(
-                COALESCE(c.relacl,
-                         acldefault(
-                             CASE WHEN c.relkind = 'S' THEN 'S' ELSE 'r' END,
-                             c.relowner))
+                COALESCE(
+                    c.relacl,
+                    acldefault(
+                        (CASE WHEN c.relkind = 'S' THEN 'S'::"char" ELSE 'r'::"char" END),
+                        c.relowner
+                    )
+                )
             ) AS a
             JOIN pg_roles gr ON gr.oid = a.grantee
             WHERE gr.rolname = %s
             """
         )
-        with self.conn.cursor() as cur:
-            cur.execute(query, (group,))
-            result: Dict[str, Dict[str, Set[str]]] = {}
-            for schema, table, priv, grantable in cur.fetchall():
-                privname = priv + ("*" if grantable else "")
-                result.setdefault(schema, {}).setdefault(table, set()).add(privname)
-            return result
+        self._reset_if_aborted()
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(query, (group,))
+                result: Dict[str, Dict[str, Set[str]]] = {}
+                for schema, table, priv, grantable in cur.fetchall():
+                    privname = priv + ("*" if grantable else "")
+                    result.setdefault(schema, {}).setdefault(table, set()).add(privname)
+                return result
+        except Exception as e:
+            logger.error("Erro ao obter privilégios de grupo '%s': %s", group, e)
+            # Garante que um erro aqui não deixe a transação em estado abortado
+            self._reset_if_aborted()
+            return {}
 
     def apply_group_privileges(
         self,
@@ -869,19 +913,18 @@ class DBManager:
             logger.debug("Default privileges already set; no-op.")
             return True
 
-        # Define clausula FOR ROLE
-        for_clause = ""
-        params: List[object] = []
+        # Define cláusula FOR ROLE corretamente (identificador, não literal)
         if for_role:
-            for_clause = "FOR ROLE %s"
-            params.append(for_role)
+            for_role_sql = sql.SQL("FOR ROLE {}" ).format(sql.Identifier(for_role))
+        else:
+            for_role_sql = sql.SQL("")
 
         with self.conn.cursor() as cur:
             if revoke_set:
                 revoke_sql = sql.SQL(
                     "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} REVOKE {privs} ON {obj_type} FROM {group}"
                 ).format(
-                    for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
+                    for_role=for_role_sql,
                     schema=sql.Identifier(schema),
                     privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(revoke_set)),
                     obj_type=sql.SQL(obj_sql_name),
@@ -893,13 +936,13 @@ class DBManager:
                 except Exception:
                     sql_text = str(revoke_sql)
                 logger.debug(f"Executing REVOKE: {sql_text}")
-                cur.execute(revoke_sql, params)
+                cur.execute(revoke_sql)
 
             if grant_set:
                 grant_sql = sql.SQL(
                     "ALTER DEFAULT PRIVILEGES {for_role} IN SCHEMA {schema} GRANT {privs} ON {obj_type} TO {group}"
                 ).format(
-                    for_role=sql.SQL(for_clause) if for_role else sql.SQL(""),
+                    for_role=for_role_sql,
                     schema=sql.Identifier(schema),
                     privs=sql.SQL(", ").join(sql.SQL(p) for p in sorted(grant_set)),
                     obj_type=sql.SQL(obj_sql_name),
@@ -911,7 +954,7 @@ class DBManager:
                 except Exception:
                     sql_text = str(grant_sql)
                 logger.debug(f"Executing GRANT: {sql_text}")
-                cur.execute(grant_sql, params)
+                cur.execute(grant_sql)
 
         if grant_set or revoke_set:
             self.conn.commit()
