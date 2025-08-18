@@ -1,12 +1,18 @@
 from PyQt6.QtWidgets import (
-    QMainWindow,
-    QMenuBar,
+    QMainWindow,   
+    QMenuBar,     
     QMdiArea,
-    QStackedWidget,
+    QStackedWidget, 
+    QDockWidget
     QVBoxLayout,
+    QStatusBar, 
+    QMessageBox, 
+    QProgressDialog, 
+    QDialog, 
+    QLabel,
+    QPushButton
 )
-from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog, QDialog
-from PyQt6.QtWidgets import QVBoxLayout, QPushButton
+
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QIcon, QGuiApplication
 from pathlib import Path
@@ -62,6 +68,7 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._setup_statusbar()
         self._setup_central()
+        self._setup_info_dock()
         # Controladores e managers serão inicializados após conexão
         self.db_manager = None
         self.role_manager = None
@@ -74,6 +81,10 @@ class MainWindow(QMainWindow):
         self.opened_windows = []
         # Flag para evitar múltiplas notificações de conexão perdida
         self._handled_connection_lost = False
+        self.conn_manager = ConnectionManager()
+        self.conn_manager.connected.connect(self._on_connected)
+        self.conn_manager.disconnected.connect(self._on_disconnected)
+        self.conn_manager.connection_lost.connect(self.on_connection_lost)
 
     def _setup_menu(self):
         menubar = self.menuBar()
@@ -147,6 +158,23 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage("Não conectado")
 
+
+    def _setup_info_dock(self):
+        self.info_dock = QDockWidget("Informações", self)
+        self.info_label = QLabel("", self.info_dock)
+        self.info_dock.setWidget(self.info_label)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.info_dock)
+
+    def _on_connected(self, dbname: str, user: str):
+        self.initial_panel.refresh()
+        self.statusbar.showMessage(f"Conectado a {dbname} como {user}")
+        self.info_label.setText("")
+
+    def _on_disconnected(self):
+        self.initial_panel.refresh()
+        self.statusbar.showMessage("Não conectado")
+        self.info_label.setText("Desconectado")
+
     def on_dashboard(self):
         self.stacked_widget.setCurrentWidget(self.initial_panel)
         if hasattr(self, "info_dock"):
@@ -161,7 +189,7 @@ class MainWindow(QMainWindow):
             users_window = UsersView(controller=self.users_controller)
             users_window.setWindowTitle("Gerenciador de Usuários")
             try:
-                users_window.connection_lost.connect(self.on_connection_lost)
+                users_window.connection_lost.connect(self.conn_manager.connection_lost.emit)
             except Exception:
                 pass
             sub_window = self.mdi.addSubWindow(users_window)
@@ -250,6 +278,7 @@ class MainWindow(QMainWindow):
             self.schema_controller = SchemaController(self.schema_manager, self.logger)
 
             self.menuGerenciar.setEnabled(True)
+
             self.statusbar.showMessage(
                 f"Conectado a {params['dbname']} como {params['user']}"
             )
@@ -284,10 +313,12 @@ class MainWindow(QMainWindow):
             self.schema_manager = None
             self.schema_controller = None
             self.menuGerenciar.setEnabled(False)
+
             self.statusbar.showMessage("Não conectado")
             self.initial_panel.refresh()
             self.mdi.setVisible(False)
             self.info_dock.show()
+
             QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
 
         self._connect_thread.succeeded.connect(finalize_success)
@@ -308,13 +339,14 @@ class MainWindow(QMainWindow):
         self.schema_manager = None
         self.schema_controller = None
         self.groups_view = None
+
         # Restaura estado inicial
         self.initial_panel.refresh()
         self.mdi.closeAllSubWindows()
         self.mdi.setVisible(False)
         self.info_dock.show()
+        
         self.menuGerenciar.setEnabled(False)
-        self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
         # Permite novas notificações se reconectar no futuro
         self._handled_connection_lost = False
@@ -422,11 +454,14 @@ class MainWindow(QMainWindow):
         self.schema_manager = None
         self.schema_controller = None
         self.groups_view = None
+
         self.initial_panel.refresh()
         self.mdi.closeAllSubWindows()
         self.mdi.setVisible(False)
         self.info_dock.show()
+
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Conexão perdida")
+        self.info_label.setText("Conexão perdida. Reconecte-se para continuar.")
         QMessageBox.critical(self, "Conexão Perdida", "A conexão com o banco foi perdida. Reconecte-se para continuar.")
     
