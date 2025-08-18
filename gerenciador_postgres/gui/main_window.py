@@ -1,5 +1,14 @@
-from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea, QStackedWidget
-from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog, QDialog
+from PyQt6.QtWidgets import (
+    QMainWindow,
+    QMenuBar,
+    QMdiArea,
+    QStackedWidget,
+    QStatusBar,
+    QMessageBox,
+    QProgressDialog,
+    QDialog,
+    QLabel,
+)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QIcon
 from pathlib import Path
@@ -125,6 +134,13 @@ class MainWindow(QMainWindow):
     def _setup_statusbar(self):
         self.statusbar = QStatusBar(self)
         self.setStatusBar(self.statusbar)
+        self.lbl_db = QLabel("DB: -")
+        self.lbl_user = QLabel("Usuário: -")
+        self.lbl_host = QLabel("Host: -")
+        self.lbl_status = QLabel("Desconectado")
+        self.lbl_status.setStyleSheet("color: red")
+        for lbl in [self.lbl_db, self.lbl_user, self.lbl_host, self.lbl_status]:
+            self.statusbar.addPermanentWidget(lbl)
         self.statusbar.showMessage("Não conectado")
 
     def on_usuarios(self):
@@ -223,6 +239,11 @@ class MainWindow(QMainWindow):
             self.schema_controller = SchemaController(self.schema_manager, self.logger)
 
             self.menuGerenciar.setEnabled(True)
+            self.lbl_db.setText(f"DB: {params['dbname']}")
+            self.lbl_user.setText(f"Usuário: {params['user']}")
+            self.lbl_host.setText(f"Host: {params.get('host', 'localhost')}")
+            self.lbl_status.setText("Conectado")
+            self.lbl_status.setStyleSheet("color: green")
             self.statusbar.showMessage(
                 f"Conectado a {params['dbname']} como {params['user']}"
             )
@@ -256,6 +277,11 @@ class MainWindow(QMainWindow):
             self.schema_manager = None
             self.schema_controller = None
             self.menuGerenciar.setEnabled(False)
+            self.lbl_db.setText("DB: -")
+            self.lbl_user.setText("Usuário: -")
+            self.lbl_host.setText("Host: -")
+            self.lbl_status.setText("Desconectado")
+            self.lbl_status.setStyleSheet("color: red")
             self.statusbar.showMessage("Não conectado")
             self.initial_panel.refresh()
             self.stacked_widget.setCurrentWidget(self.initial_panel)
@@ -283,6 +309,11 @@ class MainWindow(QMainWindow):
         self.initial_panel.refresh()
         self.stacked_widget.setCurrentWidget(self.initial_panel)
         self.menuGerenciar.setEnabled(False)
+        self.lbl_db.setText("DB: -")
+        self.lbl_user.setText("Usuário: -")
+        self.lbl_host.setText("Host: -")
+        self.lbl_status.setText("Desconectado")
+        self.lbl_status.setStyleSheet("color: red")
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
         # Permite novas notificações se reconectar no futuro
@@ -356,6 +387,8 @@ class MainWindow(QMainWindow):
         self.initial_panel.refresh()
         self.stacked_widget.setCurrentWidget(self.initial_panel)
         self.menuGerenciar.setEnabled(False)
+        self.lbl_status.setText("Conexão perdida")
+        self.lbl_status.setStyleSheet("color: red")
         self.statusbar.showMessage("Conexão perdida")
         QMessageBox.critical(self, "Conexão Perdida", "A conexão com o banco foi perdida. Reconecte-se para continuar.")
     
