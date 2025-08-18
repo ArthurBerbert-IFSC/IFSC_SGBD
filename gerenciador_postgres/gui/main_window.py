@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea, QStackedWidget
 from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog, QDialog
+from PyQt6.QtWidgets import QVBoxLayout, QPushButton
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QAction, QIcon, QGuiApplication
 from pathlib import Path
 from .connection_dialog import ConnectionDialog
 from ..db_manager import DBManager
@@ -89,6 +90,7 @@ class MainWindow(QMainWindow):
 
         # Ações do menu Ajuda
         self.actionAjuda = QAction("Ajuda", self)
+        self.actionEnvInfo = QAction("Informações do Ambiente", self)
         self.actionSobre = QAction("Sobre", self)
 
         # --- Conectar Sinais (Handlers) ---
@@ -101,6 +103,7 @@ class MainWindow(QMainWindow):
         self.actionSqlConsole.triggered.connect(self.on_sql_console)
 
         self.actionAjuda.triggered.connect(self.show_help)
+        self.actionEnvInfo.triggered.connect(self.show_env_info)
         self.actionSobre.triggered.connect(self.show_about)
         # Outras ações seriam conectadas aqui no futuro...
 
@@ -120,6 +123,7 @@ class MainWindow(QMainWindow):
 
         # Menu Ajuda
         self.menuAjuda.addAction(self.actionAjuda)
+        self.menuAjuda.addAction(self.actionEnvInfo)
         self.menuAjuda.addAction(self.actionSobre)
 
     def _setup_statusbar(self):
@@ -291,6 +295,32 @@ class MainWindow(QMainWindow):
     def show_help(self):
         from .help_dialog import HelpDialog
         dlg = HelpDialog(self)
+        dlg.exec()
+
+    def show_env_info(self):
+        panel = InitialPanel()
+        env_box = panel.env_box
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Informações do Ambiente")
+        layout = QVBoxLayout(dlg)
+        env_box.setParent(dlg)
+        layout.addWidget(env_box)
+        btn_copy = QPushButton("Copiar", dlg)
+        layout.addWidget(btn_copy, alignment=Qt.AlignmentFlag.AlignRight)
+
+        def copy():
+            texts = []
+            box_layout = env_box.layout()
+            for i in range(box_layout.count()):
+                w = box_layout.itemAt(i).widget()
+                if w and hasattr(w, "text"):
+                    texts.append(w.text())
+            QGuiApplication.clipboard().setText("\n".join(texts))
+            QMessageBox.information(
+                dlg, "Copiado", "Informações copiadas para a área de transferência."
+            )
+
+        btn_copy.clicked.connect(copy)
         dlg.exec()
 
     def show_about(self):
