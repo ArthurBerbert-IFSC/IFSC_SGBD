@@ -71,23 +71,38 @@ class SchemaView(QWidget):
             return
         owner = None
         roles = []
+        supers = set()
         if self.controller:
             try:
-                roles = self.controller.list_roles()
+                roles = self.controller.list_owner_candidates(include_superusers=True)
+                supers = set(self.controller.list_superusers())
             except Exception as e:
                 if self.logger:
-                    self.logger.error(f"Falha ao listar roles: {e}")
-        if roles:
-            items = [""] + roles
-            owner, ok2 = QInputDialog.getItem(
-                self, "Proprietário", "Owner (opcional):", items, 0, False
-            )
-            if not ok2:
-                owner = None
+                    self.logger.error(f"Falha ao listar candidatos a owner: {e}")
+        # Ordena: primeiro superusuários (marcados), depois demais
+        decorated = []
+        for r in roles:
+            if r in supers:
+                decorated.append((0, f"[{r}]", r))  # chave de ordenação 0 para supers
+            else:
+                decorated.append((1, r, r))
+        decorated.sort()
+        display_items = [d[1] for d in decorated]
+        items = [""] + display_items
+        owner, ok2 = QInputDialog.getItem(
+            self,
+            "Proprietário",
+            "Owner (opcional) – superusuários entre []:",
+            items,
+            0,
+            False,
+        )
+        if not ok2:
+            owner = None
         else:
-            owner, ok2 = QInputDialog.getText(self, "Proprietário", "Owner (opcional):")
-            if not ok2:
-                owner = None
+            # Converter de volta display -> real
+            if owner and owner.startswith("[") and owner.endswith("]"):
+                owner = owner[1:-1]
         try:
             self.controller.create_schema(name, owner or None)
             QMessageBox.information(self, "Sucesso", f"Schema '{name}' criado.")
@@ -167,21 +182,32 @@ class SchemaView(QWidget):
             return
         name = item.text()
         roles = []
+        supers = set()
         if self.controller:
             try:
-                roles = self.controller.list_roles()
+                roles = self.controller.list_owner_candidates(include_superusers=True)
+                supers = set(self.controller.list_superusers())
             except Exception as e:
                 if self.logger:
-                    self.logger.error(f"Falha ao listar roles: {e}")
-
-        if roles:
-            new_owner, ok = QInputDialog.getItem(
-                self, "Alterar Owner", "Novo owner:", roles, 0, False
-            )
-        else:
-            new_owner, ok = QInputDialog.getText(
-                self, "Alterar Owner", f"Novo owner para '{name}':"
-            )
+                    self.logger.error(f"Falha ao listar candidatos a owner: {e}")
+        decorated = []
+        for r in roles:
+            if r in supers:
+                decorated.append((0, f"[{r}]", r))
+            else:
+                decorated.append((1, r, r))
+        decorated.sort()
+        display_items = [d[1] for d in decorated]
+        new_owner, ok = QInputDialog.getItem(
+            self,
+            "Alterar Owner",
+            "Novo owner – superusuários entre []:",
+            display_items,
+            0,
+            False,
+        )
+        if ok and new_owner and new_owner.startswith("[") and new_owner.endswith("]"):
+            new_owner = new_owner[1:-1]
 
         if not ok or not new_owner:
             return

@@ -836,7 +836,7 @@ class RoleManager:
             if not group_name.startswith(prefix):
                 # Evita duplicar prefixo se usuário digitou algo parecido
                 if group_name.startswith(prefix.rstrip('_')):
-                    # ex: prefix=turma_ e name inicia com 'turma' sem underscore
+                    # Se já começa com o texto do prefixo sem underscore, evita duplicar
                     group_name = group_name[len(prefix.rstrip('_')):]
                 group_name = f"{prefix}{group_name}" if not group_name.startswith(prefix) else group_name
     # Sem fallback antigo: sempre exige o prefixo configurado se fornecido

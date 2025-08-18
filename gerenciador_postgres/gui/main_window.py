@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QIcon, QGuiApplication
 from pathlib import Path
+import logging
 from .connection_dialog import ConnectionDialog
 from ..db_manager import DBManager
 from ..role_manager import RoleManager
@@ -61,29 +62,163 @@ class ConnectThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        # Logger específico da MainWindow
+        self._mw_logger = logging.getLogger(__name__ + ".MainWindow")
+        try:
+            self._mw_logger.info("[INIT] Iniciando construção da MainWindow")
+        except Exception:
+            pass
+
+        # Configuração básica da janela
         assets_dir = Path(__file__).resolve().parents[2] / "assets"
         self.setWindowIcon(QIcon(str(assets_dir / "principal_2.png")))
         self.setWindowTitle("Gerenciador PostgreSQL")
         self.resize(900, 600)
+        try:
+            self._mw_logger.debug("[INIT] Janela básica configurada (título, ícone, tamanho)")
+        except Exception:
+            pass
+
+        # Estrutura principal da UI
         self._setup_menu()
+        try:
+            self._mw_logger.debug("[INIT] Menu configurado")
+        except Exception:
+            pass
         self._setup_statusbar()
+        try:
+            self._mw_logger.debug("[INIT] Status bar configurada")
+        except Exception:
+            pass
         self._setup_central()
-        # Controladores e managers serão inicializados após conexão
-        self.db_manager = None
-        self.role_manager = None
-        self.users_controller = None
-        self.groups_controller = None
-        self.groups_view = None
-        self.schema_manager = None
-        self.schema_controller = None
-        self.logger = setup_logger()
-        self.opened_windows = []
-        # Flag para evitar múltiplas notificações de conexão perdida
-        self._handled_connection_lost = False
-        self.conn_manager = ConnectionManager()
-        self.conn_manager.connected.connect(self._on_connected)
-        self.conn_manager.disconnected.connect(self._on_disconnected)
-        self.conn_manager.connection_lost.connect(self.on_connection_lost)
+        try:
+            self._mw_logger.debug("[INIT] Área central configurada (mdi + info dock)")
+        except Exception:
+            pass
+        # Bloco de pós-configuração com tratamento de exceções detalhado
+        try:
+            self._mw_logger.debug("[INIT] Iniciando pós-configuração de managers/controladores")
+
+            # Controladores e managers (inicializados após conexão)
+            self.db_manager = None
+            self.role_manager = None
+            self.users_controller = None
+            self.groups_controller = None
+            self.groups_view = None
+            self.schema_manager = None
+            self.schema_controller = None
+
+            # Logger principal do sistema (evita reconfigurar handlers já feitos em Rodar.py)
+            try:
+                self.logger = logging.getLogger('app') or logging.getLogger()
+            except Exception:
+                self.logger = logging.getLogger()
+            self._mw_logger.debug("[INIT] logger obtido (sem reconfiguração)")
+
+            self.opened_windows = []
+            self._mw_logger.debug("[INIT] opened_windows inicializado")
+
+            # Estado de conexão / eventos
+            self._handled_connection_lost = False  # Evita múltiplas notificações
+            self._mw_logger.debug("[INIT] _handled_connection_lost definido para False")
+            # ConnectionManager será instanciado sob demanda (lazy) para evitar travar init
+            self.conn_manager = None
+            self._mw_logger.debug("[INIT] ConnectionManager lazy (ainda não instanciado)")
+
+            # Loga geometria antes de mostrar (show será chamado em Rodar.py)
+            try:
+                self._mw_logger.debug(
+                    f"[INIT] Geometry inicial w={self.width()} h={self.height()} pos={self.pos().x()},{self.pos().y()}"
+                )
+            except Exception:
+                pass
+
+            # Ajustes visuais iniciais
+            if hasattr(self, 'info_dock'):
+                self.info_dock.show()
+                self._mw_logger.debug("[INIT] info_dock mostrado")
+            # Garante uma largura inicial para o dock (caso apareça colapsado)
+            try:
+                self.resizeDocks([self.info_dock], [260], Qt.Orientation.Horizontal)
+            except Exception:
+                pass
+
+            self._mw_logger.info("[INIT] MainWindow construída (aguardando conexão)")
+        except Exception:  # Captura qualquer falha silenciosa anterior
+            try:
+                self._mw_logger.exception("[INIT] Falha durante pós-configuração da MainWindow")
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    def showEvent(self, event):  # type: ignore[override]
+        try:
+            self._mw_logger.info("[EVENT] showEvent disparado")
+        except Exception:
+            pass
+        super().showEvent(event)
+        try:
+            self.raise_()
+            self.activateWindow()
+        except Exception:
+            pass
+        # Ajuste extra: se dock ficou invisível, tentar exibir
+        try:
+            if hasattr(self, 'info_dock') and not self.info_dock.isVisible():
+                self.info_dock.show()
+        except Exception:
+            pass
+        # Garante que a janela esteja visível (pode ter ficado fora da tela)
+        try:
+            self._ensure_visible()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    def _ensure_conn_manager(self):
+        if self.conn_manager is not None:
+            return
+        try:
+            self._mw_logger.debug("[CM-LAZY] Instanciando ConnectionManager agora")
+        except Exception:
+            pass
+        cm = ConnectionManager()
+        self.conn_manager = cm
+        try:
+            cm.connected.connect(self._on_connected)
+            cm.disconnected.connect(self._on_disconnected)
+            cm.connection_lost.connect(self.on_connection_lost)
+            self._mw_logger.debug("[CM-LAZY] Sinais conectados")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    def _ensure_visible(self):
+        """Reposiciona a janela se estiver totalmente fora de todas as telas."""
+        try:
+            from PyQt6.QtGui import QGuiApplication
+            frame = self.frameGeometry()
+            screens = QGuiApplication.screens()
+            if not screens:
+                return
+            # Critério ampliado: se mais de 70% da largura estiver fora da tela primária à esquerda ou direita, reposiciona
+            primary = QGuiApplication.primaryScreen() or screens[0]
+            pgeo = primary.availableGeometry()
+            intersects_any = any(frame.intersects(s.geometry()) for s in screens)
+            off_horizontal = frame.right() < pgeo.left() + 40 or frame.left() > pgeo.right() - 40
+            if not intersects_any or off_horizontal:
+                center = pgeo.center()
+                new_top_left = center - self.rect().center()
+                self.move(new_top_left)
+                try:
+                    self._mw_logger.info(
+                        f"[VISIBILITY] Janela reposicionada para {new_top_left.x()},{new_top_left.y()} (intersects_any={intersects_any} off_horizontal={off_horizontal})"
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _setup_menu(self):
         menubar = self.menuBar()
@@ -156,6 +291,10 @@ class MainWindow(QMainWindow):
         self.statusbar = QStatusBar(self)
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage("Não conectado")
+        try:
+            self._mw_logger.debug("[SETUP] Status bar criada")
+        except Exception:
+            pass
 
 
     # _setup_info_dock removido: info_dock agora é criado apenas em _setup_central
@@ -170,6 +309,10 @@ class MainWindow(QMainWindow):
 
     def on_dashboard(self):
         # Exibe painel inicial e destaca dock de informações
+        try:
+            self._mw_logger.debug("[UI] on_dashboard acionado")
+        except Exception:
+            pass
         if hasattr(self, 'mdi'):
             self.mdi.setVisible(False)
         if hasattr(self, 'info_dock'):
@@ -219,8 +362,18 @@ class MainWindow(QMainWindow):
             )
 
     def on_conectar(self):
+        # Garante que ConnectionManager existe
+        self._ensure_conn_manager()
+        try:
+            self._mw_logger.info("[CONNECTION] Abrindo diálogo de conexão")
+        except Exception:
+            pass
         dlg = ConnectionDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
+            try:
+                self._mw_logger.info("[CONNECTION] Diálogo cancelado")
+            except Exception:
+                pass
             return
 
         params = dlg.get_connection_params()
@@ -232,6 +385,10 @@ class MainWindow(QMainWindow):
         self._progress.setWindowModality(Qt.WindowModality.WindowModal)
         self._progress.setMinimumDuration(0)
         self._progress.show()
+        try:
+            self._mw_logger.debug("[CONNECTION] Progress dialog mostrado; iniciando thread")
+        except Exception:
+            pass
 
         # Inclui o nome do perfil (se houver) para resolução de senha no ConnectionManager
         profile_name = dlg.cmbProfiles.currentText().strip() if hasattr(dlg, 'cmbProfiles') else None
@@ -243,6 +400,10 @@ class MainWindow(QMainWindow):
         self._connect_timeout_timer.setSingleShot(True)
 
         def finalize_success(bg_conn):
+            try:
+                self._mw_logger.info("[CONNECTION] finalize_success chamado")
+            except Exception:
+                pass
             if not getattr(self, "_connect_in_progress", False):
                 return
             self._connect_in_progress = False
@@ -290,8 +451,16 @@ class MainWindow(QMainWindow):
                 "Conexão bem-sucedida",
                 f"Conectado ao banco {params['dbname']}.",
             )
+            try:
+                self._mw_logger.info("[CONNECTION] Conexão estabelecida e UI atualizada")
+            except Exception:
+                pass
 
         def finalize_fail(error: Exception):
+            try:
+                self._mw_logger.error(f"[CONNECTION] finalize_fail: {error}")
+            except Exception:
+                pass
             if not getattr(self, "_connect_in_progress", False):
                 return
             self._connect_in_progress = False
@@ -328,10 +497,15 @@ class MainWindow(QMainWindow):
         self._connect_timeout_timer.start(15000)
         self._progress.canceled.connect(lambda: finalize_fail(Exception("Operação cancelada pelo usuário")))
         self._connect_thread.start()
+        try:
+            self._mw_logger.debug("[CONNECTION] Thread de conexão iniciada")
+        except Exception:
+            pass
 
     def on_desconectar(self):
         """Desconecta e reseta o estado da aplicação."""
-        ConnectionManager().disconnect()
+        if self.conn_manager:
+            self.conn_manager.disconnect()
         self.db_manager = None
         self.role_manager = None
         self.users_controller = None
@@ -446,7 +620,8 @@ class MainWindow(QMainWindow):
         self._handled_connection_lost = True
         # Fecha conexão e reseta estado sem mostrar diálogo 'Desconectado'
         try:
-            ConnectionManager().disconnect()
+            if self.conn_manager:
+                self.conn_manager.disconnect()
         except Exception:
             pass
         self.db_manager = None

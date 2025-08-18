@@ -36,15 +36,13 @@ def force_reload_and_test():
             conn = cm.get_connection()
             db = DBManager(conn)
             
-            # Testa com o grupo que estava dando erro
-            print("\n🧪 Testando get_schema_privileges...")
-            result = db.get_schema_privileges('turma_Geo2_2025-2')
-            print(f"✅ Resultado: {result}")
-            
-            # Testa também default privileges
-            print("\n🧪 Testando get_default_table_privileges...")
-            result2 = db.get_default_table_privileges('turma_Geo2_2025-2')
-            print(f"✅ Resultado: {result2}")
+            # Exemplo de teste opcional (ajuste para um grupo real se necessário)
+            # print("\n🧪 Testando get_schema_privileges...")
+            # result = db.get_schema_privileges('grp_exemplo')
+            # print(f"✅ Resultado: {result}")
+            # print("\n🧪 Testando get_default_table_privileges...")
+            # result2 = db.get_default_table_privileges('grp_exemplo')
+            # print(f"✅ Resultado: {result2}")
             
         except Exception as e:
             print(f"⚠️  Não foi possível testar (sem conexão): {e}")

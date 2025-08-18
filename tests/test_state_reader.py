@@ -146,7 +146,8 @@ class DummyCursorRoles:
         pass
 
     def fetchall(self):
-        return [("grp_teste",), ("outro",), ("turma_antigo",)]
+        # Simula roles variados; apenas os com padrão gerenciado (grp_) devem permanecer
+        return [("grp_teste",), ("outro",), ("legacy_antigo",)]
 
 
 class DummyConnRoles:

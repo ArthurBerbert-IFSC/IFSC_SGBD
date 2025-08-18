@@ -68,6 +68,8 @@ def _friendly_error(exc: OperationalError) -> OperationalError:
         new_msg = "Senha não fornecida. Digite a senha ou configure uma variável de ambiente/keyring."
     elif "authentication failed" in msg or "password authentication failed" in msg:
         new_msg = "Usuário/senha inválidos ou método no pg_hba.conf"
+    elif "does not exist" in msg and "database" in msg:
+        new_msg = "Banco de dados não existe!!! (pode ser erro de grafia ou foi removido). Verifique o nome informado."
     elif "ssl" in msg and "handshake" in msg:
         new_msg = "Erro SSL/TLS; alinhar requisitos de criptografia do servidor"
     else:
@@ -75,7 +77,24 @@ def _friendly_error(exc: OperationalError) -> OperationalError:
     return OperationalError(new_msg)
 
 
-class ConnectionManager(QObject):
+# Default para modo puro (sem QObject) a menos que usuário force modo Qt explícito
+PURE_MODE = os.getenv("CM_FORCE_QT", "").lower() not in {"1","true","yes"}
+
+
+class _DummySignal:
+    def __init__(self):
+        self._slots = []
+    def connect(self, slot):
+        self._slots.append(slot)
+    def emit(self, *a, **k):
+        for s in list(self._slots):
+            try:
+                s(*a, **k)
+            except Exception:
+                logger.exception("[CM] Erro em dummy slot")
+
+
+class ConnectionManager(QObject if not PURE_MODE else object):
     """Singleton para gerenciar conexões com escopo por *thread*.
 
     Cada *thread* recebe sua própria conexão para um perfil específico. As
@@ -83,9 +102,13 @@ class ConnectionManager(QObject):
     pool via ``disconnect``.
     """
 
-    connected = pyqtSignal(str, str)  # dbname, user
-    disconnected = pyqtSignal()
-    connection_lost = pyqtSignal()
+    if not PURE_MODE:
+        connected = pyqtSignal(str, str)  # dbname, user
+        disconnected = pyqtSignal()
+        connection_lost = pyqtSignal()
+    else:
+        # Em modo puro, sinais serão instâncias de _DummySignal
+        pass
 
     _instance: ConnectionManager | None = None
     _initialized = False
@@ -98,13 +121,45 @@ class ConnectionManager(QObject):
     def __init__(self) -> None:
         if self.__class__._initialized:
             return
-        # Garante que exista um QCoreApplication para registrar sinais PyQt
-        self._qapp = QCoreApplication.instance() or QCoreApplication([])
-        super().__init__()
+        logger.debug("[CM] __init__ início (PURE_MODE=%s)" % PURE_MODE)
+        # Obtém instância existente de QApplication / QCoreApplication
+        try:
+            self._qapp = QCoreApplication.instance()
+            if self._qapp is None:
+                logger.error("[CM] Nenhuma QApplication ativa encontrada (esperado após criação da MainWindow)")
+        except Exception:
+            logger.exception("[CM] Erro ao obter QApplication existente")
+        if not PURE_MODE:
+            logger.debug("[CM] antes de super().__init__")
+            self._qt_failed = False
+            try:
+                super().__init__()
+                logger.debug("[CM] após super().__init__")
+            except Exception:
+                logger.exception("[CM] Falha em super().__init__; entrando em modo puro")
+                self._qt_failed = True
+        else:
+            self._qt_failed = False
+
+        if PURE_MODE or getattr(self, '_qt_failed', False):
+            # Inicializa sinais dummy
+            self.connected = _DummySignal()
+            self.disconnected = _DummySignal()
+            self.connection_lost = _DummySignal()
+            logger.debug("[CM] Sinais dummy configurados")
+        # Sentinel para diagnosticar travas nativas (escreve arquivo)
+        try:
+            from pathlib import Path as _P
+            (_P(__file__).resolve().parent / "cm_init_sentinel.txt").write_text("ok", encoding="utf-8")
+        except Exception:
+            pass
         # Dicionário de pools por nome de perfil
         self._pools = {}
+        logger.debug("[CM] pools dict criado")
         self._thread_local = threading.local()
+        logger.debug("[CM] thread_local criado")
         self.__class__._initialized = True
+        logger.debug("[CM] __init__ concluído")
 
     # ------------------------------------------------------------------
     def _get_thread_conns(self) -> dict[str, connection]:

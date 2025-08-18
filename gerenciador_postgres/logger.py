@@ -43,6 +43,18 @@ def setup_logger():
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
 
+    # Suprimir verborragia de bibliotecas muito detalhadas (ex: pdfminer)
+    noisy_modules = [
+        "pdfminer",
+        "pdfminer.psparser",
+        "pdfminer.pdfinterp",
+        "pdfminer.pdfparser",
+        "pdfminer.pdfdocument",
+        "pdfminer.pdfpage",
+    ]
+    for mod in noisy_modules:
+        logging.getLogger(mod).setLevel(logging.WARNING)
+
     return logger
 
 

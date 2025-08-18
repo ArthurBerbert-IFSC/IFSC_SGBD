@@ -17,6 +17,12 @@ class SchemaController(QObject):
     def list_roles(self):
         return self.schema_manager.list_roles()
 
+    def list_owner_candidates(self, include_superusers: bool = True):
+        return self.schema_manager.list_owner_candidates(include_superusers=include_superusers)
+
+    def list_superusers(self):
+        return self.schema_manager.list_superusers()
+
     def create_schema(self, name: str, owner: str | None = None):
         try:
             result = self.schema_manager.create_schema(name, owner)

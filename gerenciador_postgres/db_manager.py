@@ -324,6 +324,30 @@ class DBManager:
             )
             return filter_managed([row[0] for row in cur.fetchall()])
 
+    def list_all_roles(self, include_internal: bool = False) -> List[str]:
+        """Lista todos os roles (logins e grupos) opcionando exclusão dos internos.
+
+        Diferente de ``list_roles`` NÃO aplica ``filter_managed`` e portanto
+        retorna também usuários sem o prefixo gerenciado, inclusive superusuários.
+
+        Args:
+            include_internal: Se ``True`` inclui roles internos (pg_*, rls_*). Normalmente fica False.
+        """
+        self._reset_if_aborted()
+        with self.conn.cursor() as cur:
+            if include_internal:
+                cur.execute("SELECT rolname FROM pg_roles ORDER BY rolname")
+            else:
+                cur.execute(
+                    """
+                    SELECT rolname FROM pg_roles
+                    WHERE rolname NOT LIKE 'pg\\_%'
+                      AND rolname NOT LIKE 'rls\\_%'
+                    ORDER BY rolname
+                    """
+                )
+            return [row[0] for row in cur.fetchall()]
+
     # Métodos de tabelas e privilégios ------------------------------------
 
     def list_tables_by_schema(

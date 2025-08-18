@@ -31,6 +31,13 @@ class SchemaManager:
             row = cur.fetchone()
             return bool(row and row[0])
 
+    def _role_exists(self, role: str) -> bool:
+        if not role:
+            return False
+        with self.dao.conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
+            return cur.fetchone() is not None
+
     def _get_schema_owner(self, schema: str) -> str | None:
         with self.dao.conn.cursor() as cur:
             cur.execute(
@@ -50,29 +57,45 @@ class SchemaManager:
         dados_depois = None
         sucesso = False
         
-        if not (self._is_superuser(user) or self._has_role(user, self.allowed_group)):
+        # Verifica existência do grupo configurado; se não existir, cai para regra só superusuário
+        group_exists = self._role_exists(self.allowed_group)
+        has_group_perm = False
+        if group_exists:
+            has_group_perm = self._has_role(user, self.allowed_group)
+        else:
+            if self.allowed_group:
+                self.logger.warning(
+                    f"Grupo configurado 'schema_creation_group'='{self.allowed_group}' não existe. Apenas superusuários poderão criar schemas até corrigir config ou recriar o role."
+                )
+        if not (self._is_superuser(user) or (group_exists and has_group_perm)):
             self.logger.error(
                 f"[{self.operador}] Usuário '{user}' não tem permissão para criar schema"
             )
-            raise PermissionError(
-                f"Apenas {self.allowed_group} ou superusuários podem criar schemas."
-            )
+            if group_exists:
+                raise PermissionError(
+                    f"Apenas {self.allowed_group} ou superusuários podem criar schemas."
+                )
+            else:
+                raise PermissionError(
+                    "Grupo configurado para criação de schemas não existe; somente superusuários podem criar."
+                )
         
         try:
             with self.dao.transaction():
-                with self.dao.conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT pg_has_role(%s, %s, 'member')",
-                        (self.operador, self.allowed_group),
-                    )
-                    has_permission = cur.fetchone()[0]
-                if not has_permission:
-                    self.logger.error(
-                        f"[{self.operador}] Permissão negada para criar schema '{name}'"
-                    )
-                    raise PermissionError(
-                        f"Usuário não pertence ao grupo '{self.allowed_group}'"
-                    )
+                if group_exists:
+                    with self.dao.conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT pg_has_role(%s, %s, 'member')",
+                            (self.operador, self.allowed_group),
+                        )
+                        has_permission = cur.fetchone()[0]
+                    if not has_permission:
+                        self.logger.error(
+                            f"[{self.operador}] Permissão negada para criar schema '{name}'"
+                        )
+                        raise PermissionError(
+                            f"Usuário não pertence ao grupo '{self.allowed_group}'"
+                        )
 
                 self.dao.create_schema(name, owner)
                 if hasattr(self.dao, 'enable_postgis'):
@@ -172,5 +195,35 @@ class SchemaManager:
             return self.dao.list_roles()
         except Exception as e:
             self.logger.error(f"[{self.operador}] Erro ao listar roles: {e}")
+            return []
+
+    # --- Auxiliar para GUI --------------------------------------------------
+    def list_owner_candidates(self, include_superusers: bool = True) -> list[str]:
+        """Retorna lista de roles candidatos a serem owners de schemas.
+
+        Inclui todos os roles não internos. Opcionalmente filtra superusuários
+        se ``include_superusers`` for ``False``.
+        """
+        try:
+            roles = self.dao.list_all_roles()
+            if not include_superusers:
+                # Filtra superusuários consultando catalogo
+                with self.dao.conn.cursor() as cur:
+                    cur.execute("SELECT rolname FROM pg_roles WHERE rolsuper")
+                    supers = {r[0] for r in cur.fetchall()}
+                roles = [r for r in roles if r not in supers]
+            return roles
+        except Exception as e:
+            self.logger.error(f"[{self.operador}] Erro ao listar candidatos a owner: {e}")
+            return []
+
+    def list_superusers(self) -> list[str]:
+        """Retorna lista de roles que são superusuários."""
+        try:
+            with self.dao.conn.cursor() as cur:
+                cur.execute("SELECT rolname FROM pg_roles WHERE rolsuper ORDER BY rolname")
+                return [r[0] for r in cur.fetchall()]
+        except Exception as e:
+            self.logger.error(f"[{self.operador}] Erro ao listar superusuários: {e}")
             return []
 

@@ -293,7 +293,19 @@ class BatchInsertDialog(QDialog):
             parts = line.strip().split(maxsplit=1)
             if len(parts) != 2:
                 raise ValueError(f"Linha {idx} inválida: {line}")
-            usuarios.append((parts[0], parts[1]))
+            matricula, nome_completo = parts[0], parts[1]
+            # Geração automática username: nome.sobrenome (sem acentos, minúsculo, só letras/números/ponto)
+            base = nome_completo.strip().lower()
+            import unicodedata, re
+            base = ''.join(c for c in unicodedata.normalize('NFD', base) if unicodedata.category(c) != 'Mn')
+            tokens = [t for t in re.split(r'[^a-z0-9]+', base) if t]
+            if len(tokens) >= 2:
+                username = f"{tokens[0]}.{tokens[-1]}"
+            elif tokens:
+                username = tokens[0]
+            else:
+                raise ValueError(f"Linha {idx} sem nome válido: {line}")
+            usuarios.append((username, nome_completo))
         validade = self.date.date().toString('yyyy-MM-dd') if self.chkValidade.isChecked() else None
         grupo = self.cmbGrupo.currentText()
         if grupo == "-- Criar novo grupo --":
@@ -339,6 +351,7 @@ class UsersView(QWidget):
         self.btnInserirLote = QPushButton("Inserir Usuários em Lote")
         self.btnExcluirLote = QPushButton("Deletar Usuários em Lote")
         self.btnEditarExpLote = QPushButton("Editar Expiração em Lote")
+        self.btnRefreshGrupos = QPushButton("Recarregar Grupos")
         for b in (
             self.btnNovo,
             self.btnEditar,
@@ -346,6 +359,7 @@ class UsersView(QWidget):
             self.btnInserirLote,
             self.btnExcluirLote,
             self.btnEditarExpLote,
+            self.btnRefreshGrupos,
         ):
             left.addWidget(b)
         left.addStretch()
@@ -420,6 +434,7 @@ class UsersView(QWidget):
         self.btnInserirLote.clicked.connect(self.add_user_batch)
         self.btnExcluirLote.clicked.connect(self.batch_delete_users)
         self.btnEditarExpLote.clicked.connect(self.batch_edit_expiration)
+        self.btnRefreshGrupos.clicked.connect(self._refresh_group_lists)
 
     # ---------- Filtro ----------
     def _on_filter_changed(self, text: str):
