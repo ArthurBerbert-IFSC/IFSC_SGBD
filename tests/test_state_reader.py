@@ -146,7 +146,7 @@ class DummyCursorRoles:
         pass
 
     def fetchall(self):
-        return [("turma_teste",), ("monitores_abc",), ("outro",)]
+        return [("grp_teste",), ("outro",), ("turma_antigo",)]
 
 
 class DummyConnRoles:
@@ -157,4 +157,4 @@ class DummyConnRoles:
 def test_list_roles_filters_managed():
     conn = DummyConnRoles()
     roles = state_reader.list_roles(conn)
-    assert roles == ["turma_teste", "monitores_abc"]
+    assert roles == ["grp_teste"]

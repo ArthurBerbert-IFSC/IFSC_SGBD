@@ -17,8 +17,10 @@ else:
 DEFAULT_CONFIG = {
     "log_path": str(BASE_DIR / "logs" / "app.log"),
     "log_level": "INFO",
-    "group_prefix": "turma_",
-    "user_prefix": "monitores_*",
+    # Único prefixo gerenciado para grupos
+    "group_prefix": "grp_",
+    # Usuários agora sem prefixo específico (mantido apenas para retrocompatibilidade de chave)
+    "user_prefix": "",
     "schema_creation_group": "Professores",
     "connect_timeout": 5,
 }
