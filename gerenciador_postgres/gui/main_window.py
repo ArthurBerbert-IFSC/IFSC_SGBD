@@ -1,4 +1,10 @@
-from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea, QStackedWidget
+from PyQt6.QtWidgets import (
+    QMainWindow,
+    QMenuBar,
+    QMdiArea,
+    QStackedWidget,
+    QVBoxLayout,
+)
 from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog, QDialog
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QIcon
@@ -15,6 +21,7 @@ from ..controllers import (
 )
 from ..logger import setup_logger
 from .initial_panel import InitialPanel
+from .app_info_panel import AppInfoPanel
 from ..app_metadata import AppMetadata
 import psycopg2
 
@@ -295,11 +302,13 @@ class MainWindow(QMainWindow):
 
     def show_about(self):
         meta = AppMetadata()
-        QMessageBox.about(
-            self,
-            f"Sobre {meta.name}",
-            f"{meta.name}\nVersão {meta.version}\nLicença {meta.license}\n{meta.maintainer} <{meta.contact_email}>",
-        )
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Sobre {meta.name}")
+        assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        dlg.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(AppInfoPanel())
+        dlg.exec()
 
     def _setup_central(self):
         self.stacked_widget = QStackedWidget(self)

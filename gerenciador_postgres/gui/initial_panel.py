@@ -13,8 +13,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..app_metadata import AppMetadata
 from ..config_manager import load_config, CONFIG_FILE
+from .app_info_panel import AppInfoPanel
 
 
 def _mask(value: str) -> str:
@@ -108,18 +108,10 @@ class InitialPanel(QWidget):
             )
 
     def _populate(self) -> None:
-        meta = AppMetadata()
         cfg = load_config()
 
         # Aplicativo
-        self.app_box.layout().addWidget(QLabel(f"Nome: {meta.name}"))
-        self.app_box.layout().addWidget(QLabel(f"Versão: {meta.version}"))
-        self.app_box.layout().addWidget(QLabel(f"Data de lançamento: {meta.release_date}"))
-        self.app_box.layout().addWidget(QLabel(f"Licença: {meta.license}"))
-        self.app_box.layout().addWidget(QLabel(f"Maintainer: {meta.maintainer} ({meta.contact_email})"))
-        github = QLabel(f'<a href="{meta.github_url}">GitHub</a>')
-        github.setOpenExternalLinks(True)
-        self.app_box.layout().addWidget(github)
+        self.app_box.layout().addWidget(AppInfoPanel())
 
         # Ambiente
         python_ver = platform.python_version()
