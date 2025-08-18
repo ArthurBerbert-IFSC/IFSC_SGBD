@@ -1,16 +1,16 @@
 from PyQt6.QtWidgets import (
-    QMainWindow,   
-    QMenuBar,     
+    QMainWindow,
+    QMenuBar,
     QMdiArea,
-    QStackedWidget, 
-    QDockWidget
+    QStackedWidget,
+    QDockWidget,
     QVBoxLayout,
-    QStatusBar, 
-    QMessageBox, 
-    QProgressDialog, 
-    QDialog, 
+    QStatusBar,
+    QMessageBox,
+    QProgressDialog,
+    QDialog,
     QLabel,
-    QPushButton
+    QPushButton,
 )
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
@@ -68,7 +68,6 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._setup_statusbar()
         self._setup_central()
-        self._setup_info_dock()
         # Controladores e managers serão inicializados após conexão
         self.db_manager = None
         self.role_manager = None
@@ -159,28 +158,28 @@ class MainWindow(QMainWindow):
         self.statusbar.showMessage("Não conectado")
 
 
-    def _setup_info_dock(self):
-        self.info_dock = QDockWidget("Informações", self)
-        self.info_label = QLabel("", self.info_dock)
-        self.info_dock.setWidget(self.info_label)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.info_dock)
+    # _setup_info_dock removido: info_dock agora é criado apenas em _setup_central
 
     def _on_connected(self, dbname: str, user: str):
         self.initial_panel.refresh()
         self.statusbar.showMessage(f"Conectado a {dbname} como {user}")
-        self.info_label.setText("")
 
     def _on_disconnected(self):
         self.initial_panel.refresh()
         self.statusbar.showMessage("Não conectado")
-        self.info_label.setText("Desconectado")
 
     def on_dashboard(self):
-        self.stacked_widget.setCurrentWidget(self.initial_panel)
-        if hasattr(self, "info_dock"):
+        # Exibe painel inicial e destaca dock de informações
+        if hasattr(self, 'mdi'):
+            self.mdi.setVisible(False)
+        if hasattr(self, 'info_dock'):
+            self.info_dock.show()
             self.info_dock.raise_()
-            self.info_dock.activateWindow()
-            self.info_dock.setFocus()
+        if hasattr(self, 'initial_panel'):
+            try:
+                self.initial_panel.refresh()
+            except Exception:
+                pass
 
     def on_usuarios(self):
         from .users_view import UsersView
@@ -401,8 +400,10 @@ class MainWindow(QMainWindow):
         self.info_dock = QDockWidget("Informações", self)
         self.info_dock.setObjectName("info_dock")
         self.info_dock.setWidget(self.initial_panel)
-        self.info_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.BottomDockWidgetArea)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.info_dock)
+        self.info_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.info_dock)
         self.setDockOptions(
             QMainWindow.DockOption.AllowTabbedDocks
             | QMainWindow.DockOption.AllowNestedDocks
@@ -462,6 +463,5 @@ class MainWindow(QMainWindow):
 
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Conexão perdida")
-        self.info_label.setText("Conexão perdida. Reconecte-se para continuar.")
         QMessageBox.critical(self, "Conexão Perdida", "A conexão com o banco foi perdida. Reconecte-se para continuar.")
     
