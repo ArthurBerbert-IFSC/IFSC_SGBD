@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea, QStackedWidget
+from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMdiArea, QDockWidget
 from PyQt6.QtWidgets import QStatusBar, QMessageBox, QProgressDialog, QDialog
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QIcon
@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         # --- Criar Menus ---
         self.menuArquivo = menubar.addMenu("Arquivo")
         self.menuGerenciar = menubar.addMenu("Gerenciar")
+        self.menuExibir = menubar.addMenu("Exibir")
         self.menuAjuda = menubar.addMenu("Ajuda")
 
         # --- Criar Ações ---
@@ -130,7 +131,7 @@ class MainWindow(QMainWindow):
     def on_usuarios(self):
         from .users_view import UsersView
         if self.users_controller:
-            self.stacked_widget.setCurrentWidget(self.mdi)
+            self.mdi.setVisible(True)
             users_window = UsersView(controller=self.users_controller)
             users_window.setWindowTitle("Gerenciador de Usuários")
             try:
@@ -151,7 +152,7 @@ class MainWindow(QMainWindow):
         """Abre a janela para gerenciamento de grupos e privilégios."""
         from .groups_view import GroupsView
         if self.groups_controller:
-            self.stacked_widget.setCurrentWidget(self.mdi)
+            self.mdi.setVisible(True)
             groups_window = GroupsView(controller=self.groups_controller)
             groups_window.setWindowTitle("Gerenciador de Grupos")
             sub_window = self.mdi.addSubWindow(groups_window)
@@ -227,7 +228,8 @@ class MainWindow(QMainWindow):
                 f"Conectado a {params['dbname']} como {params['user']}"
             )
             self.initial_panel.refresh()
-            self.stacked_widget.setCurrentWidget(self.initial_panel)
+            self.mdi.setVisible(False)
+            self.info_dock.show()
 
             QMessageBox.information(
                 self,
@@ -258,7 +260,8 @@ class MainWindow(QMainWindow):
             self.menuGerenciar.setEnabled(False)
             self.statusbar.showMessage("Não conectado")
             self.initial_panel.refresh()
-            self.stacked_widget.setCurrentWidget(self.initial_panel)
+            self.mdi.setVisible(False)
+            self.info_dock.show()
             QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
 
         self._connect_thread.succeeded.connect(finalize_success)
@@ -279,9 +282,11 @@ class MainWindow(QMainWindow):
         self.schema_manager = None
         self.schema_controller = None
         self.groups_view = None
-        # Restaura o MDI como central
+        # Restaura estado inicial
         self.initial_panel.refresh()
-        self.stacked_widget.setCurrentWidget(self.initial_panel)
+        self.mdi.closeAllSubWindows()
+        self.mdi.setVisible(False)
+        self.info_dock.show()
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Não conectado")
         QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
@@ -302,18 +307,28 @@ class MainWindow(QMainWindow):
         )
 
     def _setup_central(self):
-        self.stacked_widget = QStackedWidget(self)
-        self.setCentralWidget(self.stacked_widget)
-        self.initial_panel = InitialPanel()
         self.mdi = QMdiArea(self)
-        self.stacked_widget.addWidget(self.initial_panel)
-        self.stacked_widget.addWidget(self.mdi)
-        self.stacked_widget.setCurrentWidget(self.initial_panel)
+        self.setCentralWidget(self.mdi)
+        self.mdi.setVisible(False)
+
+        self.initial_panel = InitialPanel()
+        self.info_dock = QDockWidget("Informações", self)
+        self.info_dock.setObjectName("info_dock")
+        self.info_dock.setWidget(self.initial_panel)
+        self.info_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.BottomDockWidgetArea)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.info_dock)
+        self.setDockOptions(
+            QMainWindow.DockOption.AllowTabbedDocks
+            | QMainWindow.DockOption.AllowNestedDocks
+            | QMainWindow.DockOption.AnimatedDocks
+        )
+        if hasattr(self, "menuExibir"):
+            self.menuExibir.addAction(self.info_dock.toggleViewAction())
 
     def on_schemas(self):
         from .schema_view import SchemaView
         if self.schema_controller:
-            self.stacked_widget.setCurrentWidget(self.mdi)
+            self.mdi.setVisible(True)
             schema_window = SchemaView(controller=self.schema_controller, logger=self.logger)
             schema_window.setWindowTitle("Gerenciador de Schemas")
             sub_window = self.mdi.addSubWindow(schema_window)
@@ -325,7 +340,7 @@ class MainWindow(QMainWindow):
     def on_sql_console(self):
         from .sql_console_view import SQLConsoleView
         if self.db_manager:
-            self.stacked_widget.setCurrentWidget(self.mdi)
+            self.mdi.setVisible(True)
             console = SQLConsoleView(self.db_manager, self)
             sub_window = self.mdi.addSubWindow(console)
             self.opened_windows.append(sub_window)
@@ -354,7 +369,9 @@ class MainWindow(QMainWindow):
         self.schema_controller = None
         self.groups_view = None
         self.initial_panel.refresh()
-        self.stacked_widget.setCurrentWidget(self.initial_panel)
+        self.mdi.closeAllSubWindows()
+        self.mdi.setVisible(False)
+        self.info_dock.show()
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Conexão perdida")
         QMessageBox.critical(self, "Conexão Perdida", "A conexão com o banco foi perdida. Reconecte-se para continuar.")
