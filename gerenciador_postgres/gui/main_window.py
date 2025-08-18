@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         # --- Criar Menus ---
         self.menuArquivo = menubar.addMenu("Arquivo")
         self.menuGerenciar = menubar.addMenu("Gerenciar")
+        self.menuExibir = menubar.addMenu("Exibir")
         self.menuAjuda = menubar.addMenu("Ajuda")
 
         # --- Criar Ações ---
@@ -87,6 +88,10 @@ class MainWindow(QMainWindow):
         self.actionAmbientes = QAction("Ambientes (Schemas)", self)
         self.actionSqlConsole = QAction("Console SQL", self)
 
+        # Ações do menu Exibir
+        self.actionDashboard = QAction("Dashboard", self)
+        self.actionDashboard.setShortcut("Ctrl+Home")
+
         # Ações do menu Ajuda
         self.actionAjuda = QAction("Ajuda", self)
         self.actionSobre = QAction("Sobre", self)
@@ -99,6 +104,7 @@ class MainWindow(QMainWindow):
         self.actionGrupos.triggered.connect(self.on_grupos)
         self.actionAmbientes.triggered.connect(self.on_schemas)
         self.actionSqlConsole.triggered.connect(self.on_sql_console)
+        self.actionDashboard.triggered.connect(self.on_dashboard)
 
         self.actionAjuda.triggered.connect(self.show_help)
         self.actionSobre.triggered.connect(self.show_about)
@@ -116,7 +122,10 @@ class MainWindow(QMainWindow):
         self.menuGerenciar.addAction(self.actionGrupos)
         self.menuGerenciar.addAction(self.actionAmbientes)
         self.menuGerenciar.addAction(self.actionSqlConsole)
-        self.menuGerenciar.setEnabled(False) # Começa desabilitado
+        self.menuGerenciar.setEnabled(False)  # Começa desabilitado
+
+        # Menu Exibir
+        self.menuExibir.addAction(self.actionDashboard)
 
         # Menu Ajuda
         self.menuAjuda.addAction(self.actionAjuda)
@@ -126,6 +135,13 @@ class MainWindow(QMainWindow):
         self.statusbar = QStatusBar(self)
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage("Não conectado")
+
+    def on_dashboard(self):
+        self.stacked_widget.setCurrentWidget(self.initial_panel)
+        if hasattr(self, "info_dock"):
+            self.info_dock.raise_()
+            self.info_dock.activateWindow()
+            self.info_dock.setFocus()
 
     def on_usuarios(self):
         from .users_view import UsersView
