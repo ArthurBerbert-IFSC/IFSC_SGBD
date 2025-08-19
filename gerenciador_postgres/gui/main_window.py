@@ -1,16 +1,16 @@
 from PyQt6.QtWidgets import (
     QMainWindow,
-    QMenuBar,
-    QMdiArea,
-    QStackedWidget,
-    QDockWidget,
-    QVBoxLayout,
     QStatusBar,
     QMessageBox,
     QProgressDialog,
     QDialog,
     QLabel,
     QPushButton,
+    QWidget,
+    QVBoxLayout,
+    QGroupBox,
+    QTabWidget,
+    QSplitter,
 )
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
@@ -28,8 +28,8 @@ from ..controllers import (
     SchemaController,
 )
 from ..logger import setup_logger
-from .initial_panel import InitialPanel
 from .app_info_panel import AppInfoPanel
+from .dashboard_panel import DashboardPanel
 from ..app_metadata import AppMetadata
 import psycopg2
 
@@ -48,13 +48,22 @@ class ConnectThread(QThread):
 
     def run(self):
         try:
-            # Realiza um teste de conexão em background (conecta e fecha)
-            conn = ConnectionManager().connect(**self.params)
+            # Teste de conexão sem acionar sinais/GUI: usar psycopg2 direto
+            import psycopg2
+            test_params = dict(self.params)
+            timeout = int(test_params.pop('connect_timeout', 5) or 5)
+            # Remove chave não suportada pelo driver
+            test_params.pop('profile_name', None)
+            conn = psycopg2.connect(connect_timeout=timeout, **test_params)
             if self._cancelled:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
                 self.failed.emit(Exception("Conexão cancelada"))
                 return
-
-            self.succeeded.emit(conn)
+            conn.close()
+            self.succeeded.emit(object())  # placeholder
         except Exception as e:
             self.failed.emit(e)
 
@@ -93,7 +102,7 @@ class MainWindow(QMainWindow):
             pass
         self._setup_central()
         try:
-            self._mw_logger.debug("[INIT] Área central configurada (mdi + info dock)")
+            self._mw_logger.debug("[INIT] Área central configurada (splitter dashboard + tabs)")
         except Exception:
             pass
         # Bloco de pós-configuração com tratamento de exceções detalhado
@@ -134,13 +143,9 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-            # Ajustes visuais iniciais
-            if hasattr(self, 'info_dock'):
-                self.info_dock.show()
-                self._mw_logger.debug("[INIT] info_dock mostrado")
-            # Garante uma largura inicial para o dock (caso apareça colapsado)
+            # Ajustes visuais iniciais (dashboard visível)
             try:
-                self.resizeDocks([self.info_dock], [260], Qt.Orientation.Horizontal)
+                self._refresh_dashboard_status()
             except Exception:
                 pass
 
@@ -297,69 +302,28 @@ class MainWindow(QMainWindow):
             pass
 
 
-    # _setup_info_dock removido: info_dock agora é criado apenas em _setup_central
+    # _setup_info_dock removido
 
     def _on_connected(self, dbname: str, user: str):
-        self.initial_panel.refresh()
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, self._refresh_dashboard_status)
         self.statusbar.showMessage(f"Conectado a {dbname} como {user}")
 
     def _on_disconnected(self):
-        self.initial_panel.refresh()
+        self._refresh_dashboard_status()
         self.statusbar.showMessage("Não conectado")
 
     def on_dashboard(self):
-        # Exibe painel inicial e destaca dock de informações
-        try:
-            self._mw_logger.debug("[UI] on_dashboard acionado")
-        except Exception:
-            pass
-        if hasattr(self, 'mdi'):
-            self.mdi.setVisible(False)
-        if hasattr(self, 'info_dock'):
-            self.info_dock.show()
-            self.info_dock.raise_()
-        if hasattr(self, 'initial_panel'):
-            try:
-                self.initial_panel.refresh()
-            except Exception:
-                pass
+        """Mostrar aba Dashboard."""
+        self.open_panel('dashboard')
 
     def on_usuarios(self):
-        from .users_view import UsersView
-        if self.users_controller:
-            self.mdi.setVisible(True)
-            users_window = UsersView(controller=self.users_controller)
-            users_window.setWindowTitle("Gerenciador de Usuários")
-            try:
-                users_window.connection_lost.connect(self.conn_manager.connection_lost.emit)
-            except Exception:
-                pass
-            sub_window = self.mdi.addSubWindow(users_window)
-            self.opened_windows.append(sub_window)
-            sub_window.show()
-        else:
-            QMessageBox.warning(
-                self,
-                "Não Conectado",
-                "Você precisa estar conectado a um banco de dados para gerenciar usuários.",
-            )
+        """Mostrar aba Usuários."""
+        self.open_panel('usuarios')
 
     def on_grupos(self):
-        """Abre a janela para gerenciamento de grupos e privilégios."""
-        from .groups_view import GroupsView
-        if self.groups_controller:
-            self.mdi.setVisible(True)
-            groups_window = GroupsView(controller=self.groups_controller)
-            groups_window.setWindowTitle("Gerenciador de Grupos")
-            sub_window = self.mdi.addSubWindow(groups_window)
-            self.opened_windows.append(sub_window)
-            sub_window.show()
-        else:
-            QMessageBox.warning(
-                self,
-                "Não Conectado",
-                "Você precisa estar conectado a um banco de dados para gerenciar grupos.",
-            )
+        """Mostrar aba Grupos."""
+        self.open_panel('grupos')
 
     def on_conectar(self):
         # Garante que ConnectionManager existe
@@ -412,14 +376,17 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._progress.close()
-            # Fecha a conexão de teste criada no thread em background
+            # Realiza conexão real agora no thread principal
             try:
-                if bg_conn:
-                    bg_conn.close()
-            except Exception:
-                pass
-            try:
-                ui_conn = ConnectionManager().connect(**params)
+                cm = ConnectionManager()
+                safe_params = params.copy()
+                safe_params.pop('profile_name', None)
+                ui_conn = cm.connect(**safe_params)
+                # armazenar parâmetros para dashboard
+                try:
+                    cm._current_params = params  # type: ignore
+                except Exception:
+                    pass
             except Exception as e:
                 finalize_fail(e)
                 return
@@ -442,9 +409,9 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage(
                 f"Conectado a {params['dbname']} como {params['user']}"
             )
-            self.initial_panel.refresh()
-            self.mdi.setVisible(False)
-            self.info_dock.show()
+            self._refresh_dashboard_status()
+            if hasattr(self, 'stacked'):
+                self.stacked.setCurrentIndex(0)
 
             QMessageBox.information(
                 self,
@@ -483,12 +450,11 @@ class MainWindow(QMainWindow):
             self.menuGerenciar.setEnabled(False)
 
             self.statusbar.showMessage("Não conectado")
-            self.initial_panel.refresh()
-            self.mdi.setVisible(False)
-            self.info_dock.show()
+            self._refresh_dashboard_status()
+            if hasattr(self, 'stacked'):
+                self.stacked.setCurrentIndex(0)
 
             QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
-
         self._connect_thread.succeeded.connect(finalize_success)
         self._connect_thread.failed.connect(finalize_fail)
         self._connect_timeout_timer.timeout.connect(
@@ -514,13 +480,10 @@ class MainWindow(QMainWindow):
         self.groups_view = None
 
         # Restaura estado inicial
-        self.initial_panel.refresh()
-        self.mdi.closeAllSubWindows()
-        self.mdi.setVisible(False)
-        self.info_dock.show()
-        
+        self._refresh_dashboard_status()
+        if hasattr(self, 'stacked'):
+            self.stacked.setCurrentIndex(0)
         self.menuGerenciar.setEnabled(False)
-        QMessageBox.information(self, "Desconectado", "Conexão encerrada.")
         # Permite novas notificações se reconectar no futuro
         self._handled_connection_lost = False
 
@@ -530,27 +493,39 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def show_env_info(self):
-        panel = InitialPanel()
-        env_box = panel.env_box
+        from ..config_manager import load_config, CONFIG_FILE
+        import platform as _pf
+        from PyQt6.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
         dlg = QDialog(self)
-        dlg.setWindowTitle("Informações do Ambiente")
         layout = QVBoxLayout(dlg)
-        env_box.setParent(dlg)
-        layout.addWidget(env_box)
+        box = QGroupBox("Ambiente")
+        v = QVBoxLayout(box)
+        cfg = load_config()
+        v.addWidget(QLabel(f"Python: {_pf.python_version()}"))
+        v.addWidget(QLabel(f"Qt: {QT_VERSION_STR} / PyQt: {PYQT_VERSION_STR}"))
+        v.addWidget(QLabel(f"Sistema: {_pf.system()} {_pf.release()}"))
+        v.addWidget(QLabel(f"Configurações: {CONFIG_FILE}"))
+        log_path = cfg.get("log_path", "")
+        log_size = "?"
+        try:
+            from pathlib import Path as _P
+            if log_path and _P(log_path).exists():
+                log_size = str(_P(log_path).stat().st_size)
+        except Exception:
+            pass
+        v.addWidget(QLabel(f"Logs: {log_path} ({log_size} bytes)"))
+        layout.addWidget(box)
         btn_copy = QPushButton("Copiar", dlg)
         layout.addWidget(btn_copy, alignment=Qt.AlignmentFlag.AlignRight)
 
         def copy():
             texts = []
-            box_layout = env_box.layout()
-            for i in range(box_layout.count()):
-                w = box_layout.itemAt(i).widget()
-                if w and hasattr(w, "text"):
+            for i in range(v.count()):
+                w = v.itemAt(i).widget()
+                if w and hasattr(w, 'text'):
                     texts.append(w.text())
             QGuiApplication.clipboard().setText("\n".join(texts))
-            QMessageBox.information(
-                dlg, "Copiado", "Informações copiadas para a área de transferência."
-            )
+            QMessageBox.information(dlg, "Copiado", "Informações copiadas para a área de transferência.")
 
         btn_copy.clicked.connect(copy)
         dlg.exec()
@@ -566,59 +541,178 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _setup_central(self):
-        self.mdi = QMdiArea(self)
-        self.setCentralWidget(self.mdi)
-        self.mdi.setVisible(False)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.dashboard = DashboardPanel()
+        self.tabs = QTabWidget(self)
+        self.tabs.setTabsClosable(True)
+        self.tabs.setDocumentMode(True)
+        self.tabs.setMovable(True)
+        self.tabs.tabCloseRequested.connect(self._close_tab)
+        self.splitter.addWidget(self.dashboard)
+        self.splitter.addWidget(self.tabs)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.setCentralWidget(self.splitter)
+        self.dashboard.toggle_collapse_requested.connect(self._toggle_dashboard_collapse)
+        self.dashboard.request_status_refresh.connect(self._refresh_dashboard_status)
+        self.dashboard.request_counts_refresh.connect(self._refresh_dashboard_counts)
+        # Compatibility alias
+        self.stacked = self.tabs  # type: ignore
+        self._dashboard_collapsed = False
+        self._register_panels()
+        self._augment_exibir_menu()
 
-        self.initial_panel = InitialPanel()
-        self.info_dock = QDockWidget("Informações", self)
-        self.info_dock.setObjectName("info_dock")
-        self.info_dock.setWidget(self.initial_panel)
-        self.info_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea
-        )
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.info_dock)
-        self.setDockOptions(
-            QMainWindow.DockOption.AllowTabbedDocks
-            | QMainWindow.DockOption.AllowNestedDocks
-            | QMainWindow.DockOption.AnimatedDocks
-        )
-        if hasattr(self, "menuExibir"):
-            self.menuExibir.addAction(self.info_dock.toggleViewAction())
+    # --- Panels registry & menu augmentation ---
+    def _register_panels(self):
+        # Painéis em abas (dashboard fica lateral)
+        self._panels = {
+            'usuarios': (self._factory_usuarios, 'Usuários', None),
+            'grupos': (self._factory_grupos, 'Grupos', None),
+            'ambientes': (self._factory_schemas, 'Schemas', None),
+            'sql': (self._factory_sql_console, 'SQL', None),
+        }
+
+    def _augment_exibir_menu(self):
+        existing_titles = {a.text() for a in self.menuExibir.actions()}
+        # Add actions for each registered panel
+        for key, (_, title, _icon) in self._panels.items():
+            if title not in existing_titles:
+                act = QAction(title, self)
+                act.triggered.connect(lambda _, k=key: self.open_panel(k))
+                self.menuExibir.addAction(act)
+        if 'Fechar Aba Atual' not in existing_titles:
+            self.menuExibir.addSeparator()
+            act_close = QAction('Fechar Aba Atual', self)
+            act_close.triggered.connect(self._close_current_tab)
+            self.menuExibir.addAction(act_close)
+
+    # --- Factories ---
+    def _factory_usuarios(self):
+        if not self.users_controller:
+            raise RuntimeError('Não conectado')
+        from .users_view import UsersView
+        v = UsersView(controller=self.users_controller)
+        try:
+            v.connection_lost.connect(self.conn_manager.connection_lost.emit)
+        except Exception:
+            pass
+        return v
+
+    def _factory_grupos(self):
+        if not self.groups_controller:
+            raise RuntimeError('Não conectado')
+        from .groups_view import GroupsView
+        return GroupsView(controller=self.groups_controller)
+
+    def _factory_schemas(self):
+        if not self.schema_controller:
+            raise RuntimeError('Não conectado')
+        from .schema_view import SchemaView
+        return SchemaView(controller=self.schema_controller, logger=self.logger)
+
+    def _factory_sql_console(self):
+        if not self.db_manager:
+            raise RuntimeError('Não conectado')
+        from .sql_console_view import SQLConsoleView
+        return SQLConsoleView(self.db_manager, self)
+
+    # --- Tab helpers ---
+    def open_panel(self, key: str):
+        panels = getattr(self, '_panels', {})
+        if key not in panels:
+            QMessageBox.warning(self, 'Painel desconhecido', f"Painel '{key}' não registrado.")
+            return
+        factory, title, icon = panels[key]
+        # focus existing
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == title:
+                self.tabs.setCurrentIndex(i)
+                return
+        try:
+            widget = factory()
+        except Exception as e:
+            if str(e) == 'Não conectado':
+                QMessageBox.warning(self, 'Não Conectado', f"Você precisa estar conectado para abrir '{title}'.")
+            else:
+                QMessageBox.critical(self, 'Erro', f'Falha ao criar painel {title}: {e}')
+            return
+        idx = self.tabs.addTab(widget, icon or title)
+        self.tabs.setCurrentIndex(idx)
+
+    def _close_tab(self, index: int):
+        w = self.tabs.widget(index)
+        if w:
+            w.deleteLater()
+        self.tabs.removeTab(index)
+
+    def _close_current_tab(self):
+        i = self.tabs.currentIndex()
+        if i >= 0:
+            self._close_tab(i)
+
+    def _toggle_dashboard_collapse(self):
+        if self._dashboard_collapsed:
+            self.dashboard.setMaximumWidth(16777215)
+            self.dashboard.setMinimumWidth(180)
+            self.dashboard.set_collapsed(False)
+        else:
+            self.dashboard.setMinimumWidth(0)
+            self.dashboard.setMaximumWidth(0)
+            self.dashboard.set_collapsed(True)
+        self._dashboard_collapsed = not self._dashboard_collapsed
+
+    def _refresh_dashboard_status(self):
+        try:
+            if self.db_manager and self.role_manager:
+                # fetch connection parameters from ConnectionManager if available
+                cm = self.conn_manager
+                db = user = host = None
+                connected = False
+                if cm and cm._current_params:  # type: ignore
+                    p = cm._current_params  # type: ignore
+                    db = p.get('dbname')
+                    user = p.get('user')
+                    host = p.get('host')
+                # simple ping
+                try:
+                    with self.db_manager.conn.cursor() as cur:
+                        cur.execute('SELECT 1')
+                    connected = True
+                except Exception:
+                    connected = False
+                self.dashboard.set_connection_info(db, user, host, connected)
+            else:
+                self.dashboard.set_connection_info(None, None, None, False)
+        except Exception:
+            pass
+
+    def _refresh_dashboard_counts(self):
+        try:
+            if not self.db_manager:
+                self.dashboard.set_counts(None, None, None, None)
+                return
+            from ..config_manager import load_config
+            prefix = load_config().get('group_prefix', 'grp_')
+            u = self.db_manager.count_users()
+            g = self.db_manager.count_groups(prefix=prefix)
+            s = self.db_manager.count_schemas()
+            t = self.db_manager.count_tables()
+            self.dashboard.set_counts(u, g, s, t)
+        except Exception:
+            self.dashboard.set_counts(None, None, None, None)
 
     def on_schemas(self):
-        from .schema_view import SchemaView
-        if self.schema_controller:
-            self.mdi.setVisible(True)
-            schema_window = SchemaView(controller=self.schema_controller, logger=self.logger)
-            schema_window.setWindowTitle("Gerenciador de Schemas")
-            sub_window = self.mdi.addSubWindow(schema_window)
-            self.opened_windows.append(sub_window)
-            sub_window.show()
-        else:
-            QMessageBox.warning(self, "Não Conectado", "Você precisa estar conectado a um banco de dados para gerenciar schemas.")
+            """Mostrar aba Schemas."""
+            self.open_panel('ambientes')
 
     def on_sql_console(self):
-        from .sql_console_view import SQLConsoleView
-        if self.db_manager:
-            self.mdi.setVisible(True)
-            console = SQLConsoleView(self.db_manager, self)
-            sub_window = self.mdi.addSubWindow(console)
-            self.opened_windows.append(sub_window)
-            sub_window.show()
-        else:
-            QMessageBox.warning(
-                self,
-                "Não Conectado",
-                "Você precisa estar conectado a um banco de dados para executar SQL.",
-            )
+            """Mostrar aba Console SQL."""
+            self.open_panel('sql')
 
     def on_connection_lost(self):
-        """Tratamento centralizado quando qualquer view detecta perda de conexão."""
         if self._handled_connection_lost:
             return
         self._handled_connection_lost = True
-        # Fecha conexão e reseta estado sem mostrar diálogo 'Desconectado'
         try:
             if self.conn_manager:
                 self.conn_manager.disconnect()
@@ -630,12 +724,9 @@ class MainWindow(QMainWindow):
         self.schema_manager = None
         self.schema_controller = None
         self.groups_view = None
-
-        self.initial_panel.refresh()
-        self.mdi.closeAllSubWindows()
-        self.mdi.setVisible(False)
-        self.info_dock.show()
-
+        self._refresh_dashboard_status()
+        if hasattr(self, 'stacked'):
+            self.stacked.setCurrentIndex(0)
         self.menuGerenciar.setEnabled(False)
         self.statusbar.showMessage("Conexão perdida")
         QMessageBox.critical(self, "Conexão Perdida", "A conexão com o banco foi perdida. Reconecte-se para continuar.")

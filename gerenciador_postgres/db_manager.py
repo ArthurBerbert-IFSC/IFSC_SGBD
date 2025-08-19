@@ -188,6 +188,56 @@ class DBManager:
             # Agora retornamos todos os roles de login não-sistema.
             return [row[0] for row in cur.fetchall()]
 
+    # --- Contagens rápidas para dashboard ---
+    def count_users(self) -> int:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*) FROM pg_roles
+                WHERE rolcanlogin = true
+                  AND rolname NOT LIKE 'pg\\_%'
+                  AND rolname NOT LIKE 'rls\\_%'
+                  AND rolname <> 'postgres'
+                """
+            )
+            return cur.fetchone()[0]
+
+    def count_groups(self, prefix: str = 'grp_') -> int:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*) FROM pg_roles
+                WHERE rolcanlogin = false
+                  AND rolname LIKE %s
+                """,
+                (f"{prefix}%",),
+            )
+            return cur.fetchone()[0]
+
+    def count_schemas(self) -> int:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*) FROM information_schema.schemata
+                WHERE schema_name NOT LIKE 'pg_%'
+                  AND schema_name <> 'information_schema'
+                """
+            )
+            return cur.fetchone()[0]
+
+    def count_tables(self) -> int:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*) FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relkind = 'r'
+                  AND n.nspname NOT LIKE 'pg_%'
+                  AND n.nspname <> 'information_schema'
+                """
+            )
+            return cur.fetchone()[0]
+
     def create_group(self, group_name: str):
         with self.conn.cursor() as cur:
             cur.execute(
