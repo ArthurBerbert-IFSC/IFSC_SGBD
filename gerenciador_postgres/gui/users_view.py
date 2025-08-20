@@ -23,7 +23,6 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QInputDialog,
     QProgressDialog,
-    QToolBar,
     QApplication,
 )
 from PyQt6.QtCore import Qt, QDate
@@ -346,23 +345,53 @@ class UsersView(QWidget):
 
         # Painel esquerdo (ações)
         left = QVBoxLayout()
+
+        # Grupo principal de ações do usuário
+        user_actions = QWidget()
+        user_actions.setObjectName("user-actions-group")
+        user_actions.setStyleSheet(
+            "#user-actions-group{"  # estilo dedicado para diferenciação visual
+            "background-color:#E5F5FB;"
+            "border:1px solid #B6D4E8;"
+            "padding:8px;"
+            "border-radius:4px;"
+            "}"
+        )
+        actions_layout = QVBoxLayout(user_actions)
         self.btnNovo = QPushButton("Novo Usuário")
         self.btnEditar = QPushButton("Editar Usuário")
         self.btnExcluir = QPushButton("Deletar Usuário")
+        for b in (self.btnNovo, self.btnEditar, self.btnExcluir):
+            actions_layout.addWidget(b)
+        left.addWidget(user_actions)
+
         self.btnInserirLote = QPushButton("Inserir Usuários em Lote")
         self.btnExcluirLote = QPushButton("Deletar Usuários em Lote")
         self.btnEditarExpLote = QPushButton("Editar Expiração em Lote")
+        self.btnNewGroup = QPushButton("Criar Grupo")
+        self.btnDeleteGroup = QPushButton("Excluir Grupo")
         self.btnRefreshGrupos = QPushButton("Recarregar Grupos")
         for b in (
-            self.btnNovo,
-            self.btnEditar,
-            self.btnExcluir,
             self.btnInserirLote,
             self.btnExcluirLote,
             self.btnEditarExpLote,
-            self.btnRefreshGrupos,
         ):
             left.addWidget(b)
+
+        group_actions = QWidget()
+        group_actions.setObjectName("group-actions-group")
+        group_actions.setStyleSheet(
+            "#group-actions-group {background-color: #E8F6E8; border: 1px solid #C4D7C4;}"
+        )
+        ga_layout = QVBoxLayout(group_actions)
+        for b in (
+            self.btnNewGroup,
+            self.btnDeleteGroup,
+            self.btnRefreshGrupos,
+        ):
+            ga_layout.addWidget(b)
+        left.addWidget(group_actions)
+
         left.addStretch()
         root.addLayout(left, 0)
 
@@ -392,12 +421,6 @@ class UsersView(QWidget):
         # Painel de grupos
         self.groupPanel = QWidget()
         gp_layout = QVBoxLayout(self.groupPanel)
-        toolbar = QToolBar()
-        self.btnNewGroup = QPushButton("Criar Grupo")
-        self.btnDeleteGroup = QPushButton("Excluir Grupo")
-        toolbar.addWidget(self.btnNewGroup)
-        toolbar.addWidget(self.btnDeleteGroup)
-        gp_layout.addWidget(toolbar)
         gp_layout.addWidget(QLabel("Gerenciamento de Grupos do Usuário Selecionado"))
         lists_layout = QHBoxLayout()
         # Grupos do usuário
