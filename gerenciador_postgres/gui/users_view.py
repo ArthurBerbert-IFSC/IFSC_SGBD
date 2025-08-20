@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
     QProgressDialog,
     QToolBar,
     QApplication,
+    QFrame,
+    QStyle,
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QIcon
@@ -353,16 +355,52 @@ class UsersView(QWidget):
         self.btnExcluirLote = QPushButton("Deletar Usuários em Lote")
         self.btnEditarExpLote = QPushButton("Editar Expiração em Lote")
         self.btnRefreshGrupos = QPushButton("Recarregar Grupos")
+
+        style = self.style()
+        self.btnInserirLote.setIcon(
+            QIcon.fromTheme(
+                "list-add",
+                style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder),
+            )
+        )
+        self.btnExcluirLote.setIcon(
+            QIcon.fromTheme(
+                "edit-delete",
+                style.standardIcon(QStyle.StandardPixmap.SP_TrashIcon),
+            )
+        )
+        self.btnEditarExpLote.setIcon(
+            QIcon.fromTheme(
+                "document-edit",
+                style.standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView),
+            )
+        )
+
+        # Ações individuais
         for b in (
             self.btnNovo,
             self.btnEditar,
             self.btnExcluir,
+        ):
+            left.addWidget(b)
+
+        # Agrupamento das ações em lote
+        batch_box = QFrame()
+        batch_box.setObjectName("bulk-actions-group")
+        batch_box.setFrameShape(QFrame.Shape.StyledPanel)
+        batch_box.setStyleSheet(
+            "#bulk-actions-group {background-color: #F2EEF5; border-radius: 4px; padding: 4px;}"
+        )
+        batch_layout = QVBoxLayout(batch_box)
+        for b in (
             self.btnInserirLote,
             self.btnExcluirLote,
             self.btnEditarExpLote,
-            self.btnRefreshGrupos,
         ):
-            left.addWidget(b)
+            batch_layout.addWidget(b)
+        left.addWidget(batch_box)
+
+        left.addWidget(self.btnRefreshGrupos)
         left.addStretch()
         root.addLayout(left, 0)
 
