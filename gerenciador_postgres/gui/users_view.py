@@ -346,17 +346,31 @@ class UsersView(QWidget):
 
         # Painel esquerdo (ações)
         left = QVBoxLayout()
+
+        # Grupo principal de ações do usuário
+        user_actions = QWidget()
+        user_actions.setObjectName("user-actions-group")
+        user_actions.setStyleSheet(
+            "#user-actions-group{"  # estilo dedicado para diferenciação visual
+            "background-color:#E5F5FB;"
+            "border:1px solid #B6D4E8;"
+            "padding:8px;"
+            "border-radius:4px;"
+            "}"
+        )
+        actions_layout = QVBoxLayout(user_actions)
         self.btnNovo = QPushButton("Novo Usuário")
         self.btnEditar = QPushButton("Editar Usuário")
         self.btnExcluir = QPushButton("Deletar Usuário")
+        for b in (self.btnNovo, self.btnEditar, self.btnExcluir):
+            actions_layout.addWidget(b)
+        left.addWidget(user_actions)
+
         self.btnInserirLote = QPushButton("Inserir Usuários em Lote")
         self.btnExcluirLote = QPushButton("Deletar Usuários em Lote")
         self.btnEditarExpLote = QPushButton("Editar Expiração em Lote")
         self.btnRefreshGrupos = QPushButton("Recarregar Grupos")
         for b in (
-            self.btnNovo,
-            self.btnEditar,
-            self.btnExcluir,
             self.btnInserirLote,
             self.btnExcluirLote,
             self.btnEditarExpLote,
