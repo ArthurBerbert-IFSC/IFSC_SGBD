@@ -602,8 +602,8 @@ class MainWindow(QMainWindow):
     def _factory_grupos(self):
         if not self.groups_controller:
             raise RuntimeError('Não conectado')
-        from .groups_view import GroupsView
-        return GroupsView(controller=self.groups_controller)
+        from .groups_view import PrivilegesView
+        return PrivilegesView(controller=self.groups_controller)
 
     def _factory_schema_privileges(self):
         if not self.schema_controller or not self.groups_controller:
