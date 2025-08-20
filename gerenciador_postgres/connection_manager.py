@@ -112,10 +112,12 @@ class ConnectionManager(QObject if not PURE_MODE else object):
 
     _instance: ConnectionManager | None = None
     _initialized = False
+    _thread_local = threading.local()
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._initialized = False
         return cls._instance
 
     def __init__(self) -> None:
