@@ -410,6 +410,7 @@ class MainWindow(QMainWindow):
                 f"Conectado a {params['dbname']} como {params['user']}"
             )
             self._refresh_dashboard_status()
+            self._refresh_dashboard_counts()  # Atualiza contagens após conexão
             if hasattr(self, 'stacked'):
                 self.stacked.setCurrentIndex(0)
 
@@ -623,10 +624,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Painel desconhecido', f"Painel '{key}' não registrado.")
             return
         factory, title, icon = panels[key]
+        
+        # Verifica se é uma aba que pode afetar contagens
+        should_refresh_counts = key in ('usuarios', 'grupos', 'ambientes')
+        
         # focus existing
         for i in range(self.tabs.count()):
             if self.tabs.tabText(i) == title:
                 self.tabs.setCurrentIndex(i)
+                # Atualiza contagens se navegar para aba relevante
+                if should_refresh_counts and self.db_manager:
+                    self._refresh_dashboard_counts()
                 return
         try:
             widget = factory()
@@ -638,6 +646,10 @@ class MainWindow(QMainWindow):
             return
         idx = self.tabs.addTab(widget, icon or title)
         self.tabs.setCurrentIndex(idx)
+        
+        # Atualiza contagens se abrir nova aba relevante
+        if should_refresh_counts and self.db_manager:
+            self._refresh_dashboard_counts()
 
     def _close_tab(self, index: int):
         w = self.tabs.widget(index)
