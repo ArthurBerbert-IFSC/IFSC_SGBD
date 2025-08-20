@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QInputDialog,
     QProgressDialog,
+    QToolBar,
     QApplication,
 )
 from PyQt6.QtCore import Qt, QDate
@@ -391,6 +392,12 @@ class UsersView(QWidget):
         # Painel de grupos
         self.groupPanel = QWidget()
         gp_layout = QVBoxLayout(self.groupPanel)
+        toolbar = QToolBar()
+        self.btnNewGroup = QPushButton("Criar Grupo")
+        self.btnDeleteGroup = QPushButton("Excluir Grupo")
+        toolbar.addWidget(self.btnNewGroup)
+        toolbar.addWidget(self.btnDeleteGroup)
+        gp_layout.addWidget(toolbar)
         gp_layout.addWidget(QLabel("Gerenciamento de Grupos do Usuário Selecionado"))
         lists_layout = QHBoxLayout()
         # Grupos do usuário
@@ -428,6 +435,8 @@ class UsersView(QWidget):
         self.btnAddGrupo.clicked.connect(self._add_group_to_user)
         self.btnRemGrupo.clicked.connect(self._remove_group_from_user)
         self.btnTransferGrupo.clicked.connect(self._transfer_group_user)
+        self.btnNewGroup.clicked.connect(self._on_new_group)
+        self.btnDeleteGroup.clicked.connect(self._on_delete_group)
         self.btnNovo.clicked.connect(self.add_user)
         self.btnEditar.clicked.connect(self.edit_user)
         self.btnExcluir.clicked.connect(self.delete_user)
@@ -512,6 +521,67 @@ class UsersView(QWidget):
             self._refresh_group_lists()
         else:
             QMessageBox.critical(self, "Erro", "Não foi possível transferir.")
+
+    def _on_new_group(self):
+        from gerenciador_postgres.config_manager import load_config
+        prefix_cfg = load_config().get("group_prefix", "grp_")
+        name, ok = QInputDialog.getText(
+            self,
+            "Novo Grupo",
+            f"Digite o nome do grupo (o prefixo '{prefix_cfg}' será adicionado automaticamente):",
+            QLineEdit.EchoMode.Normal,
+            "",
+        )
+        if not ok or not name.strip():
+            return
+        name = name.strip().lower()
+        if not name.startswith(prefix_cfg):
+            name = f"{prefix_cfg}{name}"
+        try:
+            self.controller.create_group(name)
+            QMessageBox.information(self, "Sucesso", f"Grupo '{name}' criado.")
+            self._refresh_group_lists()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Não foi possível criar o grupo.\nMotivo: {e}")
+
+    def _on_delete_group(self):
+        item = self.lstAllGroups.currentItem() or self.lstUserGroups.currentItem()
+        if not item:
+            return
+        group = item.text()
+        members = self.controller.list_group_members(group)
+        if members:
+            msg = (
+                f"O grupo '{group}' possui {len(members)} membro(s).\n"
+                "Deseja removê-los junto com o grupo?"
+            )
+            reply = QMessageBox.question(
+                self,
+                "Grupo com membros",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                success = self.controller.delete_group_and_members(group)
+            else:
+                success = self.controller.delete_group(group)
+        else:
+            reply = QMessageBox.question(
+                self,
+                "Confirmar Deleção",
+                f"Tem certeza que deseja excluir o grupo '{group}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            success = self.controller.delete_group(group)
+        if success:
+            QMessageBox.information(
+                self, "Sucesso", f"Grupo '{group}' excluído com sucesso."
+            )
+            self._refresh_group_lists()
 
     # ------------------------------------------------------------------
     # Operações

@@ -75,6 +75,26 @@ class UsersController(QObject):
     def list_groups(self):
         return self.role_manager.list_groups()
 
+    def create_group(self, group_name: str):
+        result = self.role_manager.create_group(group_name)
+        self.data_changed.emit()
+        return result
+
+    def delete_group(self, group_name: str) -> bool:
+        success = self.role_manager.delete_group(group_name)
+        if success:
+            self.data_changed.emit()
+        return success
+
+    def delete_group_and_members(self, group_name: str) -> bool:
+        success = self.role_manager.delete_group_and_members(group_name)
+        if success:
+            self.data_changed.emit()
+        return success
+
+    def list_group_members(self, group_name: str):
+        return self.role_manager.list_group_members(group_name)
+
     def list_user_groups(self, username: str):
         return self.role_manager.list_user_groups(username)
 
