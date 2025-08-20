@@ -14,12 +14,15 @@ from PyQt6.QtWidgets import (
     QProgressDialog,
     QGroupBox,
     QCheckBox,
+    QToolBar,
+    QInputDialog,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from pathlib import Path
 from dataclasses import dataclass, field
 import logging
+import psycopg2.errors
 
 from config.permission_templates import PERMISSION_TEMPLATES
 from gerenciador_postgres.controllers.groups_controller import DependencyWarning
@@ -59,11 +62,12 @@ class PrivilegesState:
 class PrivilegesView(QWidget):
     """Janela para gerenciamento de grupos e seus privilégios."""
 
-    def __init__(self, parent=None, controller=None):
+    def __init__(self, parent=None, controller=None, schema_controller=None):
         super().__init__(parent)
         assets_dir = Path(__file__).resolve().parents[2] / "assets"
         self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
         self.controller = controller
+        self.schema_controller = schema_controller
         self.current_group = None
         self.templates = {}
         self.schema_tables = {}
@@ -80,6 +84,8 @@ class PrivilegesView(QWidget):
         self._connect_signals()
         if self.controller:
             self.controller.data_changed.connect(self.refresh_groups)
+        if self.schema_controller:
+            self.schema_controller.data_changed.connect(self._populate_privileges)
         self.refresh_groups()
 
     # ------------------------------------------------------------------
@@ -112,6 +118,16 @@ class PrivilegesView(QWidget):
         # Schema management (master-detail)
         self.schema_group = QGroupBox("Gerenciamento de Schemas")
         schema_management_layout = QVBoxLayout()
+        self.schema_toolbar = QToolBar()
+        self.btnSchemaNew = QPushButton("Novo Schema")
+        self.btnSchemaDelete = QPushButton("Excluir")
+        self.btnSchemaOwner = QPushButton("Alterar Owner")
+        self.btnSchemaDelete.setEnabled(False)
+        self.btnSchemaOwner.setEnabled(False)
+        self.schema_toolbar.addWidget(self.btnSchemaNew)
+        self.schema_toolbar.addWidget(self.btnSchemaDelete)
+        self.schema_toolbar.addWidget(self.btnSchemaOwner)
+        schema_management_layout.addWidget(self.schema_toolbar)
         detail_layout = QHBoxLayout()
         self.schema_list = QListWidget()
         self.schema_list.setMaximumWidth(250)
@@ -156,6 +172,9 @@ class PrivilegesView(QWidget):
     def _connect_signals(self):
         self.lstGroups.currentItemChanged.connect(self._on_group_selected)
         self.schema_list.currentItemChanged.connect(self._update_schema_details)
+        self.btnSchemaNew.clicked.connect(self.on_new_schema)
+        self.btnSchemaDelete.clicked.connect(self.on_delete_schema)
+        self.btnSchemaOwner.clicked.connect(self.on_change_owner)
         self.btnApplyTemplate.clicked.connect(self._apply_template)
         self.btnSaveSchema.clicked.connect(self._save_schema_privileges)
         self.btnSaveDefaults.clicked.connect(self._save_default_privileges)
@@ -233,6 +252,160 @@ class PrivilegesView(QWidget):
                     item.setText(desired)
         finally:
             self.schema_list.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    # Handlers de gerenciamento de schemas
+    # ------------------------------------------------------------------
+    def on_new_schema(self):
+        name, ok = QInputDialog.getText(self, "Novo Schema", "Nome do schema:")
+        if not ok or not name:
+            return
+        owner = None
+        roles = []
+        supers = set()
+        if self.schema_controller:
+            try:
+                roles = self.schema_controller.list_owner_candidates(include_superusers=True)
+                supers = set(self.schema_controller.list_superusers())
+            except Exception as e:
+                logger.error(f"Falha ao listar candidatos a owner: {e}")
+        decorated = []
+        for r in roles:
+            if r in supers:
+                decorated.append((0, f"[{r}]", r))
+            else:
+                decorated.append((1, r, r))
+        decorated.sort()
+        display_items = [d[1] for d in decorated]
+        items = [""] + display_items
+        owner, ok2 = QInputDialog.getItem(
+            self,
+            "Proprietário",
+            "Owner (opcional) – superusuários entre []:",
+            items,
+            0,
+            False,
+        )
+        if not ok2:
+            owner = None
+        else:
+            if owner and owner.startswith("[") and owner.endswith("]"):
+                owner = owner[1:-1]
+        try:
+            if self.schema_controller:
+                self.schema_controller.create_schema(name, owner or None)
+            QMessageBox.information(self, "Sucesso", f"Schema '{name}' criado.")
+            self._populate_privileges()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Não foi possível criar o schema:\n{e}")
+            logger.error(f"Falha ao criar schema '{name}': {e}")
+
+    def on_delete_schema(self):
+        item = self.schema_list.currentItem()
+        if not item:
+            return
+        name = self._schema_item_name(item)
+        reply = QMessageBox.question(
+            self,
+            "Confirmar",
+            f"Excluir schema '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            if self.schema_controller:
+                self.schema_controller.delete_schema(name)
+            QMessageBox.information(self, "Sucesso", f"Schema '{name}' removido.")
+            self._populate_privileges()
+        except Exception as e:
+            def _root_exc(ex):
+                cur = ex
+                while getattr(cur, "__cause__", None) is not None:
+                    cur = cur.__cause__
+                return cur
+
+            root = _root_exc(e)
+            message = str(root)
+            pgcode = getattr(root, "pgcode", None)
+            is_deps_err = False
+            try:
+                is_deps_err = isinstance(root, psycopg2.errors.DependentObjectsStillExist)
+            except Exception:
+                is_deps_err = False
+            if not is_deps_err:
+                is_deps_err = (pgcode == "2BP01") or ("other objects depend on it" in message)
+
+            if is_deps_err:
+                cascade_reply = QMessageBox.question(
+                    self,
+                    "Objetos Dependentes Encontrados",
+                    f"O schema '{name}' possui objetos dependentes (tabelas, etc.).\n\n"
+                    f"Deseja remover o schema e TODOS os objetos dependentes?\n\n"
+                    f"ATENÇÃO: Esta ação é irreversível!",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if cascade_reply == QMessageBox.StandardButton.Yes:
+                    try:
+                        if self.schema_controller:
+                            self.schema_controller.delete_schema(name, cascade=True)
+                        QMessageBox.information(self, "Sucesso", f"Schema '{name}' e objetos dependentes removidos.")
+                        self._populate_privileges()
+                    except Exception as cascade_e:
+                        QMessageBox.critical(self, "Erro", f"Não foi possível remover o schema com CASCADE:\n{cascade_e}")
+                        logger.error(f"Falha ao remover schema '{name}' com CASCADE: {cascade_e}")
+                else:
+                    QMessageBox.information(self, "Cancelado", "Exclusão sem CASCADE cancelada pelo usuário.")
+                    logger.info(
+                        f"Exclusão de schema '{name}' sem CASCADE cancelada pelo usuário devido a objetos dependentes."
+                    )
+            else:
+                QMessageBox.critical(self, "Erro", f"Não foi possível remover o schema:\n{e}")
+                logger.error(f"Falha ao remover schema '{name}': {e}")
+
+    def on_change_owner(self):
+        item = self.schema_list.currentItem()
+        if not item:
+            return
+        name = self._schema_item_name(item)
+        roles = []
+        supers = set()
+        if self.schema_controller:
+            try:
+                roles = self.schema_controller.list_owner_candidates(include_superusers=True)
+                supers = set(self.schema_controller.list_superusers())
+            except Exception as e:
+                logger.error(f"Falha ao listar candidatos a owner: {e}")
+        decorated = []
+        for r in roles:
+            if r in supers:
+                decorated.append((0, f"[{r}]", r))
+            else:
+                decorated.append((1, r, r))
+        decorated.sort()
+        display_items = [d[1] for d in decorated]
+        new_owner, ok = QInputDialog.getItem(
+            self,
+            "Alterar Owner",
+            "Novo owner – superusuários entre []:",
+            display_items,
+            0,
+            False,
+        )
+        if ok and new_owner and new_owner.startswith("[") and new_owner.endswith("]"):
+            new_owner = new_owner[1:-1]
+        if not ok or not new_owner:
+            return
+        try:
+            if self.schema_controller:
+                self.schema_controller.change_owner(name, new_owner)
+            QMessageBox.information(self, "Sucesso", f"Owner de '{name}' alterado.")
+            self._populate_privileges()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Não foi possível alterar owner:\n{e}")
+            logger.error(f"Falha ao alterar owner de '{name}': {e}")
 
     def _get_state(self, role: str, schema: str) -> PrivilegesState:
         state = self._priv_cache.get((role, schema))
@@ -446,6 +619,9 @@ class PrivilegesView(QWidget):
         self.treePrivileges.expandAll()
 
     def _update_schema_details(self, current_item, previous_item):
+        has_item = current_item is not None
+        self.btnSchemaDelete.setEnabled(has_item)
+        self.btnSchemaOwner.setEnabled(has_item)
         if previous_item and not self._check_dirty_for_schema(self.current_group, self._strip_dirty_marker(previous_item.text())):
             self.schema_list.blockSignals(True)
             self.schema_list.setCurrentItem(previous_item)
