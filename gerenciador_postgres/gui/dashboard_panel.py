@@ -50,7 +50,7 @@ class DashboardPanel(QWidget):
             content_layout.addLayout(box)
 
         # App section
-        separator("Aplicação")
+        separator('<span style="color:#0057b7;">Aplicação</span>')
         meta = AppMetadata()
         self.lblAppName = QLabel(f"Nome: {meta.name}")
         self.lblVersion = QLabel(f"Versão: {meta.version}")
@@ -58,12 +58,21 @@ class DashboardPanel(QWidget):
         content_layout.addWidget(self.lblVersion)
 
         # Dev section
-        separator("Desenvolvedor")
-        self.lblDev = QLabel("Autor: Arthur Berbert")
+        separator('<span style="color:#0057b7;">Desenvolvedor</span>')
+        self.lblDev = QLabel(f"Autor: {meta.maintainer}")
+        self.lblContact = QLabel(f"{meta.contact_email}")
+        self.lblGithub = QLabel(f'<a href="{meta.github_url}">GitHub</a>')
+        self.lblGithub.setTextFormat(Qt.TextFormat.RichText)
+        self.lblGithub.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.lblGithub.setOpenExternalLinks(True)
+        self.lblEnv = QLabel(f"Python: {platform.python_version()}")
         content_layout.addWidget(self.lblDev)
+        content_layout.addWidget(self.lblContact)
+        content_layout.addWidget(self.lblGithub)
+        content_layout.addWidget(self.lblEnv)
 
         # Connection section
-        separator("Conexão")
+        separator('<span style="color:#0057b7;">Conexão</span>')
         form_conn = QFormLayout()
         self.lblDb = QLabel("--")
         self.lblUser = QLabel("--")
@@ -80,13 +89,8 @@ class DashboardPanel(QWidget):
         self.btnRefreshStatus.clicked.connect(self.request_status_refresh.emit)
         content_layout.addWidget(self.btnRefreshStatus)
 
-        # Environment section
-        separator("Ambiente")
-        self.lblEnv = QLabel(f"Python: {platform.python_version()}")
-        content_layout.addWidget(self.lblEnv)
-
         # Counts section
-        separator("Contagens")
+        separator('<span style="color:#0057b7;">Contagens</span>')
         form_counts = QFormLayout()
         self.lblCountUsers = QLabel("--")
         self.lblCountGroups = QLabel("--")
