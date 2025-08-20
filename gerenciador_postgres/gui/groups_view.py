@@ -10,10 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QLabel,
     QSplitter,
-    QToolBar,
-    QInputDialog,
     QMessageBox,
-    QLineEdit,
     QProgressDialog,
     QGroupBox,
     QCheckBox,
@@ -92,12 +89,7 @@ class GroupsView(QWidget):
         # Left panel
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        self.toolbar = QToolBar()
-        self.btnNewGroup = QPushButton("Novo Grupo")
-        self.btnDeleteGroup = QPushButton("Excluir Grupo")
-        self.toolbar.addWidget(self.btnNewGroup)
-        self.toolbar.addWidget(self.btnDeleteGroup)
-        left_layout.addWidget(self.toolbar)
+        left_layout.addWidget(QLabel("Grupos"))
         self.lstGroups = QListWidget()
         left_layout.addWidget(self.lstGroups)
         left_layout.addWidget(QLabel("Membros do Grupo:"))
@@ -161,8 +153,6 @@ class GroupsView(QWidget):
             w.setEnabled(False)
 
     def _connect_signals(self):
-        self.btnNewGroup.clicked.connect(self._on_new_group)
-        self.btnDeleteGroup.clicked.connect(self._on_delete_group)
         self.lstGroups.currentItemChanged.connect(self._on_group_selected)
         self.schema_list.currentItemChanged.connect(self._update_schema_details)
         self.btnApplyTemplate.clicked.connect(self._apply_template)
@@ -205,28 +195,6 @@ class GroupsView(QWidget):
         self.templates = self.controller.list_privilege_templates()
         self.cmbTemplates.clear()
         self.cmbTemplates.addItems(self.templates.keys())
-
-    def _on_new_group(self):
-        from gerenciador_postgres.config_manager import load_config
-        prefix_cfg = load_config().get("group_prefix", "grp_")
-        name, ok = QInputDialog.getText(
-            self,
-            "Novo Grupo",
-            f"Digite o nome do grupo (o prefixo '{prefix_cfg}' será adicionado automaticamente):",
-            QLineEdit.EchoMode.Normal,
-            "",
-        )
-        if not ok or not name.strip():
-            return
-        name = name.strip().lower()
-        if not name.startswith(prefix_cfg):
-            name = f"{prefix_cfg}{name}"
-        try:
-            self.controller.create_group(name)
-            QMessageBox.information(self, "Sucesso", f"Grupo '{name}' criado.")
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Não foi possível criar o grupo.\nMotivo: {e}")
-
     # ------------------------------------------------------------------
     # Métodos utilitários de estado / indicadores (reintroduzidos)
     # ------------------------------------------------------------------
@@ -320,48 +288,6 @@ class GroupsView(QWidget):
             state.dirty_table = True
             logger.debug("[GroupsView] table_priv_changed role=%s schema=%s table=%s old=%s new=%s", role, schema, table, old_perms, new_perms)
             self._refresh_schema_dirty_indicators()
-
-    def _on_delete_group(self):
-        item = self.lstGroups.currentItem()
-        if not item:
-            return
-        group = item.text()
-        members = self.controller.list_group_members(group)
-        if members:
-            msg = (
-                f"O grupo '{group}' possui {len(members)} membro(s).\n"
-                "Deseja removê-los junto com o grupo?"
-            )
-            reply = QMessageBox.question(
-                self,
-                "Grupo com membros",
-                msg,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                success = self.controller.delete_group_and_members(group)
-            else:
-                success = self.controller.delete_group(group)
-        else:
-            reply = QMessageBox.question(
-                self,
-                "Confirmar Deleção",
-                f"Tem certeza que deseja excluir o grupo '{group}'?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-            success = self.controller.delete_group(group)
-        if success:
-            QMessageBox.information(
-                self, "Sucesso", f"Grupo '{group}' excluído com sucesso."
-            )
-        else:
-            QMessageBox.critical(
-                self, "Erro", "Não foi possível excluir o grupo."
-            )
 
     def _on_group_selected(self, current, previous):
         if previous and not self._check_dirty_for_group(previous.text()):
