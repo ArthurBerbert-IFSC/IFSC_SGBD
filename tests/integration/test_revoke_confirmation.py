@@ -12,7 +12,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
 from gerenciador_postgres.db_manager import DBManager
 from gerenciador_postgres.role_manager import RoleManager
 from gerenciador_postgres.controllers.groups_controller import GroupsController
-from gerenciador_postgres.gui.groups_view import GroupsView, PrivilegesState
+from gerenciador_postgres.gui.groups_view import PrivilegesView, PrivilegesState
 
 pytestmark = pytest.mark.integration
 
@@ -31,7 +31,7 @@ def conn():
 
 
 def _build_view(controller):
-    view = GroupsView.__new__(GroupsView)
+    view = PrivilegesView.__new__(PrivilegesView)
     view.controller = controller
     view.current_group = "dep_role"
     state = PrivilegesState(table_privs={"dep_base": set()})
@@ -44,7 +44,7 @@ def _build_view(controller):
         except Exception as e:
             on_error(e)
 
-    view._execute_async = exec_sync.__get__(view, GroupsView)
+    view._execute_async = exec_sync.__get__(view, PrivilegesView)
     return view
 
 

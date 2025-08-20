@@ -4,7 +4,7 @@ import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 from PyQt6.QtWidgets import QMessageBox
 
-from gerenciador_postgres.gui.groups_view import GroupsView
+from gerenciador_postgres.gui.groups_view import PrivilegesView
 
 
 class DummyController:
@@ -25,7 +25,7 @@ class DummyController:
 
 
 def _make_view(controller):
-    view = GroupsView.__new__(GroupsView)
+    view = PrivilegesView.__new__(PrivilegesView)
     view.controller = controller
     view.lstGroups = SimpleNamespace(
         currentItem=lambda: SimpleNamespace(text=lambda: "grp_test")

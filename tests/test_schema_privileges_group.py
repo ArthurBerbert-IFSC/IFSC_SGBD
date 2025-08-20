@@ -7,7 +7,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 pytest.importorskip("PyQt6.QtWidgets")
 from gerenciador_postgres.db_manager import DBManager
-from gerenciador_postgres.gui.groups_view import GroupsView
+from gerenciador_postgres.gui.groups_view import PrivilegesView
 from PyQt6.QtWidgets import (
     QApplication,
     QTreeWidget,
@@ -80,7 +80,7 @@ def test_grant_and_display_schema_privileges():
         def get_default_table_privileges(self, group):
             return {}
 
-    view = GroupsView.__new__(GroupsView)
+    view = PrivilegesView.__new__(PrivilegesView)
     view.controller = DummyController()
     view.current_group = "grp_role"
     view.schema_list = QListWidget()
