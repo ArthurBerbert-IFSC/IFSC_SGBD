@@ -569,7 +569,7 @@ class MainWindow(QMainWindow):
         self._panels = {
             'usuarios': (self._factory_usuarios, 'Usuários', None),
             'grupos': (self._factory_grupos, 'Grupos', None),
-            'ambientes': (self._factory_schemas, 'Schemas', None),
+            'ambientes': (self._factory_schema_privileges, 'Schemas/Privilégios', None),
             'sql': (self._factory_sql_console, 'SQL', None),
         }
 
@@ -605,11 +605,15 @@ class MainWindow(QMainWindow):
         from .groups_view import GroupsView
         return GroupsView(controller=self.groups_controller)
 
-    def _factory_schemas(self):
-        if not self.schema_controller:
+    def _factory_schema_privileges(self):
+        if not self.schema_controller or not self.groups_controller:
             raise RuntimeError('Não conectado')
-        from .schema_view import SchemaView
-        return SchemaView(controller=self.schema_controller, logger=self.logger)
+        from .schema_privileges_view import SchemaPrivilegesView
+        return SchemaPrivilegesView(
+            schema_controller=self.schema_controller,
+            privileges_controller=self.groups_controller,
+            logger=self.logger,
+        )
 
     def _factory_sql_console(self):
         if not self.db_manager:
