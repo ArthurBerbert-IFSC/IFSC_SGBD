@@ -184,68 +184,100 @@ class SQLConsoleView(QWidget):
         self.txtMessages.clear()
         start_time = perf_counter()
         last_row_count = 0
-        cur = None
-        try:
-            with conn.cursor() as cur:
-                statements = [s.strip() for s in sql_text.split(";") if s.strip()]
-                for stmt in statements:
-                    cur.execute(stmt)
-                    if cur.description:
-                        rows = cur.fetchall()
-                        headers = [d[0] for d in cur.description]
-                        self.tblDataOutput.setColumnCount(len(headers))
-                        self.tblDataOutput.setHorizontalHeaderLabels(headers)
-                        self.tblDataOutput.setRowCount(len(rows))
-                        for r, row in enumerate(rows):
-                            for c, col in enumerate(row):
-                                self.tblDataOutput.setItem(
-                                    r, c, QTableWidgetItem(str(col))
-                                )
-                        last_row_count = len(rows)
-                    else:
-                        last_row_count = cur.rowcount
-                        self.tblDataOutput.clear()
-                        self.tblDataOutput.setRowCount(0)
-                        self.tblDataOutput.setColumnCount(0)
-                conn.commit()
-                elapsed = perf_counter() - start_time
-                self.txtMessages.setPlainText("Comando executado com sucesso.")
-                self.status_bar.showMessage(
-                    f"Concluído em {elapsed:.2f}s | Linhas afetadas: {last_row_count}"
-                )
-        except psycopg2.OperationalError as e:
-            # Check if it's a connection loss error
-            if "server closed the connection unexpectedly" in str(e) or "connection already closed" in str(e):
-                self.append_message(
-                    "Erro: Conexão com o servidor perdida. Verifique sua conexão de rede ou VPN."
-                )
-                # Mark connection as closed to prevent further attempts to use it
-                if hasattr(conn, 'closed'):
-                    conn.closed = 1
-            else:
-                self.append_message(f"Erro na execução: {e}")
+        had_error = False
+        statements = [s.strip() for s in sql_text.split(";") if s.strip()]
+        # Executa cada statement isoladamente para reportar erro sem travar a UI
+        for idx, stmt in enumerate(statements, start=1):
+            if had_error:
+                break
+            cur = None
+            try:
+                cur = conn.cursor()
+                cur.execute(stmt)
+                if cur.description:
+                    rows = cur.fetchall()
+                    headers = [d[0] for d in cur.description]
+                    self.tblDataOutput.setColumnCount(len(headers))
+                    self.tblDataOutput.setHorizontalHeaderLabels(headers)
+                    self.tblDataOutput.setRowCount(len(rows))
+                    for r, row in enumerate(rows):
+                        for c, col in enumerate(row):
+                            self.tblDataOutput.setItem(r, c, QTableWidgetItem(str(col)))
+                    last_row_count = len(rows)
+                else:
+                    last_row_count = cur.rowcount
+            except psycopg2.OperationalError as e:
+                had_error = True
+                msg = str(e)
+                if "server closed the connection unexpectedly" in msg or "connection already closed" in msg:
+                    self.append_message("[FALHA] Conexão perdida durante execução.")
+                    try:
+                        if not getattr(conn, 'closed', True):
+                            conn.rollback()
+                    except Exception:
+                        pass
+                else:
+                    self.append_message(self._format_db_error(e, stmt, idx))
+                    try:
+                        if not getattr(conn, 'closed', True):
+                            conn.rollback()
+                    except Exception:
+                        pass
+            except psycopg2.Error as e:  # Outros erros de banco (UndefinedFunction, etc.)
+                had_error = True
+                self.append_message(self._format_db_error(e, stmt, idx))
                 try:
                     if not getattr(conn, 'closed', True):
                         conn.rollback()
-                except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                    # Connection already closed, nothing to rollback
+                except Exception:
                     pass
-        except Exception as e:
-            self.append_message(f"Erro na execução: {e}")
+            except Exception as e:
+                had_error = True
+                self.append_message(f"[ERRO] Statement {idx}: {e}")
+                try:
+                    if not getattr(conn, 'closed', True):
+                        conn.rollback()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    if cur is not None and not getattr(conn, 'closed', True):
+                        cur.close()
+                except Exception:
+                    pass
+
+        elapsed = perf_counter() - start_time
+        if not had_error:
             try:
-                if not getattr(conn, 'closed', True):
-                    conn.rollback()
-            except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                # Connection already closed, nothing to rollback
+                conn.commit()
+            except Exception:
                 pass
-        finally:
-            # Only close the cursor if the connection is still open
-            try:
-                if not getattr(conn, 'closed', True) and cur is not None:
-                    cur.close()
-            except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                # Connection already closed, cannot close cursor
-                pass
+            self.append_message("[OK] Execução concluída.")
+            self.status_bar.showMessage(f"Concluído em {elapsed:.2f}s | Linhas afetadas: {last_row_count}")
+        else:
+            self.status_bar.showMessage(f"Erro após {elapsed:.2f}s (transação revertida)")
+
+    def _format_db_error(self, err: Exception, stmt: str, idx: int) -> str:
+        # Tenta extrair detalhes específicos de psycopg2
+        parts = [f"[ERRO BD] Statement {idx}"]
+        try:
+            import psycopg2
+            if isinstance(err, psycopg2.Error):
+                diag = getattr(err, 'diag', None)
+                primary = getattr(diag, 'message_primary', None) if diag else None
+                hint = getattr(diag, 'hint', None) if diag else None
+                code = getattr(err, 'pgcode', None)
+                parts.append(primary or str(err).strip())
+                if code:
+                    parts.append(f"Código: {code}")
+                if hint:
+                    parts.append(f"Hint: {hint}")
+        except Exception:
+            parts.append(str(err))
+        # Inclui preview do SQL
+        preview = stmt.replace('\n', ' ')[:180]
+        parts.append(f"SQL: {preview}{'…' if len(preview) == 180 else ''}")
+        return "\n".join(parts)
 
     def _set_font_size(self):
         font = QFont(self.txtSQL.font())

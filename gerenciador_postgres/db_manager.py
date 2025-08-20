@@ -639,6 +639,10 @@ class DBManager:
 
     def grant_schema_privileges(self, group: str, schema: str, privileges: Set[str]):
         """Concede privilégios de schema ao grupo informado."""
+        # Sanitiza marcador de 'sujo' caso tenha escapado da camada GUI
+        if schema.endswith(" *"):
+            logger.debug("[grant_schema_privileges] Stripping dirty marker from schema '%s'", schema)
+            schema = schema[:-2]
         logger.debug(f"grant_schema_privileges called: group={group}, schema={schema}, privileges={privileges}")
         
         base_privs = {p.rstrip("*") for p in privileges}
@@ -963,6 +967,9 @@ class DBManager:
     ):
         """Altera os privilégios padrão para objetos futuros em um schema."""
         logger.debug(f"=== alter_default_privileges START ===")
+        if schema.endswith(" *"):
+            logger.debug("[alter_default_privileges] Stripping dirty marker from schema '%s'", schema)
+            schema = schema[:-2]
         logger.debug(f"group={group}, schema={schema}, obj_type={obj_type}, privileges={privileges}, for_role={for_role}")
 
         # Validações

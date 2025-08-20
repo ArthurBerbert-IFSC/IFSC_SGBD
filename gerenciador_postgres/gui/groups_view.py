@@ -240,6 +240,15 @@ class GroupsView(QWidget):
             return text[:-2]
         return text
 
+    # Utilitário para tratar nomes de schema vindos diretamente de strings (ex: item.text())
+    def _strip_dirty_marker(self, name: str) -> str:
+        if not name:
+            return ""
+        name = name.strip()
+        if name.endswith(" *"):
+            return name[:-2]
+        return name
+
     def _refresh_schema_dirty_indicators(self):
         """Atualiza a exibição (asterisco) dos schemas com alterações pendentes."""
         self.schema_list.blockSignals(True)
@@ -411,6 +420,8 @@ class GroupsView(QWidget):
         return False
 
     def _check_dirty_for_schema(self, role: str, schema: str) -> bool:
+        # Garante que usamos sempre o nome base (sem asterisco) para lookup
+        schema = self._strip_dirty_marker(schema)
         key = (role, schema)
         state = self._priv_cache.get(key)
         if not state or not state.dirty:
@@ -432,17 +443,18 @@ class GroupsView(QWidget):
         return False
 
     def _save_state_sync(self, role: str, schema: str) -> bool:
-        state = self._priv_cache.get((role, schema))
+        schema_base = self._strip_dirty_marker(schema)
+        state = self._priv_cache.get((role, schema_base))
         if not state:
             return True
         ok1 = self.controller.grant_schema_privileges(
-            role, schema, state.schema_privs, emit_signal=False
+            role, schema_base, state.schema_privs, emit_signal=False
         )
         ok2 = self.controller.alter_default_privileges(
-            role, schema, "tables", state.default_privs, emit_signal=False
+            role, schema_base, "tables", state.default_privs, emit_signal=False
         )
         ok3 = self.controller.apply_group_privileges(
-            role, {schema: state.table_privs}, defaults_applied=True, emit_signal=False
+            role, {schema_base: state.table_privs}, defaults_applied=True, emit_signal=False
         )
         if ok1 and ok2 and ok3:
             state.dirty_schema = state.dirty_default = state.dirty_table = False
@@ -506,14 +518,16 @@ class GroupsView(QWidget):
         self.treePrivileges.expandAll()
 
     def _update_schema_details(self, current_item, previous_item):
-        if previous_item and not self._check_dirty_for_schema(self.current_group, previous_item.text()):
+        if previous_item and not self._check_dirty_for_schema(self.current_group, self._strip_dirty_marker(previous_item.text())):
             self.schema_list.blockSignals(True)
             self.schema_list.setCurrentItem(previous_item)
             self.schema_list.blockSignals(False)
             return
         if not current_item or not self.controller or not self.current_group:
             return
-        schema_name = current_item.text()
+        # Nome exibido pode conter marcador de sujo; usamos base para operações e cache
+        schema_name_display = current_item.text()
+        schema_name = self._strip_dirty_marker(schema_name_display)
         role = self.current_group
 
         self._clear_layout(self.schema_details_layout)
