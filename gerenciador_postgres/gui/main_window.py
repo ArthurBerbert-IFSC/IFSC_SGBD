@@ -242,7 +242,7 @@ class MainWindow(QMainWindow):
 
         # Ações do menu Gerenciar
         self.actionUsuarios = QAction("Usuários", self)
-        self.actionGrupos = QAction("Grupos", self)
+        self.actionPrivilegios = QAction("Privilégios", self)
         self.actionSqlConsole = QAction("Console SQL", self)
 
         # Ações do menu Exibir
@@ -259,7 +259,7 @@ class MainWindow(QMainWindow):
         self.actionDesconectar.triggered.connect(self.on_desconectar)
         self.actionSair.triggered.connect(self.close)
         self.actionUsuarios.triggered.connect(self.on_usuarios)
-        self.actionGrupos.triggered.connect(self.on_grupos)
+        self.actionPrivilegios.triggered.connect(self.on_privilegios)
         self.actionSqlConsole.triggered.connect(self.on_sql_console)
         self.actionDashboard.triggered.connect(self.on_dashboard)
 
@@ -277,7 +277,7 @@ class MainWindow(QMainWindow):
 
         # Menu Gerenciar
         self.menuGerenciar.addAction(self.actionUsuarios)
-        self.menuGerenciar.addAction(self.actionGrupos)
+        self.menuGerenciar.addAction(self.actionPrivilegios)
         self.menuGerenciar.addAction(self.actionSqlConsole)
         self.menuGerenciar.setEnabled(False)  # Começa desabilitado
 
@@ -318,9 +318,9 @@ class MainWindow(QMainWindow):
         """Mostrar aba Usuários."""
         self.open_panel('usuarios')
 
-    def on_grupos(self):
-        """Mostrar aba Grupos."""
-        self.open_panel('grupos')
+    def on_privilegios(self):
+        """Mostrar aba Privilégios."""
+        self.open_panel('privilegios')
 
     def on_conectar(self):
         # Garante que ConnectionManager existe
@@ -565,7 +565,7 @@ class MainWindow(QMainWindow):
         # Painéis em abas (dashboard fica lateral)
         self._panels = {
             'usuarios': (self._factory_usuarios, 'Usuários', None),
-            'grupos': (self._factory_grupos, 'Grupos', None),
+            'privilegios': (self._factory_privilegios, 'Privilégios', None),
             'sql': (self._factory_sql_console, 'SQL', None),
         }
 
@@ -595,10 +595,10 @@ class MainWindow(QMainWindow):
             pass
         return v
 
-    def _factory_grupos(self):
+    def _factory_privilegios(self):
         if not self.groups_controller:
             raise RuntimeError('Não conectado')
-        from .groups_view import PrivilegesView
+        from .privileges_view import PrivilegesView
         return PrivilegesView(controller=self.groups_controller, schema_controller=self.schema_controller)
 
     def _factory_sql_console(self):
@@ -616,7 +616,7 @@ class MainWindow(QMainWindow):
         factory, title, icon = panels[key]
         
         # Verifica se é uma aba que pode afetar contagens
-        should_refresh_counts = key in ('usuarios', 'grupos')
+        should_refresh_counts = key in ('usuarios', 'privilegios')
         
         # focus existing
         for i in range(self.tabs.count()):

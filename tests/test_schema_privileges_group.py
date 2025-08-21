@@ -7,7 +7,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 pytest.importorskip("PyQt6.QtWidgets")
 from gerenciador_postgres.db_manager import DBManager
-from gerenciador_postgres.gui.groups_view import PrivilegesView
+from gerenciador_postgres.gui.privileges_view import PrivilegesView
 from PyQt6.QtWidgets import (
     QApplication,
     QTreeWidget,
