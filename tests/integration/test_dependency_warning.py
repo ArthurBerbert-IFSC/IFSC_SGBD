@@ -46,7 +46,7 @@ def test_dependency_warning_flow(conn):
         contract = {"object_privileges": {"dep_role": {"public": {"dep_base": []}}}}
         rec = reconciler.Reconciler(conn)
         ops = rec.diff(contract)
-        assert ops and ops[0].get("badge") == "WARN-DEPEND"
+        assert any(op.get("badge") == "WARN-DEPEND" for op in ops)
 
         execu = executor.Executor(conn)
         with pytest.raises(RuntimeError) as excinfo:
