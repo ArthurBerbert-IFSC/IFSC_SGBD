@@ -243,7 +243,6 @@ class MainWindow(QMainWindow):
         # Ações do menu Gerenciar
         self.actionUsuarios = QAction("Usuários", self)
         self.actionGrupos = QAction("Grupos", self)
-        self.actionAmbientes = QAction("Ambientes (Schemas)", self)
         self.actionSqlConsole = QAction("Console SQL", self)
 
         # Ações do menu Exibir
@@ -261,7 +260,6 @@ class MainWindow(QMainWindow):
         self.actionSair.triggered.connect(self.close)
         self.actionUsuarios.triggered.connect(self.on_usuarios)
         self.actionGrupos.triggered.connect(self.on_grupos)
-        self.actionAmbientes.triggered.connect(self.on_schemas)
         self.actionSqlConsole.triggered.connect(self.on_sql_console)
         self.actionDashboard.triggered.connect(self.on_dashboard)
 
@@ -280,7 +278,6 @@ class MainWindow(QMainWindow):
         # Menu Gerenciar
         self.menuGerenciar.addAction(self.actionUsuarios)
         self.menuGerenciar.addAction(self.actionGrupos)
-        self.menuGerenciar.addAction(self.actionAmbientes)
         self.menuGerenciar.addAction(self.actionSqlConsole)
         self.menuGerenciar.setEnabled(False)  # Começa desabilitado
 
@@ -569,7 +566,6 @@ class MainWindow(QMainWindow):
         self._panels = {
             'usuarios': (self._factory_usuarios, 'Usuários', None),
             'grupos': (self._factory_grupos, 'Grupos', None),
-            'ambientes': (self._factory_schema_privileges, 'Schemas/Privilégios', None),
             'sql': (self._factory_sql_console, 'SQL', None),
         }
 
@@ -605,16 +601,6 @@ class MainWindow(QMainWindow):
         from .groups_view import PrivilegesView
         return PrivilegesView(controller=self.groups_controller, schema_controller=self.schema_controller)
 
-    def _factory_schema_privileges(self):
-        if not self.schema_controller or not self.groups_controller:
-            raise RuntimeError('Não conectado')
-        from .schema_privileges_view import SchemaPrivilegesView
-        return SchemaPrivilegesView(
-            schema_controller=self.schema_controller,
-            privileges_controller=self.groups_controller,
-            logger=self.logger,
-        )
-
     def _factory_sql_console(self):
         if not self.db_manager:
             raise RuntimeError('Não conectado')
@@ -630,7 +616,7 @@ class MainWindow(QMainWindow):
         factory, title, icon = panels[key]
         
         # Verifica se é uma aba que pode afetar contagens
-        should_refresh_counts = key in ('usuarios', 'grupos', 'ambientes')
+        should_refresh_counts = key in ('usuarios', 'grupos')
         
         # focus existing
         for i in range(self.tabs.count()):
@@ -716,10 +702,6 @@ class MainWindow(QMainWindow):
             self.dashboard.set_counts(u, g, s, t)
         except Exception:
             self.dashboard.set_counts(None, None, None, None)
-
-    def on_schemas(self):
-            """Mostrar aba Schemas."""
-            self.open_panel('ambientes')
 
     def on_sql_console(self):
             """Mostrar aba Console SQL."""
