@@ -330,15 +330,25 @@ class UsersView(QWidget):
 
     connection_lost = pyqtSignal()
 
-    def __init__(self, parent: QWidget | None = None, controller=None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        controller=None,
+        initial_group: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.controller = controller
+        self._initial_group = initial_group
         # Flag para evitar múltiplas emissões do sinal de conexão perdida
         self._connection_lost_emitted = False
         self._build_ui()
         if self.controller:
             self.controller.data_changed.connect(self.load_users)
+            if initial_group and hasattr(self.controller, "members_changed"):
+                self.controller.members_changed.connect(self._on_members_changed)
         self.load_users()
+        if self._initial_group:
+            self.show_group_members(self._initial_group)
 
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
@@ -498,15 +508,31 @@ class UsersView(QWidget):
             self.lstUserGroups.addItem(g)
         for g in sorted(all_groups - user_groups):
             self.lstAllGroups.addItem(g)
-        # Restaura seleção se possível
-        if sel_user:
-            items = self.lstUserGroups.findItems(sel_user, Qt.MatchFlag.MatchExactly)
-            if items:
-                self.lstUserGroups.setCurrentItem(items[0])
-        if sel_all:
-            items = self.lstAllGroups.findItems(sel_all, Qt.MatchFlag.MatchExactly)
-            if items:
-                self.lstAllGroups.setCurrentItem(items[0])
+
+    # --------------------------------------------------------------
+    # Exibição focada em um grupo
+    # --------------------------------------------------------------
+    def _on_members_changed(self, group: str):
+        if self._initial_group and group == self._initial_group:
+            self.show_group_members(self._initial_group)
+
+    def show_group_members(self, group_name: str):
+        if not self.controller:
+            return
+        self._initial_group = group_name
+        members = []
+        try:
+            for user in self.controller.list_group_members(group_name):
+                info = self.controller.get_user(user)
+                valid = None
+                if isinstance(info, dict):
+                    valid = info.get("valid_until")
+                members.append((user, valid))
+        except Exception:
+            members = []
+        self.baseModel.set_users(members)
+        self.txtFiltro.clear()
+        self.setWindowTitle(f"Membros do grupo {group_name}")
 
     def _add_group_to_user(self):
         username = self._current_username(); item = self.lstAllGroups.currentItem()

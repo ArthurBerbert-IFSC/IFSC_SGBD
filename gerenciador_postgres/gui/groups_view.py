@@ -91,6 +91,8 @@ class PrivilegesView(QWidget):
         self._connect_signals()
         if self.controller:
             self.controller.data_changed.connect(self.refresh_groups)
+            if hasattr(self.controller, "members_changed"):
+                self.controller.members_changed.connect(self._refresh_members)
         if self.schema_controller:
             self.schema_controller.data_changed.connect(self._populate_privileges)
         self.refresh_groups()
@@ -106,9 +108,21 @@ class PrivilegesView(QWidget):
         left_layout.addWidget(QLabel("Grupos"))
         self.lstGroups = QListWidget()
         left_layout.addWidget(self.lstGroups)
-        left_layout.addWidget(QLabel("Membros do Grupo:"))
+
+        # Painel de membros com possibilidade de recolher/expandir
+        self.members_box = QGroupBox("Membros do Grupo")
+        self.members_box.setCheckable(True)
+        self.members_box.setChecked(False)
+        members_layout = QVBoxLayout()
         self.lstMembers = QListWidget()
-        left_layout.addWidget(self.lstMembers)
+        self.btnManageMembers = QPushButton("Gerenciar membros…")
+        members_layout.addWidget(self.lstMembers)
+        members_layout.addWidget(self.btnManageMembers)
+        self.members_box.setLayout(members_layout)
+        # Conteúdo oculto inicialmente
+        self.lstMembers.setVisible(False)
+        self.btnManageMembers.setVisible(False)
+        left_layout.addWidget(self.members_box)
         self.splitter.addWidget(left_panel)
 
         # Right panel
@@ -214,7 +228,7 @@ class PrivilegesView(QWidget):
             self.btnSaveAll,
             self.btnReloadTables,
             self.btnSweep,
-            self.lstMembers,
+            self.members_box,
         ]:
             w.setEnabled(False)
 
@@ -234,6 +248,8 @@ class PrivilegesView(QWidget):
         self.btnSweep.clicked.connect(self._sweep_privileges)
         self.treeDbPrivileges.itemChanged.connect(self._on_db_priv_changed)
         self.treePrivileges.itemChanged.connect(self._on_table_priv_changed)
+        self.members_box.toggled.connect(self._toggle_members_panel)
+        self.btnManageMembers.clicked.connect(self._open_members_manager)
 
     # ------------------------------------------------------------------
     def refresh_groups(self):
@@ -545,7 +561,8 @@ class PrivilegesView(QWidget):
             self.btnSaveDefaults.setEnabled(False)
             self.btnSaveTables.setEnabled(False)
             self.btnSweep.setEnabled(False)
-            self.lstMembers.setEnabled(False)
+            self.members_box.setEnabled(False)
+            self.members_box.setChecked(False)
             self.lstMembers.clear()
             self.schema_list.clear()
             self._clear_layout(self.schema_details_layout)
@@ -564,11 +581,26 @@ class PrivilegesView(QWidget):
             self.btnSaveTables,
             self.btnReloadTables,
             self.btnSweep,
-            self.lstMembers,
+            self.members_box,
         ]:
             w.setEnabled(True)
         self._populate_privileges()
         self._refresh_members()
+
+    # ------------------------------------------------------------------
+    def _toggle_members_panel(self, checked: bool):
+        self.lstMembers.setVisible(checked)
+        self.btnManageMembers.setVisible(checked)
+
+    def _open_members_manager(self):
+        if not self.controller or not self.current_group:
+            return
+        from gerenciador_postgres.gui.users_view import UsersView
+
+        self._members_window = UsersView(
+            controller=self.controller, initial_group=self.current_group
+        )
+        self._members_window.show()
 
     # ------------------------------------------------------------------
     def _check_dirty_for_group(self, group: str) -> bool:
