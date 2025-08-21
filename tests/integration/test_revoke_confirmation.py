@@ -12,7 +12,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
 from gerenciador_postgres.db_manager import DBManager
 from gerenciador_postgres.role_manager import RoleManager
 from gerenciador_postgres.controllers.groups_controller import GroupsController
-from gerenciador_postgres.gui.groups_view import PrivilegesView, PrivilegesState
+from gerenciador_postgres.gui.privileges_view import PrivilegesView, PrivilegesState
 
 pytestmark = pytest.mark.integration
 
@@ -67,15 +67,15 @@ def test_revoke_with_confirmation(conn, monkeypatch):
     asked = []
 
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.question",
+        "gerenciador_postgres.gui.privileges_view.QMessageBox.question",
         lambda *a, **k: asked.append(True) or QMessageBox.StandardButton.Yes,
     )
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.information",
+        "gerenciador_postgres.gui.privileges_view.QMessageBox.information",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.critical",
+        "gerenciador_postgres.gui.privileges_view.QMessageBox.critical",
         lambda *a, **k: None,
     )
 
@@ -117,15 +117,15 @@ def test_revoke_aborts_on_cancel(conn, monkeypatch):
     asked = []
 
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.question",
+        "gerenciador_postgres.gui.privileges_view.QMessageBox.question",
         lambda *a, **k: asked.append(True) or QMessageBox.StandardButton.No,
     )
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.information",
+        "gerenciador_postgres.gui.privileges_view.QMessageBox.information",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.critical",
+        "gerenciador_postgres.gui.privileges_view.QMessageBox.critical",
         lambda *a, **k: None,
     )
 
