@@ -10,9 +10,15 @@ from config.permission_templates import DEFAULT_TEMPLATE
 
 class RoleManager:
     """Camada de serviço: orquestra operações, valida regras e controla transações."""
-    def __init__(self, dao: DBManager, logger: logging.Logger, operador: str = 'sistema', audit_manager=None):
+    def __init__(
+        self,
+        dao: DBManager,
+        logger: logging.Logger | None = None,
+        operador: str = 'sistema',
+        audit_manager=None,
+    ):
         self.dao = dao
-        self.logger = logger
+        self.logger = logger or logging.getLogger(__name__)
         self.operador = operador
         self.audit_manager = audit_manager
 
