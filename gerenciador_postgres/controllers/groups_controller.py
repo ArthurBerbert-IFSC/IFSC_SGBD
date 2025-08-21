@@ -1,5 +1,6 @@
 from PyQt6.QtCore import QObject, pyqtSignal
 from config.permission_templates import PERMISSION_TEMPLATES
+from gerenciador_postgres.controllers.users_controller import UsersController
 
 
 class DependencyWarning(RuntimeError):
@@ -7,15 +8,19 @@ class DependencyWarning(RuntimeError):
 
 
 class GroupsController(QObject):
-    """Controller dedicado às operações de grupos e privilégios."""
+    """Controller dedicado às operações de grupos, usuários e privilégios."""
 
     data_changed = pyqtSignal()
+    members_changed = pyqtSignal(str)
 
     def __init__(self, role_manager):
         super().__init__()
         self.role_manager = role_manager
         self._is_refreshing = False
         self._is_applying = False
+        # Controller auxiliar para operações de usuário
+        self._user_ctrl = UsersController(role_manager)
+        self._user_ctrl.data_changed.connect(self.data_changed)
 
     # ---------------------------------------------------------------
     # Operações de grupos
@@ -42,6 +47,58 @@ class GroupsController(QObject):
 
     def list_group_members(self, group_name: str):
         return self.role_manager.list_group_members(group_name)
+
+    # ---------------------------------------------------------------
+    # Operações de usuário (delegadas)
+    # ---------------------------------------------------------------
+    def list_users(self):
+        return self._user_ctrl.list_users()
+
+    def create_user(self, username: str, password: str, valid_until: str | None = None):
+        return self._user_ctrl.create_user(username, password, valid_until)
+
+    def get_user(self, username: str):
+        return self._user_ctrl.get_user(username)
+
+    def create_users_batch(
+        self,
+        users_data: list,
+        valid_until: str | None = None,
+        group_name: str | None = None,
+        renew: bool = False,
+    ):
+        return self._user_ctrl.create_users_batch(users_data, valid_until, group_name, renew)
+
+    def renew_user_validity(self, username: str, new_date: str) -> bool:
+        return self._user_ctrl.renew_user_validity(username, new_date)
+
+    def delete_user(self, username: str) -> bool:
+        return self._user_ctrl.delete_user(username)
+
+    def change_password(self, username: str, password: str) -> bool:
+        return self._user_ctrl.change_password(username, password)
+
+    def list_user_groups(self, username: str):
+        return self._user_ctrl.list_user_groups(username)
+
+    def add_user_to_group(self, username: str, group_name: str) -> bool:
+        success = self.role_manager.add_user_to_group(username, group_name)
+        if success:
+            self.members_changed.emit(group_name)
+        return success
+
+    def remove_user_from_group(self, username: str, group_name: str) -> bool:
+        success = self.role_manager.remove_user_from_group(username, group_name)
+        if success:
+            self.members_changed.emit(group_name)
+        return success
+
+    def transfer_user_group(self, username: str, old_group: str, new_group: str) -> bool:
+        success = self.role_manager.transfer_user_group(username, old_group, new_group)
+        if success:
+            self.members_changed.emit(old_group)
+            self.members_changed.emit(new_group)
+        return success
 
     # ---------------------------------------------------------------
     # Operações de privilégios
