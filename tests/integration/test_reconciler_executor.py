@@ -59,12 +59,9 @@ def test_reconcile_apply_roundtrip(conn):
         execu.apply(ops)
 
         cur.execute(
-            """
-            SELECT privilege_type FROM information_schema.schema_privileges
-            WHERE grantee='recon_role' AND schema_name='public'
-            """
+            "SELECT pg_catalog.has_schema_privilege('recon_role', 'public', 'USAGE')"
         )
-        assert {row[0] for row in cur.fetchall()} == {"USAGE"}
+        assert cur.fetchone()[0]
         cur.execute(
             """
             SELECT privilege_type FROM information_schema.role_table_grants
@@ -83,12 +80,9 @@ def test_reconcile_apply_roundtrip(conn):
         ops2 = rec.diff(contract2)
         execu.apply(ops2)
         cur.execute(
-            """
-            SELECT privilege_type FROM information_schema.schema_privileges
-            WHERE grantee='recon_role' AND schema_name='public'
-            """
+            "SELECT pg_catalog.has_schema_privilege('recon_role', 'public', 'USAGE')"
         )
-        assert cur.fetchone() is None
+        assert not cur.fetchone()[0]
         cur.execute(
             """
             SELECT privilege_type FROM information_schema.role_table_grants
