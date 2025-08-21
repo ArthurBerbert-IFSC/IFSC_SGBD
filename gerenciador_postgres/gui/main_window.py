@@ -114,7 +114,7 @@ class MainWindow(QMainWindow):
             self.role_manager = None
             self.users_controller = None
             self.groups_controller = None
-            self.groups_view = None
+            self.privileges_view = None
             self.schema_manager = None
             self.schema_controller = None
 
@@ -475,7 +475,7 @@ class MainWindow(QMainWindow):
         self.users_controller = None
         self.schema_manager = None
         self.schema_controller = None
-        self.groups_view = None
+        self.privileges_view = None
 
         # Restaura estado inicial
         self._refresh_dashboard_status()
@@ -721,7 +721,7 @@ class MainWindow(QMainWindow):
         self.users_controller = None
         self.schema_manager = None
         self.schema_controller = None
-        self.groups_view = None
+        self.privileges_view = None
         self._refresh_dashboard_status()
         if hasattr(self, 'stacked'):
             self.stacked.setCurrentIndex(0)
