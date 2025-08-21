@@ -361,10 +361,14 @@ class UsersView(QWidget):
         user_actions.setObjectName("user-actions-group")
         user_actions.setStyleSheet(
             "#user-actions-group{"  # estilo dedicado para diferenciação visual
-            "background-color:#E5F5FB;"
-            "border:1px solid #B6D4E8;"
+            "background-color:#D0E4EF;"
+            "border:1px solid #9ABBD1;"
             "padding:8px;"
             "border-radius:4px;"
+            "}"
+            "#user-actions-group QPushButton:hover{"  # realce ao passar o mouse
+            "color:#000;"
+            "background-color:#B9D5E7;"
             "}"
         )
         actions_layout = QVBoxLayout(user_actions)
@@ -391,7 +395,8 @@ class UsersView(QWidget):
         group_actions = QWidget()
         group_actions.setObjectName("group-actions-group")
         group_actions.setStyleSheet(
-            "#group-actions-group {background-color: #E8F6E8; border: 1px solid #C4D7C4;}"
+            "#group-actions-group {background-color:#D4ECD4; border:1px solid #AFC4AF;}"
+            "#group-actions-group QPushButton:hover{color:#000; background-color:#C2E0C2;}"
         )
         ga_layout = QVBoxLayout(group_actions)
         for b in (
