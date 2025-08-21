@@ -385,12 +385,21 @@ class UsersView(QWidget):
         self.btnNewGroup = QPushButton("Criar Grupo")
         self.btnDeleteGroup = QPushButton("Excluir Grupo")
         self.btnRefreshGrupos = QPushButton("Recarregar Grupos")
+
+        batch_actions = QWidget()
+        batch_actions.setObjectName("batch-actions-group")
+        batch_actions.setStyleSheet(
+            "#batch-actions-group {background-color:#FBE5C8; border:1px solid #E0B589;}"
+            "#batch-actions-group QPushButton:hover{color:#000; background-color:#F3D7B1;}"
+        )
+        ba_layout = QVBoxLayout(batch_actions)
         for b in (
             self.btnInserirLote,
             self.btnExcluirLote,
             self.btnEditarExpLote,
         ):
-            left.addWidget(b)
+            ba_layout.addWidget(b)
+        left.addWidget(batch_actions)
 
         group_actions = QWidget()
         group_actions.setObjectName("group-actions-group")
