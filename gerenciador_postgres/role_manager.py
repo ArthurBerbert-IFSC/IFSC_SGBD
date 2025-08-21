@@ -17,6 +17,20 @@ class RoleManager:
         operador: str = 'sistema',
         audit_manager=None,
     ):
+        """Inicializa o gerenciador de papéis.
+
+        Parameters
+        ----------
+        dao : DBManager
+            Camada de acesso aos dados.
+        logger : logging.Logger | None, optional
+            Logger usado para registrar operações; se não fornecido, utiliza o
+            logger do módulo, by default None.
+        operador : str, optional
+            Identificador do operador executando as ações, by default 'sistema'.
+        audit_manager : optional
+            Componente responsável pelo registro de auditoria, by default None.
+        """
         self.dao = dao
         self.logger = logger or logging.getLogger(__name__)
         self.operador = operador
