@@ -62,6 +62,7 @@ def test_dependency_warning_flow(conn):
         )
         assert cur.fetchone() is None
     finally:
+        conn.rollback()
         _cleanup(cur)
         conn.commit()
 

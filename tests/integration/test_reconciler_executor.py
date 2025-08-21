@@ -97,6 +97,7 @@ def test_reconcile_apply_roundtrip(conn):
         )
         assert cur.fetchone() is None
     finally:
+        conn.rollback()
         _cleanup(cur)
         conn.commit()
 
@@ -157,5 +158,6 @@ def test_default_privileges_roundtrip(conn):
         )
         assert cur.fetchone() is None
     finally:
+        conn.rollback()
         _cleanup_defaults(cur)
         conn.commit()
