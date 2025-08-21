@@ -102,11 +102,16 @@ def get_object_acls(
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         CROSS JOIN LATERAL aclexplode(
-            COALESCE(c.relacl,
-                     acldefault(
-                         CASE WHEN c.relkind = 'S' THEN 'S' ELSE 'r' END,
-                         c.relowner
-                     ))
+            COALESCE(
+                c.relacl,
+                acldefault(
+                    CASE
+                        WHEN c.relkind = 'S'::"char" THEN c.relkind
+                        ELSE 'r'::"char"
+                    END,
+                    c.relowner
+                )
+            )
         ) AS a
         LEFT JOIN pg_roles gr ON gr.oid = a.grantee
         WHERE n.nspname = %s AND c.relname = %s
