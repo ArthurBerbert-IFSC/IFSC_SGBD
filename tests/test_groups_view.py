@@ -1,10 +1,8 @@
-import types
-from types import SimpleNamespace
 import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 from PyQt6.QtWidgets import QMessageBox
 
-from gerenciador_postgres.gui.groups_view import PrivilegesView
+from gerenciador_postgres.gui.users_view import UsersView
 
 
 class DummyController:
@@ -23,13 +21,14 @@ class DummyController:
         self.deleted_with_members = group
         return True
 
+    def list_groups(self):
+        return ["grp_test"]
+
 
 def _make_view(controller):
-    view = PrivilegesView.__new__(PrivilegesView)
+    view = UsersView.__new__(UsersView)
     view.controller = controller
-    view.lstGroups = SimpleNamespace(
-        currentItem=lambda: SimpleNamespace(text=lambda: "grp_test")
-    )
+    view._refresh_group_lists = lambda: None
     return view
 
 
@@ -37,15 +36,18 @@ def test_delete_group_without_removing_members(monkeypatch):
     controller = DummyController()
     view = _make_view(controller)
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.question",
+        UsersView, "_select_groups_for_deletion", lambda self: ["grp_test"]
+    )
+    monkeypatch.setattr(
+        "gerenciador_postgres.gui.users_view.QMessageBox.question",
         lambda *a, **k: QMessageBox.StandardButton.No,
     )
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.information",
+        "gerenciador_postgres.gui.users_view.QMessageBox.information",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "gerenciador_postgres.gui.groups_view.QMessageBox.critical",
+        "gerenciador_postgres.gui.users_view.QMessageBox.critical",
         lambda *a, **k: None,
     )
 

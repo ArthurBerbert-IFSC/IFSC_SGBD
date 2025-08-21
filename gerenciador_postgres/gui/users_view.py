@@ -597,45 +597,77 @@ class UsersView(QWidget):
             self._refresh_group_lists()
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Não foi possível criar o grupo.\nMotivo: {e}")
+        
+    def _select_groups_for_deletion(self) -> list[str]:
+        if not self.controller:
+            return []
+        try:
+            groups = sorted(self.controller.list_groups())
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao listar grupos: {e}")
+            return []
+        if not groups:
+            QMessageBox.information(self, "Atenção", "Não há grupos disponíveis.")
+            return []
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Selecionar Grupos")
+        layout = QVBoxLayout(dlg)
+        lst = QListWidget()
+        lst.addItems(groups)
+        lst.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        layout.addWidget(lst)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return []
+        return [item.text() for item in lst.selectedItems()]
 
     def _on_delete_group(self):
-        item = self.lstAllGroups.currentItem() or self.lstUserGroups.currentItem()
-        if not item:
+        groups = self._select_groups_for_deletion()
+        if not groups:
             return
-        group = item.text()
-        members = self.controller.list_group_members(group)
-        if members:
-            msg = (
-                f"O grupo '{group}' possui {len(members)} membro(s).\n"
-                "Deseja removê-los junto com o grupo?"
-            )
-            reply = QMessageBox.question(
-                self,
-                "Grupo com membros",
-                msg,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                success = self.controller.delete_group_and_members(group)
+        for group in groups:
+            members = self.controller.list_group_members(group)
+            if members:
+                msg = (
+                    f"O grupo '{group}' possui {len(members)} membro(s).\n"
+                    "Deseja removê-los junto com o grupo?"
+                )
+                reply = QMessageBox.question(
+                    self,
+                    "Grupo com membros",
+                    msg,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    success = self.controller.delete_group_and_members(group)
+                else:
+                    success = self.controller.delete_group(group)
             else:
+                reply = QMessageBox.question(
+                    self,
+                    "Confirmar Deleção",
+                    f"Tem certeza que deseja excluir o grupo '{group}'?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    continue
                 success = self.controller.delete_group(group)
-        else:
-            reply = QMessageBox.question(
-                self,
-                "Confirmar Deleção",
-                f"Tem certeza que deseja excluir o grupo '{group}'?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-            success = self.controller.delete_group(group)
-        if success:
-            QMessageBox.information(
-                self, "Sucesso", f"Grupo '{group}' excluído com sucesso."
-            )
-            self._refresh_group_lists()
+            if success:
+                QMessageBox.information(
+                    self, "Sucesso", f"Grupo '{group}' excluído com sucesso."
+                )
+            else:
+                QMessageBox.critical(
+                    self, "Erro", f"Falha ao excluir o grupo '{group}'."
+                )
+        self._refresh_group_lists()
 
     # ------------------------------------------------------------------
     # Operações
