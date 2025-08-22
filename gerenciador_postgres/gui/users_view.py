@@ -458,10 +458,12 @@ class UsersView(QWidget):
         self.btnAddGrupo = QPushButton("<< Adicionar")
         self.btnRemGrupo = QPushButton("Remover >>")
         self.btnTransferGrupo = QPushButton("Transferir")
+        self.btnApplyDefaults = QPushButton("Reaplicar defaults")
         col_btns.addStretch()
         col_btns.addWidget(self.btnAddGrupo)
         col_btns.addWidget(self.btnRemGrupo)
         col_btns.addWidget(self.btnTransferGrupo)
+        col_btns.addWidget(self.btnApplyDefaults)
         col_btns.addStretch()
         lists_layout.addLayout(col_btns)
         # Grupos disponíveis
@@ -482,6 +484,7 @@ class UsersView(QWidget):
         self.btnAddGrupo.clicked.connect(self._add_group_to_user)
         self.btnRemGrupo.clicked.connect(self._remove_group_from_user)
         self.btnTransferGrupo.clicked.connect(self._transfer_group_user)
+        self.btnApplyDefaults.clicked.connect(self._on_apply_defaults)
         self.btnNewGroup.clicked.connect(self._on_new_group)
         self.btnDeleteGroup.clicked.connect(self._on_delete_group)
         self.btnNovo.clicked.connect(self.add_user)
@@ -584,6 +587,16 @@ class UsersView(QWidget):
             self._refresh_group_lists()
         else:
             QMessageBox.critical(self, "Erro", "Não foi possível transferir.")
+
+    def _on_apply_defaults(self):
+        username = self._current_username()
+        if not username:
+            return
+        try:
+            self.controller.apply_defaults_to_user(username)
+            QMessageBox.information(self, "Sucesso", "Defaults reaplicados.")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao aplicar defaults: {e}")
 
     def _on_new_group(self):
         from gerenciador_postgres.config_manager import load_config
