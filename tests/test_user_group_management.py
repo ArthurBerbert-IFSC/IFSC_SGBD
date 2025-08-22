@@ -52,6 +52,10 @@ class DummyDAO:
         owner = for_role
         self.default_privs.setdefault(owner, {}).setdefault(schema, {}).setdefault(group, set()).update(privileges)
 
+    def list_schemas(self):
+        """Return available schemas for default privileges operations."""
+        return ["public"]
+
     @contextmanager
     def transaction(self):
         try:
