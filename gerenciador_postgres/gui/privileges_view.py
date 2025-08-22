@@ -505,6 +505,20 @@ class PrivilegesView(QWidget):
             self._refresh_schema_dirty_indicators()
             self._update_save_all_state()
 
+    def _update_general_item_state(self, schema_item: QTreeWidgetItem):
+        """Atualiza o item 'Geral' conforme os filhos."""
+        general_item = schema_item.child(0)
+        for col in range(1, 5):
+            if schema_item.childCount() <= 1:
+                state = Qt.CheckState.Unchecked
+            else:
+                states = {
+                    schema_item.child(i).checkState(col)
+                    for i in range(1, schema_item.childCount())
+                }
+                state = states.pop() if len(states) == 1 else Qt.CheckState.PartiallyChecked
+            general_item.setCheckState(col, state)
+
     def _on_table_priv_changed(self, item: QTreeWidgetItem, column: int):
         """Atualiza cache ao marcar/desmarcar privilégios de tabela."""
         # Ignora se não há grupo selecionado ou item inválido
@@ -517,8 +531,30 @@ class PrivilegesView(QWidget):
         schema = parent.text(0)
         role = self.current_group
         state = self._get_state(role, schema)
-        table = item.text(0)
         col_map = {1: "SELECT", 2: "INSERT", 3: "UPDATE", 4: "DELETE"}
+        if item.text(0) == "Geral":
+            # Aplica mudança a todas as tabelas filhas
+            priv = col_map.get(column)
+            if not priv:
+                return
+            checked = item.checkState(column) == Qt.CheckState.Checked
+            self.treePrivileges.blockSignals(True)
+            for i in range(1, parent.childCount()):
+                child = parent.child(i)
+                child.setCheckState(column, item.checkState(column))
+                table = child.text(0)
+                perms = state.table_privs.get(table, set())
+                if checked:
+                    perms.add(priv)
+                else:
+                    perms.discard(priv)
+                state.table_privs[table] = perms
+            self.treePrivileges.blockSignals(False)
+            state.dirty_table = True
+            self._refresh_schema_dirty_indicators()
+            return
+
+        table = item.text(0)
         # Calcula conjunto após mudança
         new_perms = set()
         for col, label in col_map.items():
@@ -530,7 +566,14 @@ class PrivilegesView(QWidget):
             state.dirty_table = True
             logger.debug("[PrivilegesView] table_priv_changed role=%s schema=%s table=%s old=%s new=%s", role, schema, table, old_perms, new_perms)
             self._refresh_schema_dirty_indicators()
-            self._update_save_all_state()
+
+        # Atualiza estado do item "Geral"
+        self.treePrivileges.blockSignals(True)
+        self._update_general_item_state(parent)
+        self.treePrivileges.blockSignals(False)
+
+        # E também atualiza o estado do botão Salvar Tudo
+        self._update_save_all_state()
 
     def _on_db_priv_changed(self, item: QTreeWidgetItem, column: int):
         """Atualiza cache para privilégios de banco."""
@@ -744,6 +787,14 @@ class PrivilegesView(QWidget):
             if not state:
                 state = PrivilegesState()
                 self._priv_cache[key] = state
+            # Adiciona item "Geral" para aplicar privilégios a todas as tabelas
+            general_item = QTreeWidgetItem(["Geral", "", "", "", ""])
+            general_item.setFlags(
+                general_item.flags()
+                | Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+            schema_item.addChild(general_item)
             for table in tables:
                 table_item = QTreeWidgetItem([table, "", "", "", ""])
                 table_item.setFlags(
@@ -760,6 +811,17 @@ class PrivilegesView(QWidget):
                         Qt.CheckState.Checked if label in perms else Qt.CheckState.Unchecked,
                     )
                 schema_item.addChild(table_item)
+            # Determina estado inicial do item "Geral" com base nas tabelas
+            for col in range(1, 5):
+                if schema_item.childCount() <= 1:
+                    state_val = Qt.CheckState.Unchecked
+                else:
+                    states = {
+                        schema_item.child(i).checkState(col)
+                        for i in range(1, schema_item.childCount())
+                    }
+                    state_val = states.pop() if len(states) == 1 else Qt.CheckState.PartiallyChecked
+                general_item.setCheckState(col, state_val)
         self.treePrivileges.blockSignals(False)
         self.treePrivileges.expandAll()
 
