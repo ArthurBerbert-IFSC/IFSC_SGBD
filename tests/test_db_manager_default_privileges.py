@@ -1,6 +1,7 @@
 import unittest
 import sys
 import pathlib
+import unittest
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -81,6 +82,39 @@ class DBManagerDefaultPrivTests(unittest.TestCase):
         result = self.dbm.alter_default_privileges("grp", "public", "tables", {"SELECT"})
         self.assertTrue(result)
         self.assertIsNone(self.conn.cursor_obj)
+
+    def test_get_default_privileges_multiple_owners(self):
+        rows = [
+            ("owner1", "public", "grp", "SELECT", False),
+            ("owner2", "public", "grp", "INSERT", False),
+        ]
+
+        class Cur:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                pass
+
+            def execute(self, sql, params=None):
+                pass
+
+            def fetchall(self):
+                return rows
+
+        class Conn:
+            def cursor(self):
+                return Cur()
+
+            def commit(self):
+                pass
+
+        dbm = DBManager(Conn())
+        res = dbm.get_default_privileges()
+        self.assertEqual(res["public"]["grp"], {"SELECT", "INSERT"})
+        owners = res["_meta"]["owner_roles"]["public"]
+        self.assertEqual(owners["owner1"], {"SELECT"})
+        self.assertEqual(owners["owner2"], {"INSERT"})
 
 
 if __name__ == "__main__":

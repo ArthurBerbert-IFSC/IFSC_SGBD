@@ -858,7 +858,9 @@ class DBManager:
         )
 
         result: Dict[str, Dict[str, Set[str]]] = {}
-        meta_owner: Dict[str, str] = {}
+        # Maps schema -> {owner_role -> set(privileges)} so callers can
+        # determine which default privileges originate from which owner.
+        meta_owner: Dict[str, Dict[str, Set[str]]] = {}
 
         try:
             with self.conn.cursor() as cur:
@@ -866,8 +868,12 @@ class DBManager:
                 rows = cur.fetchall()
 
             for owner_role, schema_name, grantee, priv, grantable in rows:
-                meta_owner[schema_name] = owner_role
                 privname = priv + ("*" if grantable else "")
+                # Aggregate privileges granted by each owner
+                meta_owner.setdefault(schema_name, {}).setdefault(owner_role, set()).add(
+                    privname
+                )
+                # Track privileges granted to each grantee
                 result.setdefault(schema_name, {}).setdefault(grantee, set()).add(
                     privname
                 )

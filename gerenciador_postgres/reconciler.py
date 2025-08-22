@@ -60,14 +60,17 @@ class Reconciler:
         for key, code in OBJECT_TYPE_CODES.items():
             obj_keyword = OBJECT_TYPE_MAPS.get(key, key.upper())
             state = state_reader.get_default_privileges(self.conn, objtype=code)
-            owners = state.get("_meta", {}).get("owner_roles", {})
+            owners_map = state.get("_meta", {}).get("owner_roles", {})
             for schema, privs in state.items():
                 if schema == "_meta":
                     continue
-                owner = owners.get(schema)
-                current_map[(owner, schema, obj_keyword, code)] = {
-                    g: set(p) for g, p in privs.items()
-                }
+                for owner, owner_privs in owners_map.get(schema, {}).items():
+                    grantee_map: Dict[str, Set[str]] = {}
+                    for grantee, gprivs in privs.items():
+                        inter = set(gprivs) & set(owner_privs)
+                        if inter:
+                            grantee_map[grantee] = inter
+                    current_map[(owner, schema, obj_keyword, code)] = grantee_map
 
         ops: List[dict] = []
         for key in sorted(set(current_map) | set(desired_map)):

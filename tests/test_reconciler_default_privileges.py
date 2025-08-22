@@ -47,7 +47,7 @@ def test_diff_default_privileges_grant(monkeypatch):
 def test_diff_default_privileges_revoke(monkeypatch):
     states = {
         "r": {
-            "_meta": {"owner_roles": {"public": "owner"}},
+            "_meta": {"owner_roles": {"public": {"owner": {"SELECT"}}}},
             "public": {"grantee": {"SELECT"}},
         }
     }
