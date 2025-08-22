@@ -82,9 +82,34 @@ class GroupsController(QObject):
         return self._user_ctrl.list_user_groups(username)
 
     def add_user_to_group(self, username: str, group_name: str) -> bool:
+        existing_members = []
+        try:
+            existing_members = self.role_manager.list_group_members(group_name)
+        except Exception:
+            pass
+
         success = self.role_manager.add_user_to_group(username, group_name)
         if success:
             self.members_changed.emit(group_name)
+            # Replica default privileges de outro membro existente para o novo usuário
+            existing_owner = next((m for m in existing_members if m != username), None)
+            if existing_owner:
+                try:
+                    defaults = self.role_manager.dao.get_default_privileges(owner=existing_owner)
+                    for schema, grants in defaults.items():
+                        if schema.startswith("_"):
+                            continue
+                        privileges = grants.get(group_name)
+                        if not privileges:
+                            continue
+                        try:
+                            self.role_manager.dao.alter_default_privileges(
+                                group_name, schema, "tables", privileges, for_role=username
+                            )
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
         return success
 
     def remove_user_from_group(self, username: str, group_name: str) -> bool:
