@@ -309,6 +309,15 @@ class PrivilegesView(QWidget):
         finally:
             self.schema_list.blockSignals(False)
 
+    def _update_save_all_state(self):
+        dirty = self._db_dirty
+        if not dirty and self.current_group:
+            for (role, _), st in self._priv_cache.items():
+                if role == self.current_group and st.dirty:
+                    dirty = True
+                    break
+        self.btnSaveAll.setEnabled(bool(dirty))
+
     # ------------------------------------------------------------------
     # Handlers de gerenciamento de schemas
     # ------------------------------------------------------------------
@@ -481,6 +490,7 @@ class PrivilegesView(QWidget):
             state.dirty_schema = True
             logger.debug("[PrivilegesView] schema_priv_changed role=%s schema=%s priv=%s now=%s", role, schema, priv, state.schema_privs)
             self._refresh_schema_dirty_indicators()
+            self._update_save_all_state()
 
     def _update_default_priv(self, role: str, schema: str, priv: str, checked: bool):
         state = self._get_state(role, schema)
@@ -493,6 +503,7 @@ class PrivilegesView(QWidget):
             state.dirty_default = True
             logger.debug("[PrivilegesView] default_priv_changed role=%s schema=%s priv=%s now=%s", role, schema, priv, state.default_privs)
             self._refresh_schema_dirty_indicators()
+            self._update_save_all_state()
 
     def _on_table_priv_changed(self, item: QTreeWidgetItem, column: int):
         """Atualiza cache ao marcar/desmarcar privilégios de tabela."""
@@ -519,6 +530,7 @@ class PrivilegesView(QWidget):
             state.dirty_table = True
             logger.debug("[PrivilegesView] table_priv_changed role=%s schema=%s table=%s old=%s new=%s", role, schema, table, old_perms, new_perms)
             self._refresh_schema_dirty_indicators()
+            self._update_save_all_state()
 
     def _on_db_priv_changed(self, item: QTreeWidgetItem, column: int):
         """Atualiza cache para privilégios de banco."""
@@ -531,6 +543,7 @@ class PrivilegesView(QWidget):
         else:
             self._db_privs.discard(priv)
         self._db_dirty = True
+        self._update_save_all_state()
 
     def _on_group_selected(self, current, previous):
         if previous and not self._check_dirty_for_group(previous.text()):
@@ -978,6 +991,7 @@ class PrivilegesView(QWidget):
                 QMessageBox.information(self, "Sucesso", "Privilégios de banco atualizados.")
             else:
                 QMessageBox.critical(self, "Erro", "Falha ao salvar privilégios de banco.")
+            self._update_save_all_state()
 
         def on_error(e: Exception):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar privilégios de banco: {e}")
@@ -1057,6 +1071,7 @@ class PrivilegesView(QWidget):
                     schema,
                     schema_perms,
                 )
+            self._update_save_all_state()
 
         def on_error(e: Exception):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar privilégios de schema: {e}")
@@ -1100,6 +1115,7 @@ class PrivilegesView(QWidget):
                 QMessageBox.information(self, "Sucesso", f"Defaults de tabelas em '{schema}' atualizados.")
             else:
                 QMessageBox.critical(self, "Erro", "Falha ao salvar defaults.")
+            self._update_save_all_state()
 
         def on_error(e: Exception):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar defaults: {e}")
@@ -1131,6 +1147,7 @@ class PrivilegesView(QWidget):
                 QMessageBox.information(self, "Sucesso", "Privilégios de tabelas atualizados.")
             else:
                 QMessageBox.critical(self, "Erro", "Falha ao salvar privilégios de tabelas.")
+            self._update_save_all_state()
 
         def on_error(e: Exception):
             if isinstance(e, DependencyWarning):
@@ -1198,6 +1215,7 @@ class PrivilegesView(QWidget):
             else:
                 QMessageBox.warning(self, "Parcial", "Algumas alterações não puderam ser salvas.")
             self._refresh_schema_dirty_indicators()
+            self._update_save_all_state()
         def on_error(e: Exception):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar tudo: {e}")
         self._execute_async(task, on_success, on_error, "Salvando tudo...")
