@@ -52,6 +52,7 @@ class PrivilegesState:
     schema_privs: set[str] = field(default_factory=set)
     table_privs: dict[str, set[str]] = field(default_factory=dict)
     default_privs: set[str] = field(default_factory=set)
+    owner_role: str | None = None
     dirty_schema: bool = False
     dirty_table: bool = False
     dirty_default: bool = False
@@ -792,6 +793,7 @@ class PrivilegesView(QWidget):
             if not state:
                 state = PrivilegesState()
                 self._priv_cache[key] = state
+            state.owner_role = owner_role
             if not state.schema_privs:
                 state.schema_privs = set(schema_privs_db)
             if not state.default_privs:
@@ -1099,7 +1101,10 @@ class PrivilegesView(QWidget):
         default_perms = set(state.default_privs) if state else set()
 
         def task():
-            return self.controller.alter_default_privileges(role, schema, "tables", default_perms, emit_signal=False)
+            owner = state.owner_role if state else None
+            return self.controller.alter_default_privileges(
+                role, schema, "tables", default_perms, owner=owner, emit_signal=False
+            )
 
         def on_success(success):
             if success:
