@@ -5,8 +5,7 @@ class UsersController(QObject):
     """Controller responsável pelas operações de usuário.
 
     Este controller orquestra chamadas de criação/atualização/exclusão de
-    usuários e gerencia ações correlatas, como sincronização de privilégios
-    após operações em lote.
+    usuários e gerencia ações correlatas após operações em lote.
     """
 
     data_changed = pyqtSignal()
