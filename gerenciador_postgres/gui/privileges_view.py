@@ -40,146 +40,137 @@ class _TaskRunner(QThread):
     def __init__(self, func, parent=None):
         super().__init__(parent)
         self._func = func
+            layout = QVBoxLayout(self)
+            self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
-    def run(self):
-        try:
-            result = self._func()
-            self.succeeded.emit(result)
-        except Exception as e:  # pragma: no cover
-            self.failed.emit(e)
+            # Left panel
+            left_panel = QWidget()
+            left_layout = QVBoxLayout(left_panel)
+            left_layout.addWidget(QLabel("Grupos"))
+            self.lstGroups = QListWidget()
+            left_layout.addWidget(self.lstGroups)
 
+            # Painel de membros sempre visível
+            self.members_box = QGroupBox("Membros do Grupo")
+            members_layout = QVBoxLayout()
+            self.lstMembers = QListWidget()
+            members_layout.addWidget(self.lstMembers)
+            self.members_box.setLayout(members_layout)
+            left_layout.addWidget(self.members_box)
+            self.splitter.addWidget(left_panel)
 
-@dataclass
-class PrivilegesState:
-    schema_privs: set[str] = field(default_factory=set)
-    table_privs: dict[str, set[str]] = field(default_factory=dict)
-    # Default privileges are now tracked per owner role
-    default_privs: dict[str, set[str]] = field(default_factory=dict)
-    dirty_schema: bool = False
-    dirty_table: bool = False
-    dirty_default: bool = False
+            # Right panel
+            right_panel = QWidget()
+            right_layout = QVBoxLayout(right_panel)
+            top = QHBoxLayout()
+            top.addWidget(QLabel("Template:"))
+            self.cmbTemplates = QComboBox()
+            self.btnApplyTemplate = QPushButton("Aplicar")
+            top.addWidget(self.cmbTemplates)
+            top.addWidget(self.btnApplyTemplate)
+            right_layout.addLayout(top)
 
-    @property
-    def dirty(self) -> bool:
-        return self.dirty_schema or self.dirty_table or self.dirty_default
+            # Tabs para organização de privilégios
+            self.tabs = QTabWidget()
 
+            # --- Banco ---
+            db_tab = QWidget()
+            db_layout = QVBoxLayout(db_tab)
+            self.treeDbPrivileges = QTreeWidget()
+            self.treeDbPrivileges.setHeaderLabels(["Privilégio"])
+            db_layout.addWidget(self.treeDbPrivileges)
+            self.btnSaveDb = QPushButton("Salvar Banco")
+            db_layout.addWidget(self.btnSaveDb)
+            self.tabs.addTab(db_tab, "Banco")
 
-class PrivilegesView(QWidget):
-    """Janela para gerenciamento de grupos e seus privilégios."""
+            # --- Schemas (inclui defaults) ---
+            schema_tab = QWidget()
+            schema_tab_layout = QVBoxLayout(schema_tab)
+            self.schema_group = QGroupBox("Gerenciamento de Schemas")
+            schema_management_layout = QVBoxLayout()
+            self.schema_toolbar = QToolBar()
+            self.btnSchemaNew = QPushButton("Novo Schema")
+            self.btnSchemaDelete = QPushButton("Excluir")
+            self.btnSchemaOwner = QPushButton("Alterar Owner")
+            self.btnSchemaDelete.setEnabled(False)
+            self.btnSchemaOwner.setEnabled(False)
+            self.schema_toolbar.addWidget(self.btnSchemaNew)
+            self.schema_toolbar.addWidget(self.btnSchemaDelete)
+            self.schema_toolbar.addWidget(self.btnSchemaOwner)
+            schema_management_layout.addWidget(self.schema_toolbar)
+            detail_layout = QHBoxLayout()
+            self.schema_list = QListWidget()
+            self.schema_list.setMaximumWidth(250)
+            detail_layout.addWidget(self.schema_list)
+            self.schema_details_panel = QWidget()
+            self.schema_details_layout = QVBoxLayout(self.schema_details_panel)
+            detail_layout.addWidget(self.schema_details_panel, 1)
+            schema_management_layout.addLayout(detail_layout)
+            self.schema_group.setLayout(schema_management_layout)
+            schema_tab_layout.addWidget(self.schema_group)
+            schema_btns = QHBoxLayout()
+            self.btnSaveSchema = QPushButton("Salvar Schema")
+            self.btnSaveDefaults = QPushButton("Salvar Defaults")
+            self.btnApplyDefaults = QPushButton("Aplicar para...")
+            self.btnManageDefaultOwners = QPushButton("Gerenciar Owners")
+            schema_btns.addWidget(self.btnSaveSchema)
+            schema_btns.addWidget(self.btnSaveDefaults)
+            schema_btns.addWidget(self.btnApplyDefaults)
+            schema_btns.addWidget(self.btnManageDefaultOwners)
+            schema_btns.addStretch(1)
+            schema_tab_layout.addLayout(schema_btns)
+            self.tabs.addTab(schema_tab, "Schemas")
 
-    def __init__(self, parent=None, controller=None, schema_controller=None):
-        super().__init__(parent)
-        assets_dir = Path(__file__).resolve().parents[2] / "assets"
-        self.setWindowIcon(QIcon(str(assets_dir / "icone.png")))
-        self.controller = controller
-        self.schema_controller = schema_controller
-        self.current_group = None
-        self.templates = {}
-        self.schema_tables = {}
-        self.cb_usage = None
-        self.cb_create = None
-        self.cb_default_select = None
-        self.cb_default_insert = None
-        self.cb_default_update = None
-        self.cb_default_delete = None
-        self._threads = []  # type: list[QThread]
-        # Cache de privilégios em memória por (role, schema)
-        self._priv_cache: dict[tuple[str, str], PrivilegesState] = {}
-        # Armazena privilégios de banco e indicador de alterações
-        self.treeDbPrivileges = None
-        self.btnSaveDb = None
-        self._db_privs: set[str] = set()
-        self._db_dirty: bool = False
-        self._setup_ui()
-        self._connect_signals()
-        if self.controller:
-            self.controller.data_changed.connect(self.refresh_groups)
-            if hasattr(self.controller, "members_changed"):
-                self.controller.members_changed.connect(self._refresh_members)
-        if self.schema_controller:
-            self.schema_controller.data_changed.connect(self._populate_privileges)
-        self.refresh_groups()
+            # --- Tabelas ---
+            tables_tab = QWidget()
+            tables_layout = QVBoxLayout(tables_tab)
+            self.treePrivileges = QTreeWidget()
+            self.treePrivileges.setHeaderLabels([
+                "Schema/Tabela", "SELECT", "INSERT", "UPDATE", "DELETE"
+            ])
+            tables_layout.addWidget(self.treePrivileges)
+            tables_btns = QHBoxLayout()
+            self.btnSaveTables = QPushButton("Salvar Tabelas")
+            self.btnReloadTables = QPushButton("Recarregar Tabelas")
+            tables_btns.addWidget(self.btnSaveTables)
+            tables_btns.addWidget(self.btnReloadTables)
+            tables_btns.addStretch(1)
+            tables_layout.addLayout(tables_btns)
+            self.tabs.addTab(tables_tab, "Tabelas")
 
-    # ------------------------------------------------------------------
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+            right_layout.addWidget(self.tabs)
 
-        # Left panel
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.addWidget(QLabel("Grupos"))
-        self.lstGroups = QListWidget()
-        left_layout.addWidget(self.lstGroups)
+            # Botões gerais
+            self.btnSaveAll = QPushButton("Salvar Tudo")
+            actions_layout = QHBoxLayout()
+            actions_layout.addWidget(self.btnSaveAll)
+            actions_layout.addStretch(1)
+            right_layout.addLayout(actions_layout)
 
-        # Painel de membros sempre visível
-        self.members_box = QGroupBox("Membros do Grupo")
-        members_layout = QVBoxLayout()
-        self.lstMembers = QListWidget()
-        members_layout.addWidget(self.lstMembers)
-        self.members_box.setLayout(members_layout)
-        left_layout.addWidget(self.members_box)
-        self.splitter.addWidget(left_panel)
+            self.splitter.addWidget(right_panel)
+            layout.addWidget(self.splitter)
+            self.setLayout(layout)
 
-        # Right panel
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        top = QHBoxLayout()
-        top.addWidget(QLabel("Template:"))
-        self.cmbTemplates = QComboBox()
-        self.btnApplyTemplate = QPushButton("Aplicar")
-        top.addWidget(self.cmbTemplates)
-        top.addWidget(self.btnApplyTemplate)
-        right_layout.addLayout(top)
-
-        # Tabs para organização de privilégios
-        self.tabs = QTabWidget()
-
-        # --- Banco ---
-        db_tab = QWidget()
-        db_layout = QVBoxLayout(db_tab)
-        self.treeDbPrivileges = QTreeWidget()
-        self.treeDbPrivileges.setHeaderLabels(["Privilégio"])
-        db_layout.addWidget(self.treeDbPrivileges)
-        self.btnSaveDb = QPushButton("Salvar Banco")
-        db_layout.addWidget(self.btnSaveDb)
-        self.tabs.addTab(db_tab, "Banco")
-
-        # --- Schemas (inclui defaults) ---
-        schema_tab = QWidget()
-        schema_tab_layout = QVBoxLayout(schema_tab)
-        self.schema_group = QGroupBox("Gerenciamento de Schemas")
-        schema_management_layout = QVBoxLayout()
-        self.schema_toolbar = QToolBar()
-        self.btnSchemaNew = QPushButton("Novo Schema")
-        self.btnSchemaDelete = QPushButton("Excluir")
-        self.btnSchemaOwner = QPushButton("Alterar Owner")
-        self.btnSchemaDelete.setEnabled(False)
-        self.btnSchemaOwner.setEnabled(False)
-        self.schema_toolbar.addWidget(self.btnSchemaNew)
-        self.schema_toolbar.addWidget(self.btnSchemaDelete)
-        self.schema_toolbar.addWidget(self.btnSchemaOwner)
-        schema_management_layout.addWidget(self.schema_toolbar)
-        detail_layout = QHBoxLayout()
-        self.schema_list = QListWidget()
-        self.schema_list.setMaximumWidth(250)
-        detail_layout.addWidget(self.schema_list)
-        self.schema_details_panel = QWidget()
-        self.schema_details_layout = QVBoxLayout(self.schema_details_panel)
-        detail_layout.addWidget(self.schema_details_panel, 1)
+            # Initial disabled state
+            for w in [
+                self.treeDbPrivileges,
+                self.schema_group,
+                self.treePrivileges,
+                self.btnApplyTemplate,
+                self.btnSaveDb,
+                self.btnSaveSchema,
+                self.btnSaveDefaults,
+                self.btnApplyDefaults,
+                self.btnSaveTables,
+                self.btnSaveAll,
+                self.btnReloadTables,
+                self.members_box,
+            ]:
+                w.setEnabled(False)
         schema_management_layout.addLayout(detail_layout)
         self.schema_group.setLayout(schema_management_layout)
         schema_tab_layout.addWidget(self.schema_group)
-        schema_btns = QHBoxLayout()
-        self.btnSaveSchema = QPushButton("Salvar Schema")
-        self.btnSaveDefaults = QPushButton("Salvar Defaults")
-        self.btnApplyDefaults = QPushButton("Aplicar para...")
-        schema_btns.addWidget(self.btnSaveSchema)
-        schema_btns.addWidget(self.btnSaveDefaults)
-        schema_btns.addWidget(self.btnApplyDefaults)
-        schema_btns.addStretch(1)
-        schema_tab_layout.addLayout(schema_btns)
-        self.tabs.addTab(schema_tab, "Schemas")
+    schema_btns = QHBoxLayout()
 
         # --- Tabelas ---
         tables_tab = QWidget()
@@ -238,7 +229,7 @@ class PrivilegesView(QWidget):
         self.btnSaveDb.clicked.connect(self._save_db_privileges)
         self.btnSaveSchema.clicked.connect(self._save_schema_privileges)
         self.btnSaveDefaults.clicked.connect(self._save_default_privileges)
-        self.btnApplyDefaults.clicked.connect(self._apply_defaults_for)
+    self.btnApplyDefaults.clicked.connect(self._apply_defaults_for)
         self.btnSaveTables.clicked.connect(self._save_table_privileges)
         self.btnSaveAll.clicked.connect(self._save_all_privileges)
         self.btnReloadTables.clicked.connect(self._reload_tables)
@@ -1259,6 +1250,94 @@ class PrivilegesView(QWidget):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar defaults: {e}")
 
         self._execute_async(task, on_success, on_error, "Salvando defaults...")
+
+    def _manage_default_owners(self):
+        """Permite escolher quais roles serão considerados 'owners' para defaults neste schema.
+
+        - Marcados: aplica os privilégios de defaults atualmente selecionados nas checkboxes (SELECT/INSERT/UPDATE/DELETE)
+        - Desmarcados (que já tinham defaults): revoga todos os defaults deste grupo para esses owners
+        """
+        role, schema = self._current_schema_checked()
+        if not role:
+            return
+        state = self._priv_cache.get((role, schema))
+        current_owners = set(state.default_privs.keys()) if state and state.default_privs else set()
+
+        # Coletar lista de roles do sistema
+        candidates = []
+        if self.schema_controller:
+            try:
+                candidates = sorted(self.schema_controller.list_owner_candidates(include_superusers=True))
+            except Exception:
+                candidates = []
+        if not candidates:
+            QMessageBox.warning(self, "Sem roles", "Não foi possível listar roles para seleção.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Gerenciar Owners de Defaults – schema {schema}")
+        v = QVBoxLayout(dlg)
+        lst = QListWidget()
+        lst.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        for r in candidates:
+            item = QListWidgetItem(r)
+            lst.addItem(item)
+            if r in current_owners:
+                item.setSelected(True)
+        v.addWidget(lst)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        v.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        selected = {lst.item(i).text() for i in range(lst.count()) if lst.item(i).isSelected()}
+        to_add = selected - current_owners
+        to_remove = current_owners - selected
+
+        # Privilégios desejados baseados nos checkboxes atuais
+        default_perms = set()
+        if self.cb_default_select and self.cb_default_select.isChecked():
+            default_perms.add("SELECT")
+        if self.cb_default_insert and self.cb_default_insert.isChecked():
+            default_perms.add("INSERT")
+        if self.cb_default_update and self.cb_default_update.isChecked():
+            default_perms.add("UPDATE")
+        if self.cb_default_delete and self.cb_default_delete.isChecked():
+            default_perms.add("DELETE")
+
+        def task():
+            ok = True
+            # Aplicar para owners adicionados
+            for owner in sorted(to_add):
+                res = self.controller.alter_default_privileges(
+                    role, schema, "tables", default_perms, owner=owner, emit_signal=False
+                )
+                ok = ok and res
+            # Remover defaults de owners desmarcados: passando set() para revogar existentes
+            for owner in sorted(to_remove):
+                res = self.controller.alter_default_privileges(
+                    role, schema, "tables", set(), owner=owner, emit_signal=False
+                )
+                ok = ok and res
+            return ok
+
+        def on_success(success):
+            if success:
+                QMessageBox.information(self, "Sucesso", "Owners de defaults atualizados.")
+                # Recarrega estado do painel atual
+                current_item = self.schema_list.currentItem()
+                if current_item:
+                    self._update_schema_details(current_item, None)
+            else:
+                QMessageBox.critical(self, "Erro", "Falha ao atualizar owners de defaults.")
+            self._update_save_all_state()
+
+        def on_error(e: Exception):
+            QMessageBox.critical(self, "Erro", f"Falha ao atualizar owners de defaults: {e}")
+
+        self._execute_async(task, on_success, on_error, "Atualizando owners de defaults...")
 
     def _collect_table_privs(self):
         tables: dict[str, dict[str, set[str]]] = {}

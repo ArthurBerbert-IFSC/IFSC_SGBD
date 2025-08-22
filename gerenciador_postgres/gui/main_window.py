@@ -452,6 +452,11 @@ class MainWindow(QMainWindow):
                 self.stacked.setCurrentIndex(0)
 
             QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
+            # Reabrir o diálogo de conexão após o erro para permitir nova tentativa
+            try:
+                QTimer.singleShot(0, self.on_conectar)
+            except Exception:
+                pass
         self._connect_thread.succeeded.connect(finalize_success)
         self._connect_thread.failed.connect(finalize_fail)
         self._connect_timeout_timer.timeout.connect(
