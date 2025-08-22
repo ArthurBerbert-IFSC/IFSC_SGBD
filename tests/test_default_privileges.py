@@ -67,5 +67,10 @@ def test_get_default_privileges_parsing():
         "SELECT",
         "UPDATE",
     }
-    assert res["_meta"]["owner_roles"]["geo2"] == "postgres"
+    assert res["_meta"]["owner_roles"]["geo2"]["postgres"] == {
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE",
+    }
 

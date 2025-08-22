@@ -53,8 +53,8 @@ class _TaskRunner(QThread):
 class PrivilegesState:
     schema_privs: set[str] = field(default_factory=set)
     table_privs: dict[str, set[str]] = field(default_factory=dict)
-    default_privs: set[str] = field(default_factory=set)
-    owner_role: str | None = None
+    # Default privileges are now tracked per owner role
+    default_privs: dict[str, set[str]] = field(default_factory=dict)
     dirty_schema: bool = False
     dirty_table: bool = False
     dirty_default: bool = False
@@ -500,14 +500,25 @@ class PrivilegesView(QWidget):
 
     def _update_default_priv(self, role: str, schema: str, priv: str, checked: bool):
         state = self._get_state(role, schema)
-        before = set(state.default_privs)
-        if checked:
-            state.default_privs.add(priv)
-        else:
-            state.default_privs.discard(priv)
-        if before != state.default_privs:
+        # Copy current privileges for change detection
+        before = {o: set(p) for o, p in state.default_privs.items()}
+        if not state.default_privs:
+            return
+        for privs in state.default_privs.values():
+            if checked:
+                privs.add(priv)
+            else:
+                privs.discard(priv)
+        after = {o: set(p) for o, p in state.default_privs.items()}
+        if before != after:
             state.dirty_default = True
-            logger.debug("[PrivilegesView] default_priv_changed role=%s schema=%s priv=%s now=%s", role, schema, priv, state.default_privs)
+            logger.debug(
+                "[PrivilegesView] default_priv_changed role=%s schema=%s priv=%s now=%s",
+                role,
+                schema,
+                priv,
+                state.default_privs,
+            )
             self._refresh_schema_dirty_indicators()
             self._update_save_all_state()
 
@@ -708,9 +719,19 @@ class PrivilegesView(QWidget):
         ok1 = self.controller.grant_schema_privileges(
             role, schema_base, state.schema_privs, emit_signal=False
         )
-        ok2 = self.controller.alter_default_privileges(
-            role, schema_base, "tables", state.default_privs, emit_signal=False
-        )
+        ok2 = True
+        for owner, privs in state.default_privs.items():
+            ok2 = (
+                self.controller.alter_default_privileges(
+                    role,
+                    schema_base,
+                    "tables",
+                    privs,
+                    owner=owner,
+                    emit_signal=False,
+                )
+                and ok2
+            )
         ok3 = self.controller.apply_group_privileges(
             role, {schema_base: state.table_privs}, defaults_applied=True, emit_signal=False
         )
@@ -853,21 +874,18 @@ class PrivilegesView(QWidget):
             schema_privs_all = self.controller.get_schema_level_privileges(role)
             schema_privs_db = schema_privs_all.get(schema_name, set())
             default_all = self.controller.get_default_table_privileges(role)
-            default_info = default_all.get(schema_name, {})
-            default_privs_db = default_info.get("privileges", set())
-            owner_role = default_info.get("owner")
+            default_privs_db = default_all.get(schema_name, {})  # owner -> set
             key = (role, schema_name)
             state = self._priv_cache.get(key)
             if not state:
                 state = PrivilegesState()
                 self._priv_cache[key] = state
-            state.owner_role = owner_role
             if not state.schema_privs:
                 state.schema_privs = set(schema_privs_db)
             if not state.default_privs:
-                state.default_privs = set(default_privs_db)
+                state.default_privs = {o: set(p) for o, p in default_privs_db.items()}
             schema_privs = state.schema_privs
-            default_privs = state.default_privs
+            default_privs_union = set().union(*state.default_privs.values()) if state.default_privs else set()
             logger.debug(
                 "[PrivilegesView] _update_schema_details role=%s schema=%s db_schema_privs=%s db_default_privs=%s cached_schema=%s cached_default=%s",
                 role,
@@ -875,7 +893,7 @@ class PrivilegesView(QWidget):
                 schema_privs_db,
                 default_privs_db,
                 schema_privs,
-                default_privs,
+                state.default_privs,
             )
         except Exception as e:  # pragma: no cover
             logging.exception("Erro ao ler privilégios de schema")
@@ -884,7 +902,8 @@ class PrivilegesView(QWidget):
                 "Erro",
                 f"Não foi possível ler os privilégios.\nMotivo: {e}",
             )
-            schema_privs, default_privs, owner_role = set(), set(), None
+            schema_privs, default_privs_union, default_privs_db = set(), set(), {}
+            state = PrivilegesState()
 
         usage_create_box = QGroupBox("Permissões no Schema")
         usage_create_layout = QHBoxLayout()
@@ -908,16 +927,16 @@ class PrivilegesView(QWidget):
         defaults_box = QGroupBox("Para Novas Tabelas (Privilégios Futuros)")
         defaults_layout = QHBoxLayout()
         self.cb_default_select = QCheckBox("SELECT")
-        self.cb_default_select.setChecked("SELECT" in default_privs)
+        self.cb_default_select.setChecked("SELECT" in default_privs_union)
         defaults_layout.addWidget(self.cb_default_select)
         self.cb_default_insert = QCheckBox("INSERT")
-        self.cb_default_insert.setChecked("INSERT" in default_privs)
+        self.cb_default_insert.setChecked("INSERT" in default_privs_union)
         defaults_layout.addWidget(self.cb_default_insert)
         self.cb_default_update = QCheckBox("UPDATE")
-        self.cb_default_update.setChecked("UPDATE" in default_privs)
+        self.cb_default_update.setChecked("UPDATE" in default_privs_union)
         defaults_layout.addWidget(self.cb_default_update)
         self.cb_default_delete = QCheckBox("DELETE")
-        self.cb_default_delete.setChecked("DELETE" in default_privs)
+        self.cb_default_delete.setChecked("DELETE" in default_privs_union)
         defaults_layout.addWidget(self.cb_default_delete)
         defaults_box.setLayout(defaults_layout)
         self.schema_details_layout.addWidget(defaults_box)
@@ -982,8 +1001,9 @@ class PrivilegesView(QWidget):
             )
         )
 
-        if owner_role:
-            owner_label = QLabel(f"owner: {owner_role}")
+        if state.default_privs:
+            owners = ", ".join(sorted(state.default_privs))
+            owner_label = QLabel(f"owners: {owners}")
             self.schema_details_layout.addWidget(owner_label)
 
         self.schema_details_layout.addStretch()
@@ -1203,7 +1223,6 @@ class PrivilegesView(QWidget):
         if not role:
             return
         state = self._priv_cache.get((role, schema))
-        default_perms = set(state.default_privs) if state else set()
 
         def task():
             owners_list = owners if owners is not None else [state.owner_role if state else None]

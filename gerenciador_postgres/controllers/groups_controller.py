@@ -181,13 +181,17 @@ class GroupsController(QObject):
             self._is_refreshing = False
 
         meta = data.pop("_meta", {})
-        owners = meta.get("owner_roles", {})
-        result = {}
+        owners = meta.get("owner_roles", {})  # schema -> {owner -> set(privs)}
+        result: dict[str, dict[str, set[str]]] = {}
         for schema, grants in data.items():
-            result[schema] = {
-                "owner": owners.get(schema),
-                "privileges": grants.get(group_name, set()),
-            }
+            group_privs = grants.get(group_name, set())
+            owner_map: dict[str, set[str]] = {}
+            for owner, privs in owners.get(schema, {}).items():
+                intersect = group_privs & privs
+                if intersect:
+                    owner_map[owner] = intersect
+            if owner_map:
+                result[schema] = owner_map
         return result
 
     def list_privilege_templates(self):

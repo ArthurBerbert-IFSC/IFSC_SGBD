@@ -1,13 +1,23 @@
+import os
 import pathlib
 import sys
 import pytest
 pytest.importorskip("PyQt6.QtWidgets")
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import (
+    QApplication,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from gerenciador_postgres.gui.users_view import UsersView
 from gerenciador_postgres.gui.privileges_view import PrivilegesView, PrivilegesState
-
 
 class DummyController:
     def __init__(self):
@@ -58,8 +68,7 @@ def test_delete_group_without_removing_members(monkeypatch):
     view._on_delete_group()
     assert controller.deleted == "grp_test"
     assert controller.deleted_with_members is None
-
-
+    
 def test_save_default_privileges_multiple_owners(monkeypatch):
     class DummyPrivController:
         def __init__(self):
