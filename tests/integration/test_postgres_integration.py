@@ -115,6 +115,42 @@ def test_default_privileges(conn):
         conn.commit()
 
 
+def test_owner_default_privileges(conn):
+    db = DBManager(conn)
+    cur = conn.cursor()
+    cur.execute("DROP SCHEMA IF EXISTS owner_schema CASCADE")
+    cur.execute("DROP ROLE IF EXISTS owner_role")
+    cur.execute("DROP ROLE IF EXISTS grp_role")
+    cur.execute("CREATE ROLE owner_role LOGIN PASSWORD 'x'")
+    cur.execute("CREATE ROLE grp_role NOLOGIN")
+    cur.execute("CREATE SCHEMA owner_schema AUTHORIZATION owner_role")
+    conn.commit()
+    try:
+        with db.transaction():
+            db.alter_default_privileges(
+                "grp_role", "owner_schema", "tables", {"SELECT"}, for_role="owner_role"
+            )
+        cur.execute("SET ROLE owner_role")
+        cur.execute("CREATE TABLE owner_schema.t_owner(id int)")
+        cur.execute("RESET ROLE")
+        conn.commit()
+        cur.execute(
+            """
+            SELECT privilege_type
+            FROM information_schema.role_table_grants
+            WHERE grantee='grp_role' AND table_schema='owner_schema' AND table_name='t_owner'
+            """
+        )
+        privs = {row[0] for row in cur.fetchall()}
+        assert "SELECT" in privs
+    finally:
+        cur.execute("DROP TABLE IF EXISTS owner_schema.t_owner")
+        cur.execute("DROP SCHEMA IF EXISTS owner_schema CASCADE")
+        cur.execute("DROP ROLE IF EXISTS owner_role")
+        cur.execute("DROP ROLE IF EXISTS grp_role")
+        conn.commit()
+
+
 def test_enable_postgis(conn):
     db = DBManager(conn)
     conn.rollback()
