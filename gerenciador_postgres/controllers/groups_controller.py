@@ -81,6 +81,7 @@ class GroupsController(QObject):
     def list_user_groups(self, username: str):
         return self._user_ctrl.list_user_groups(username)
 
+
     def add_user_to_group(
         self,
         username: str,
