@@ -52,6 +52,7 @@ class PrivilegesState:
     schema_privs: set[str] = field(default_factory=set)
     table_privs: dict[str, set[str]] = field(default_factory=dict)
     default_privs: set[str] = field(default_factory=set)
+    owner_role: str | None = None
     dirty_schema: bool = False
     dirty_table: bool = False
     dirty_default: bool = False
@@ -109,19 +110,12 @@ class PrivilegesView(QWidget):
         self.lstGroups = QListWidget()
         left_layout.addWidget(self.lstGroups)
 
-        # Painel de membros com possibilidade de recolher/expandir
+        # Painel de membros sempre visível
         self.members_box = QGroupBox("Membros do Grupo")
-        self.members_box.setCheckable(True)
-        self.members_box.setChecked(False)
         members_layout = QVBoxLayout()
         self.lstMembers = QListWidget()
-        self.btnManageMembers = QPushButton("Gerenciar membros…")
         members_layout.addWidget(self.lstMembers)
-        members_layout.addWidget(self.btnManageMembers)
         self.members_box.setLayout(members_layout)
-        # Conteúdo oculto inicialmente
-        self.lstMembers.setVisible(False)
-        self.btnManageMembers.setVisible(False)
         left_layout.addWidget(self.members_box)
         self.splitter.addWidget(left_panel)
 
@@ -194,10 +188,8 @@ class PrivilegesView(QWidget):
         tables_btns = QHBoxLayout()
         self.btnSaveTables = QPushButton("Salvar Tabelas")
         self.btnReloadTables = QPushButton("Recarregar Tabelas")
-        self.btnSweep = QPushButton("Sincronizar (Full Sweep)")
         tables_btns.addWidget(self.btnSaveTables)
         tables_btns.addWidget(self.btnReloadTables)
-        tables_btns.addWidget(self.btnSweep)
         tables_btns.addStretch(1)
         tables_layout.addLayout(tables_btns)
         self.tabs.addTab(tables_tab, "Tabelas")
@@ -227,7 +219,6 @@ class PrivilegesView(QWidget):
             self.btnSaveTables,
             self.btnSaveAll,
             self.btnReloadTables,
-            self.btnSweep,
             self.members_box,
         ]:
             w.setEnabled(False)
@@ -245,11 +236,9 @@ class PrivilegesView(QWidget):
         self.btnSaveTables.clicked.connect(self._save_table_privileges)
         self.btnSaveAll.clicked.connect(self._save_all_privileges)
         self.btnReloadTables.clicked.connect(self._reload_tables)
-        self.btnSweep.clicked.connect(self._sweep_privileges)
         self.treeDbPrivileges.itemChanged.connect(self._on_db_priv_changed)
         self.treePrivileges.itemChanged.connect(self._on_table_priv_changed)
-        self.members_box.toggled.connect(self._toggle_members_panel)
-        self.btnManageMembers.clicked.connect(self._open_members_manager)
+        self.lstMembers.itemDoubleClicked.connect(self._open_users_tab)
 
     # ------------------------------------------------------------------
     def refresh_groups(self):
@@ -319,6 +308,15 @@ class PrivilegesView(QWidget):
                     item.setText(desired)
         finally:
             self.schema_list.blockSignals(False)
+
+    def _update_save_all_state(self):
+        dirty = self._db_dirty
+        if not dirty and self.current_group:
+            for (role, _), st in self._priv_cache.items():
+                if role == self.current_group and st.dirty:
+                    dirty = True
+                    break
+        self.btnSaveAll.setEnabled(bool(dirty))
 
     # ------------------------------------------------------------------
     # Handlers de gerenciamento de schemas
@@ -492,6 +490,7 @@ class PrivilegesView(QWidget):
             state.dirty_schema = True
             logger.debug("[PrivilegesView] schema_priv_changed role=%s schema=%s priv=%s now=%s", role, schema, priv, state.schema_privs)
             self._refresh_schema_dirty_indicators()
+            self._update_save_all_state()
 
     def _update_default_priv(self, role: str, schema: str, priv: str, checked: bool):
         state = self._get_state(role, schema)
@@ -504,6 +503,7 @@ class PrivilegesView(QWidget):
             state.dirty_default = True
             logger.debug("[PrivilegesView] default_priv_changed role=%s schema=%s priv=%s now=%s", role, schema, priv, state.default_privs)
             self._refresh_schema_dirty_indicators()
+            self._update_save_all_state()
 
     def _update_general_item_state(self, schema_item: QTreeWidgetItem):
         """Atualiza o item 'Geral' conforme os filhos."""
@@ -566,10 +566,14 @@ class PrivilegesView(QWidget):
             state.dirty_table = True
             logger.debug("[PrivilegesView] table_priv_changed role=%s schema=%s table=%s old=%s new=%s", role, schema, table, old_perms, new_perms)
             self._refresh_schema_dirty_indicators()
+
         # Atualiza estado do item "Geral"
         self.treePrivileges.blockSignals(True)
         self._update_general_item_state(parent)
         self.treePrivileges.blockSignals(False)
+
+        # E também atualiza o estado do botão Salvar Tudo
+        self._update_save_all_state()
 
     def _on_db_priv_changed(self, item: QTreeWidgetItem, column: int):
         """Atualiza cache para privilégios de banco."""
@@ -582,6 +586,7 @@ class PrivilegesView(QWidget):
         else:
             self._db_privs.discard(priv)
         self._db_dirty = True
+        self._update_save_all_state()
 
     def _on_group_selected(self, current, previous):
         if previous and not self._check_dirty_for_group(previous.text()):
@@ -600,9 +605,7 @@ class PrivilegesView(QWidget):
             self.btnSaveSchema.setEnabled(False)
             self.btnSaveDefaults.setEnabled(False)
             self.btnSaveTables.setEnabled(False)
-            self.btnSweep.setEnabled(False)
             self.members_box.setEnabled(False)
-            self.members_box.setChecked(False)
             self.lstMembers.clear()
             self.schema_list.clear()
             self._clear_layout(self.schema_details_layout)
@@ -620,7 +623,6 @@ class PrivilegesView(QWidget):
             self.btnSaveDefaults,
             self.btnSaveTables,
             self.btnReloadTables,
-            self.btnSweep,
             self.members_box,
         ]:
             w.setEnabled(True)
@@ -628,19 +630,21 @@ class PrivilegesView(QWidget):
         self._refresh_members()
 
     # ------------------------------------------------------------------
-    def _toggle_members_panel(self, checked: bool):
-        self.lstMembers.setVisible(checked)
-        self.btnManageMembers.setVisible(checked)
-
-    def _open_members_manager(self):
+    def _open_users_tab(self, item=None):
         if not self.controller or not self.current_group:
             return
-        from gerenciador_postgres.gui.users_view import UsersView
-
-        self._members_window = UsersView(
-            controller=self.controller, initial_group=self.current_group
-        )
-        self._members_window.show()
+        main = self.window()
+        if hasattr(main, "open_panel"):
+            main.open_panel("usuarios")
+            try:
+                for i in range(main.tabs.count()):
+                    if main.tabs.tabText(i) == "Usuários":
+                        w = main.tabs.widget(i)
+                        if hasattr(w, "show_group_members"):
+                            w.show_group_members(self.current_group)
+                        break
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     def _check_dirty_for_group(self, group: str) -> bool:
@@ -851,6 +855,7 @@ class PrivilegesView(QWidget):
             if not state:
                 state = PrivilegesState()
                 self._priv_cache[key] = state
+            state.owner_role = owner_role
             if not state.schema_privs:
                 state.schema_privs = set(schema_privs_db)
             if not state.default_privs:
@@ -1048,6 +1053,7 @@ class PrivilegesView(QWidget):
                 QMessageBox.information(self, "Sucesso", "Privilégios de banco atualizados.")
             else:
                 QMessageBox.critical(self, "Erro", "Falha ao salvar privilégios de banco.")
+            self._update_save_all_state()
 
         def on_error(e: Exception):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar privilégios de banco: {e}")
@@ -1127,6 +1133,7 @@ class PrivilegesView(QWidget):
                     schema,
                     schema_perms,
                 )
+            self._update_save_all_state()
 
         def on_error(e: Exception):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar privilégios de schema: {e}")
@@ -1158,7 +1165,10 @@ class PrivilegesView(QWidget):
         default_perms = set(state.default_privs) if state else set()
 
         def task():
-            return self.controller.alter_default_privileges(role, schema, "tables", default_perms, emit_signal=False)
+            owner = state.owner_role if state else None
+            return self.controller.alter_default_privileges(
+                role, schema, "tables", default_perms, owner=owner, emit_signal=False
+            )
 
         def on_success(success):
             if success:
@@ -1167,6 +1177,7 @@ class PrivilegesView(QWidget):
                 QMessageBox.information(self, "Sucesso", f"Defaults de tabelas em '{schema}' atualizados.")
             else:
                 QMessageBox.critical(self, "Erro", "Falha ao salvar defaults.")
+            self._update_save_all_state()
 
         def on_error(e: Exception):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar defaults: {e}")
@@ -1198,6 +1209,7 @@ class PrivilegesView(QWidget):
                 QMessageBox.information(self, "Sucesso", "Privilégios de tabelas atualizados.")
             else:
                 QMessageBox.critical(self, "Erro", "Falha ao salvar privilégios de tabelas.")
+            self._update_save_all_state()
 
         def on_error(e: Exception):
             if isinstance(e, DependencyWarning):
@@ -1265,6 +1277,7 @@ class PrivilegesView(QWidget):
             else:
                 QMessageBox.warning(self, "Parcial", "Algumas alterações não puderam ser salvas.")
             self._refresh_schema_dirty_indicators()
+            self._update_save_all_state()
         def on_error(e: Exception):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar tudo: {e}")
         self._execute_async(task, on_success, on_error, "Salvando tudo...")
@@ -1275,47 +1288,6 @@ class PrivilegesView(QWidget):
         self._save_schema_privileges()
         self._save_default_privileges()
         self._save_table_privileges()
-
-    def _sweep_privileges(self):
-        # Determina o grupo selecionado no momento do clique
-        item = self.lstGroups.currentItem()
-        group_name = item.text() if item else self.current_group
-        if not group_name:
-            QMessageBox.warning(self, "Seleção necessária", "Selecione um grupo para sincronizar.")
-            return
-
-        def task():
-            return self.controller.sweep_group_privileges(group_name)
-
-        def on_success(success):
-            if success:
-                # Após sincronizar no banco, descartamos cache antigo para o grupo
-                removed_any = False
-                for key in list(self._priv_cache.keys()):
-                    if key[0] == group_name:
-                        self._priv_cache.pop(key, None)
-                        removed_any = True
-                # Se ainda estamos visualizando este grupo, repopula privilégios
-                if self.current_group == group_name:
-                    self._populate_privileges()
-                    current_item = self.schema_list.currentItem()
-                    if current_item:
-                        self._update_schema_details(current_item, None)
-                self._refresh_schema_dirty_indicators()
-                QMessageBox.information(
-                    self, "Concluído", f"Privilégios do grupo '{group_name}' sincronizados." + (" (cache atualizado)" if removed_any else "")
-                )
-            else:
-                QMessageBox.critical(
-                    self, "Erro", f"Falha ao sincronizar privilégios do grupo '{group_name}'."
-                )
-
-        def on_error(e: Exception):
-            QMessageBox.critical(
-                self, "Erro", f"Não foi possível sincronizar os privilégios do grupo '{group_name}': {e}"
-            )
-
-        self._execute_async(task, on_success, on_error, f"Sincronizando privilégios de '{group_name}'...")
 
     def _refresh_members(self):
         self.lstMembers.clear()

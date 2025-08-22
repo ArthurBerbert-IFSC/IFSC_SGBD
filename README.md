@@ -76,13 +76,6 @@ python Rodar.py
 
 Senhas nunca são salvas; use variável de ambiente `<PERFIL>_PASSWORD` ou o keyring (`IFSC_SGBD`, conta = usuário).
 
-## Sincronização de privilégios
-
-Após salvar permissões de schemas, tabelas ou padrões futuros, o sistema **não executa mais** a sincronização automática de privilégios. Caso seja necessário alinhar privilégios antigos com o estado atual do banco:
-
-- Na interface gráfica, utilize o botão **"Sincronizar (Full Sweep)"** disponível nas telas de grupos e de privilégios.
-- Pela linha de comando, execute `scripts/sweep_privileges.py --profile <perfil> [--group <grupo>]` para sincronizar todos os grupos ou apenas o grupo informado.
-
 ## Contrato de Permissões
 
 A aplicação suporta definição de contratos de permissões no formato JSON para gerenciar papéis e privilégios no banco de dados.
