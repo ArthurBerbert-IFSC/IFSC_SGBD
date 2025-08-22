@@ -1358,13 +1358,6 @@ class PrivilegesView(QWidget):
             QMessageBox.critical(self, "Erro", f"Falha ao salvar tudo: {e}")
         self._execute_async(task, on_success, on_error, "Salvando tudo...")
 
-    # Mantém método antigo para compatibilidade interna, chamando os três (se necessário)
-    def _save_privileges(self):  # legacy
-        self._save_db_privileges()
-        self._save_schema_privileges()
-        self._save_default_privileges()
-        self._save_table_privileges()
-
     def _refresh_members(self):
         self.lstMembers.clear()
         if not self.controller or not self.current_group:
