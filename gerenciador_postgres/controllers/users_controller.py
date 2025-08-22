@@ -65,6 +65,15 @@ class UsersController(QObject):
             self.data_changed.emit()
         return success
 
+    def delete_user_cascade_objects(self, username: str) -> bool:
+        success = self.role_manager.delete_user_cascade_objects(username)
+        if success:
+            self.data_changed.emit()
+        return success
+
+    def user_has_owned_objects(self, username: str) -> bool:
+        return self.role_manager.user_has_owned_objects(username)
+
     def change_password(self, username: str, password: str) -> bool:
         return self.role_manager.change_password(username, password)
 

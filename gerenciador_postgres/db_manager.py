@@ -172,6 +172,37 @@ class DBManager:
         with self.conn.cursor() as cur:
             cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(username)))
 
+    # ---- Ownership and cleanup helpers ----
+    def role_owns_objects(self, role: str) -> bool:
+        """Return True if role owns any user objects in current database."""
+        # Esta query é mais simples e robusta, verificando a existência de
+        # objetos em pg_class (tabelas, views, etc.) e pg_namespace (schemas)
+        # que pertençam ao usuário, evitando a complexidade que causava o erro.
+        query = """
+            SELECT EXISTS (
+                SELECT 1 FROM pg_class c
+                JOIN pg_roles r ON r.oid = c.relowner
+                WHERE r.rolname = %s
+            ) OR EXISTS (
+                SELECT 1 FROM pg_namespace n
+                JOIN pg_roles r ON r.oid = n.nspowner
+                WHERE r.rolname = %s
+            );
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(query, (role, role))
+            row = cur.fetchone()
+            return bool(row and row[0])
+
+    def drop_owned(self, role: str, cascade: bool = False):
+        """Execute DROP OWNED BY role [CASCADE] in current database."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("DROP OWNED BY {} {}").format(
+                    sql.Identifier(role), sql.SQL("CASCADE") if cascade else sql.SQL("")
+                )
+            )
+
     def list_users(self) -> List[str]:
         self._reset_if_aborted()
         with self.conn.cursor() as cur:

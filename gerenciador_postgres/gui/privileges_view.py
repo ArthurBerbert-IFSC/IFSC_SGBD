@@ -1004,6 +1004,7 @@ class PrivilegesView(QWidget):
         if state.default_privs:
             owners = ", ".join(sorted(state.default_privs))
             owner_label = QLabel(f"owners: {owners}")
+            owner_label.setWordWrap(True)
             self.schema_details_layout.addWidget(owner_label)
 
         self.schema_details_layout.addStretch()
@@ -1225,7 +1226,18 @@ class PrivilegesView(QWidget):
         state = self._priv_cache.get((role, schema))
 
         def task():
-            owners_list = owners if owners is not None else [state.owner_role if state else None]
+            # Determine desired privileges from UI checkboxes
+            default_perms = set()
+            if self.cb_default_select and self.cb_default_select.isChecked():
+                default_perms.add("SELECT")
+            if self.cb_default_insert and self.cb_default_insert.isChecked():
+                default_perms.add("INSERT")
+            if self.cb_default_update and self.cb_default_update.isChecked():
+                default_perms.add("UPDATE")
+            if self.cb_default_delete and self.cb_default_delete.isChecked():
+                default_perms.add("DELETE")
+            # Determine target owner roles; if none specified, use all owners present in state
+            owners_list = owners if owners is not None else (sorted(state.default_privs.keys()) if state and state.default_privs else [None])
             ok = True
             for owner in owners_list:
                 res = self.controller.alter_default_privileges(

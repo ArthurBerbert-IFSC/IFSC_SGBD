@@ -789,17 +789,45 @@ class UsersView(QWidget):
         username = self._current_username()
         if not username:
             return
-        reply = QMessageBox.question(
-            self,
-            "Confirmar",
-            f"Remover usuário '{username}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+        # Decide estratégia baseado em propriedade de objetos
+        cascade = False
         try:
-            self.controller.delete_user(username)
+            owns = self.controller.user_has_owned_objects(username) if self.controller else False
+        except Exception:
+            owns = False
+        if owns:
+            msg = (
+                f"O usuário '{username}' possui objetos no banco.\n\n"
+                "Escolha como proceder:\n"
+                "- Sim: Reatribuir objetos para o usuário atual e remover o usuário.\n"
+                "- Não: Excluir objetos do usuário (DROP OWNED ... CASCADE) e remover o usuário.\n"
+                "- Cancelar: Abortar."
+            )
+            reply = QMessageBox.question(
+                self,
+                "Usuário possui objetos",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+            cascade = reply == QMessageBox.StandardButton.No
+        else:
+            reply = QMessageBox.question(
+                self,
+                "Confirmar",
+                f"Remover usuário '{username}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            if cascade:
+                self.controller.delete_user_cascade_objects(username)
+            else:
+                self.controller.delete_user(username)
             self.load_users()
         except Exception as e:  # pragma: no cover - interface
             QMessageBox.critical(self, "Erro", str(e))
@@ -824,18 +852,58 @@ class UsersView(QWidget):
         if not users:
             QMessageBox.information(self, "Atenção", "Selecione usuários na tabela.")
             return
-        if QMessageBox.question(
-            self,
-            "Confirmar",
-            f"Remover {len(users)} usuários?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
-            return
+        # Para exclusão em lote, perguntar estratégia padrão quando houver proprietários
+        owns_any = False
+        for u in users:
+            try:
+                if self.controller.user_has_owned_objects(u):
+                    owns_any = True
+                    break
+            except Exception:
+                pass
+        if owns_any:
+            msg = (
+                f"{len(users)} usuários selecionados; alguns possuem objetos.\n\n"
+                "Escolha a ação padrão:\n"
+                "- Sim: Reatribuir objetos e remover usuários.\n"
+                "- Não: Excluir objetos (CASCADE) e remover usuários.\n"
+                "- Cancelar: Abortar."
+            )
+            rep = QMessageBox.question(
+                self,
+                "Exclusão em lote",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes,
+            )
+            if rep == QMessageBox.StandardButton.Cancel:
+                return
+            cascade_default = rep == QMessageBox.StandardButton.No
+        else:
+            if QMessageBox.question(
+                self,
+                "Confirmar",
+                f"Remover {len(users)} usuários?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) != QMessageBox.StandardButton.Yes:
+                return
+            cascade_default = False
         erros = []
         for u in users:
             try:
-                self.controller.delete_user(u)
+                # Avalia por usuário, mas usa padrão quando aplicável
+                do_cascade = cascade_default
+                if owns_any:
+                    try:
+                        if not self.controller.user_has_owned_objects(u):
+                            do_cascade = False  # sem objetos, segue fluxo normal
+                    except Exception:
+                        pass
+                if do_cascade:
+                    self.controller.delete_user_cascade_objects(u)
+                else:
+                    self.controller.delete_user(u)
             except Exception as e:
                 erros.append(f"{u}: {e}")
         self.load_users()

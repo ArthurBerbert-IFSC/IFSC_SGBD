@@ -18,6 +18,15 @@ class DashboardPanel(QWidget):
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(4, 4, 4, 4)
+        # Tema escuro para melhorar contraste (pedido: fundo preto do grupo de conexão)
+        self.setStyleSheet(
+            """
+            QWidget#ConnectionSection { background-color: #000; border: 1px solid #222; border-radius: 4px; }
+            QWidget#ConnectionSection QLabel { color: #ddd; }
+            QLabel#StatusConnected { color: #43d543; font-weight: bold; }
+            QLabel#StatusDisconnected { color: #ff5c5c; font-weight: bold; }
+            """
+        )
 
         # Header bar (always visible)
         bar = QHBoxLayout()
@@ -58,7 +67,7 @@ class DashboardPanel(QWidget):
         content_layout.addWidget(self.lblVersion)
 
         # Dev section
-        separator('<span style="color:#0057b7;">Desenvolvedor</span>')
+        separator('<span style=\"color:#0057b7;\">Desenvolvedor</span>')
         self.lblDev = QLabel(f"Autor: {meta.maintainer}")
         self.lblContact = QLabel(f"{meta.contact_email}")
         self.lblGithub = QLabel(f'<a href="{meta.github_url}">GitHub</a>')
@@ -71,26 +80,28 @@ class DashboardPanel(QWidget):
         content_layout.addWidget(self.lblGithub)
         content_layout.addWidget(self.lblEnv)
 
-        # Connection section
-        separator('<span style="color:#0057b7;">Conexão</span>')
-        form_conn = QFormLayout()
+        # Connection section (em container com fundo preto)
+        separator('<span style=\"color:#0057b7;\">Conexão</span>')
+        conn_box = QWidget()
+        conn_box.setObjectName("ConnectionSection")
+        conn_layout = QFormLayout(conn_box)
         self.lblDb = QLabel("--")
         self.lblUser = QLabel("--")
         self.lblHost = QLabel("--")
         self.lblStatus = QLabel("Desconectado")
-        self.lblStatus.setStyleSheet("color:#b00;font-weight:bold;")
-        form_conn.addRow("Banco:", self.lblDb)
-        form_conn.addRow("Usuário:", self.lblUser)
-        form_conn.addRow("Host:", self.lblHost)
-        form_conn.addRow("Status:", self.lblStatus)
-        content_layout.addLayout(form_conn)
+        self.lblStatus.setObjectName("StatusDisconnected")
+        conn_layout.addRow("Banco:", self.lblDb)
+        conn_layout.addRow("Usuário:", self.lblUser)
+        conn_layout.addRow("Host:", self.lblHost)
+        conn_layout.addRow("Status:", self.lblStatus)
+        content_layout.addWidget(conn_box)
 
         self.btnRefreshStatus = QPushButton("Atualizar Status")
         self.btnRefreshStatus.clicked.connect(self.request_status_refresh.emit)
         content_layout.addWidget(self.btnRefreshStatus)
 
         # Counts section
-        separator('<span style="color:#0057b7;">Contagens</span>')
+        separator('<span style=\"color:#0057b7;\">Contagens</span>')
         form_counts = QFormLayout()
         self.lblCountUsers = QLabel("--")
         self.lblCountGroups = QLabel("--")
@@ -116,10 +127,14 @@ class DashboardPanel(QWidget):
         self.lblHost.setText(host or "--")
         if connected:
             self.lblStatus.setText("Conectado")
-            self.lblStatus.setStyleSheet("color:#070;font-weight:bold;")
+            self.lblStatus.setObjectName("StatusConnected")
+            self.lblStatus.style().unpolish(self.lblStatus)
+            self.lblStatus.style().polish(self.lblStatus)
         else:
             self.lblStatus.setText("Desconectado")
-            self.lblStatus.setStyleSheet("color:#b00;font-weight:bold;")
+            self.lblStatus.setObjectName("StatusDisconnected")
+            self.lblStatus.style().unpolish(self.lblStatus)
+            self.lblStatus.style().polish(self.lblStatus)
 
     def set_counts(self, users: int | None, groups: int | None, schemas: int | None, tables: int | None):
         self.lblCountUsers.setText("--" if users is None else str(users))

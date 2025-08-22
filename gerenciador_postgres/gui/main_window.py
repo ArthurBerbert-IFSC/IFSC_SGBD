@@ -376,9 +376,8 @@ class MainWindow(QMainWindow):
             # Realiza conexão real agora no thread principal
             try:
                 cm = ConnectionManager()
-                safe_params = params.copy()
-                safe_params.pop('profile_name', None)
-                ui_conn = cm.connect(**safe_params)
+                # mantém profile_name para permitir resolução de senha por perfil
+                ui_conn = cm.connect(**params)
                 # armazenar parâmetros para dashboard
                 try:
                     cm._current_params = params  # type: ignore

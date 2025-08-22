@@ -257,16 +257,41 @@ class RoleManager:
                     'valid_until': user.valid_until.isoformat() if user.valid_until else None
                 }
             
-            # Limpeza de objetos antes do DROP ROLE (opcional mas boa prática)
+            # Limpeza antes do DROP ROLE
             with self.dao.transaction():
-                with self.dao.conn.cursor() as cur:
-                    cur.execute(
-                        sql.SQL("REASSIGN OWNED BY {} TO CURRENT_USER").format(
-                            sql.Identifier(username)
-                        )
+                # Se houver objetos, reatribui para o usuário atual
+                try:
+                    if self.dao.role_owns_objects(username):
+                        with self.dao.conn.cursor() as cur:
+                            cur.execute(
+                                sql.SQL("REASSIGN OWNED BY {} TO CURRENT_USER").format(
+                                    sql.Identifier(username)
+                                )
+                            )
+                    # Remover privilégios e default privileges que apontem para o usuário
+                    self.dao.drop_owned(username, cascade=False)
+                except Exception as e:
+                    # Se a preparação falhar, a transação fica abortada.
+                    # Registramos o erro e relançamos para que o bloco `transaction`
+                    # execute o ROLLBACK e a operação seja interrompida.
+                    self.logger.error(
+                        f"[{self.operador}] Erro crítico ao preparar exclusão de '{username}': {e}"
                     )
+                    raise
 
-                self.dao.delete_user(username)
+                # Tenta dropar o role; se falhar por dependências, usa CASCADE em DROP OWNED e tenta novamente
+                try:
+                    self.dao.delete_user(username)
+                except Exception as e:
+                    msg = str(e).lower()
+                    if "cannot be dropped because some objects depend" in msg or "default privileges" in msg:
+                        self.logger.info(
+                            f"[{self.operador}] DROP ROLE falhou por dependências; aplicando DROP OWNED CASCADE e tentando novamente"
+                        )
+                        self.dao.drop_owned(username, cascade=True)
+                        self.dao.delete_user(username)
+                    else:
+                        raise
 
                 sucesso = True
                 if self.audit_manager:
@@ -299,6 +324,29 @@ class RoleManager:
                         sucesso=False
                     )
             
+            return False
+
+    def delete_user_cascade_objects(self, username: str) -> bool:
+        """Exclui um usuário removendo também todos os objetos que ele possua.
+
+        Fluxo: DROP OWNED BY <user> CASCADE; DROP ROLE <user>.
+        """
+        try:
+            with self.dao.transaction():
+                # Remover objetos e privilégios de uma vez
+                self.dao.drop_owned(username, cascade=True)
+                self.dao.delete_user(username)
+            self.logger.info(f"[{self.operador}] Excluiu usuário (CASCADE objetos): {username}")
+            return True
+        except Exception as e:
+            self.logger.error(f"[{self.operador}] Falha ao excluir usuário (CASCADE) '{username}': {e}")
+            return False
+
+    def user_has_owned_objects(self, username: str) -> bool:
+        """Expõe verificação de propriedade para a UI decidir estratégia de exclusão."""
+        try:
+            return self.dao.role_owns_objects(username)
+        except Exception:
             return False
 
     def change_password(self, username: str, password: str) -> bool:
