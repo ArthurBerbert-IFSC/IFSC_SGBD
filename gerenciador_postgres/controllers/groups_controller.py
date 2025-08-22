@@ -246,18 +246,3 @@ class GroupsController(QObject):
 
     def get_current_database(self):
         return self.role_manager.dao.conn.get_dsn_parameters().get("dbname")
-
-    # ---------------------------------------------------------------
-    # Sincronização (sweep) de privilégios
-    # ---------------------------------------------------------------
-    def sweep_group_privileges(self, group_name: str) -> bool:
-        """Reaplica GRANTs e ajusta default privileges para o grupo informado."""
-        try:
-            success = self.role_manager.sweep_privileges(target_group=group_name)
-        except Exception as e:
-            if "[WARN-DEPEND]" in str(e):
-                raise DependencyWarning(str(e))
-            raise
-        if success:
-            self.data_changed.emit()
-        return success

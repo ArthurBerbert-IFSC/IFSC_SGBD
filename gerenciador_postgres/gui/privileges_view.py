@@ -194,10 +194,8 @@ class PrivilegesView(QWidget):
         tables_btns = QHBoxLayout()
         self.btnSaveTables = QPushButton("Salvar Tabelas")
         self.btnReloadTables = QPushButton("Recarregar Tabelas")
-        self.btnSweep = QPushButton("Sincronizar (Full Sweep)")
         tables_btns.addWidget(self.btnSaveTables)
         tables_btns.addWidget(self.btnReloadTables)
-        tables_btns.addWidget(self.btnSweep)
         tables_btns.addStretch(1)
         tables_layout.addLayout(tables_btns)
         self.tabs.addTab(tables_tab, "Tabelas")
@@ -227,7 +225,6 @@ class PrivilegesView(QWidget):
             self.btnSaveTables,
             self.btnSaveAll,
             self.btnReloadTables,
-            self.btnSweep,
             self.members_box,
         ]:
             w.setEnabled(False)
@@ -245,7 +242,6 @@ class PrivilegesView(QWidget):
         self.btnSaveTables.clicked.connect(self._save_table_privileges)
         self.btnSaveAll.clicked.connect(self._save_all_privileges)
         self.btnReloadTables.clicked.connect(self._reload_tables)
-        self.btnSweep.clicked.connect(self._sweep_privileges)
         self.treeDbPrivileges.itemChanged.connect(self._on_db_priv_changed)
         self.treePrivileges.itemChanged.connect(self._on_table_priv_changed)
         self.members_box.toggled.connect(self._toggle_members_panel)
@@ -560,7 +556,6 @@ class PrivilegesView(QWidget):
             self.btnSaveSchema.setEnabled(False)
             self.btnSaveDefaults.setEnabled(False)
             self.btnSaveTables.setEnabled(False)
-            self.btnSweep.setEnabled(False)
             self.members_box.setEnabled(False)
             self.members_box.setChecked(False)
             self.lstMembers.clear()
@@ -580,7 +575,6 @@ class PrivilegesView(QWidget):
             self.btnSaveDefaults,
             self.btnSaveTables,
             self.btnReloadTables,
-            self.btnSweep,
             self.members_box,
         ]:
             w.setEnabled(True)
@@ -1216,47 +1210,6 @@ class PrivilegesView(QWidget):
         self._save_schema_privileges()
         self._save_default_privileges()
         self._save_table_privileges()
-
-    def _sweep_privileges(self):
-        # Determina o grupo selecionado no momento do clique
-        item = self.lstGroups.currentItem()
-        group_name = item.text() if item else self.current_group
-        if not group_name:
-            QMessageBox.warning(self, "Seleção necessária", "Selecione um grupo para sincronizar.")
-            return
-
-        def task():
-            return self.controller.sweep_group_privileges(group_name)
-
-        def on_success(success):
-            if success:
-                # Após sincronizar no banco, descartamos cache antigo para o grupo
-                removed_any = False
-                for key in list(self._priv_cache.keys()):
-                    if key[0] == group_name:
-                        self._priv_cache.pop(key, None)
-                        removed_any = True
-                # Se ainda estamos visualizando este grupo, repopula privilégios
-                if self.current_group == group_name:
-                    self._populate_privileges()
-                    current_item = self.schema_list.currentItem()
-                    if current_item:
-                        self._update_schema_details(current_item, None)
-                self._refresh_schema_dirty_indicators()
-                QMessageBox.information(
-                    self, "Concluído", f"Privilégios do grupo '{group_name}' sincronizados." + (" (cache atualizado)" if removed_any else "")
-                )
-            else:
-                QMessageBox.critical(
-                    self, "Erro", f"Falha ao sincronizar privilégios do grupo '{group_name}'."
-                )
-
-        def on_error(e: Exception):
-            QMessageBox.critical(
-                self, "Erro", f"Não foi possível sincronizar os privilégios do grupo '{group_name}': {e}"
-            )
-
-        self._execute_async(task, on_success, on_error, f"Sincronizando privilégios de '{group_name}'...")
 
     def _refresh_members(self):
         self.lstMembers.clear()

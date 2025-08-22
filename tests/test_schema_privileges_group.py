@@ -90,7 +90,6 @@ def test_grant_and_display_schema_privileges():
     view.treePrivileges = QTreeWidget()
     view.btnApplyTemplate = QPushButton()
     view.btnSave = QPushButton()
-    view.btnSweep = QPushButton()
     view.lstMembers = QListWidget()
 
     view._populate_privileges()
