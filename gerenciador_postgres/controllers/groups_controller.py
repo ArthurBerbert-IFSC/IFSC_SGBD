@@ -81,10 +81,21 @@ class GroupsController(QObject):
     def list_user_groups(self, username: str):
         return self._user_ctrl.list_user_groups(username)
 
-    def add_user_to_group(self, username: str, group_name: str) -> bool:
+
+    def add_user_to_group(
+        self,
+        username: str,
+        group_name: str,
+        auto_apply_defaults: bool = True,
+    ) -> bool:
         success = self.role_manager.add_user_to_group(username, group_name)
         if success:
             self.members_changed.emit(group_name)
+            if auto_apply_defaults:
+                try:
+                    self.apply_defaults_to_user(username)
+                except Exception:
+                    pass
         return success
 
     def remove_user_from_group(self, username: str, group_name: str) -> bool:
@@ -99,6 +110,44 @@ class GroupsController(QObject):
             self.members_changed.emit(old_group)
             self.members_changed.emit(new_group)
         return success
+
+    def apply_defaults_to_user(self, username: str) -> bool:
+        """Reaplica os ``ALTER DEFAULT PRIVILEGES`` existentes ao usuário."""
+        try:
+            data = self.role_manager.dao.get_default_privileges(objtype="r")
+        except Exception:
+            return False
+
+        user_groups = set()
+        try:
+            user_groups = set(self.list_user_groups(username))
+        except Exception:
+            pass
+
+        meta = data.pop("_meta", {})
+        owners = meta.get("owner_roles", {})
+        applied = False
+        for schema, grants in data.items():
+            owner = owners.get(schema)
+            privs: set = set()
+            for grp in user_groups:
+                privs |= grants.get(grp, set())
+            if privs:
+                try:
+                    self.alter_default_privileges(
+                        username,
+                        schema,
+                        "tables",
+                        privs,
+                        owner=owner,
+                        emit_signal=False,
+                    )
+                    applied = True
+                except Exception:
+                    continue
+        if applied:
+            self.data_changed.emit()
+        return applied
 
     # ---------------------------------------------------------------
     # Operações de privilégios

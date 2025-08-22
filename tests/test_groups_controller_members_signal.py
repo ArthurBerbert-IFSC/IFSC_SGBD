@@ -35,6 +35,6 @@ def test_members_changed_signal_emitted():
     received = []
     ctrl.members_changed.connect(received.append)
 
-    assert ctrl.add_user_to_group("alice", "grp_a")
+    assert ctrl.add_user_to_group("alice", "grp_a", auto_apply_defaults=False)
     assert received == ["grp_a"]
 

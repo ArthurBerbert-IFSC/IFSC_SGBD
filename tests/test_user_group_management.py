@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 from gerenciador_postgres.role_manager import RoleManager
 from gerenciador_postgres.controllers.users_controller import UsersController
+from gerenciador_postgres.controllers.groups_controller import GroupsController
 
 
 class DummyDAO:
@@ -11,6 +12,7 @@ class DummyDAO:
         self.conn = DummyConn()
         self.members = {}
         self.users = {}
+        self.default_privs = {}
 
     def list_user_groups(self, username):
         return sorted(self.members.get(username, set()))
@@ -21,6 +23,9 @@ class DummyDAO:
     def remove_user_from_group(self, username, group):
         if username in self.members:
             self.members[username].discard(group)
+
+    def list_group_members(self, group):
+        return sorted([u for u, gs in self.members.items() if group in gs])
 
     def list_groups(self):
         return ["grp_a", "grp_b"]
@@ -37,6 +42,15 @@ class DummyDAO:
     def update_user(self, username, **fields):
         if username in self.users:
             self.users[username].update(fields)
+
+    def get_default_privileges(self, owner=None, objtype="r", schema=None):
+        if owner is None:
+            return {}
+        return self.default_privs.get(owner, {})
+
+    def alter_default_privileges(self, group, schema, obj_type, privileges, for_role=None):
+        owner = for_role
+        self.default_privs.setdefault(owner, {}).setdefault(schema, {}).setdefault(group, set()).update(privileges)
 
     @contextmanager
     def transaction(self):
@@ -66,6 +80,7 @@ class UserGroupManagementTests(unittest.TestCase):
         logger = logging.getLogger("test")
         self.rm = RoleManager(self.dao, logger)
         self.uc = UsersController(self.rm)
+        self.gc = GroupsController(self.rm)
 
     def test_add_and_remove_groups(self):
         self.assertEqual(self.uc.list_user_groups("alice"), [])
@@ -105,6 +120,16 @@ class UserGroupManagementTests(unittest.TestCase):
         created = self.uc.create_users_batch(data, "2024-06-30", renew=True)
         self.assertEqual(created, ["jose"])
         self.assertEqual(self.dao.users['jose']['valid_until'], '2024-06-30')
+
+    def test_add_user_applies_default_privileges(self):
+        # Usuário existente com defaults configurados
+        self.dao.add_user_to_group("bob", "grp_a")
+        self.dao.alter_default_privileges("grp_a", "public", "tables", {"SELECT"}, for_role="bob")
+
+        # Ao adicionar novo usuário ao grupo, defaults devem ser replicados
+        self.assertTrue(self.gc.add_user_to_group("alice", "grp_a"))
+        defaults = self.dao.get_default_privileges(owner="alice")
+        self.assertEqual(defaults.get("public", {}).get("grp_a"), {"SELECT"})
 
 
 if __name__ == "__main__":

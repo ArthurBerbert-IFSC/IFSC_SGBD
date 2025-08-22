@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QToolBar,
     QInputDialog,
+    QDialog,
+    QDialogButtonBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
@@ -171,8 +173,10 @@ class PrivilegesView(QWidget):
         schema_btns = QHBoxLayout()
         self.btnSaveSchema = QPushButton("Salvar Schema")
         self.btnSaveDefaults = QPushButton("Salvar Defaults")
+        self.btnApplyDefaults = QPushButton("Aplicar para...")
         schema_btns.addWidget(self.btnSaveSchema)
         schema_btns.addWidget(self.btnSaveDefaults)
+        schema_btns.addWidget(self.btnApplyDefaults)
         schema_btns.addStretch(1)
         schema_tab_layout.addLayout(schema_btns)
         self.tabs.addTab(schema_tab, "Schemas")
@@ -216,6 +220,7 @@ class PrivilegesView(QWidget):
             self.btnSaveDb,
             self.btnSaveSchema,
             self.btnSaveDefaults,
+            self.btnApplyDefaults,
             self.btnSaveTables,
             self.btnSaveAll,
             self.btnReloadTables,
@@ -233,6 +238,7 @@ class PrivilegesView(QWidget):
         self.btnSaveDb.clicked.connect(self._save_db_privileges)
         self.btnSaveSchema.clicked.connect(self._save_schema_privileges)
         self.btnSaveDefaults.clicked.connect(self._save_default_privileges)
+        self.btnApplyDefaults.clicked.connect(self._apply_defaults_for)
         self.btnSaveTables.clicked.connect(self._save_table_privileges)
         self.btnSaveAll.clicked.connect(self._save_all_privileges)
         self.btnReloadTables.clicked.connect(self._reload_tables)
@@ -1177,27 +1183,55 @@ class PrivilegesView(QWidget):
             QMessageBox.critical(self, "Erro", f"Falha ao recarregar tabelas: {e}")
         self._execute_async(task, on_success, on_error, "Recarregando tabelas...")
 
-    def _save_default_privileges(self):
+    def _apply_defaults_for(self):
+        if not self.current_group or not self.controller:
+            return
+        members = self.controller.list_group_members(self.current_group)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Aplicar defaults para")
+        layout = QVBoxLayout(dlg)
+        lst = QListWidget()
+        lst.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        lst.addItem("Todos os membros")
+        for m in members:
+            lst.addItem(m)
+
+        def select_all():
+            first = lst.item(0)
+            if first.isSelected():
+                lst.selectAll()
+
+        lst.itemSelectionChanged.connect(select_all)
+        layout.addWidget(lst)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        if dlg.exec():
+            owners = [
+                lst.item(i).text()
+                for i in range(1, lst.count())
+                if lst.item(i).isSelected()
+            ]
+            if owners:
+                self._save_default_privileges(owners)
+
+    def _save_default_privileges(self, owners=None):
         role, schema = self._current_schema_checked()
         if not role:
             return
         state = self._priv_cache.get((role, schema))
 
         def task():
+            owners_list = owners if owners is not None else [state.owner_role if state else None]
             ok = True
-            if state:
-                for owner, privs in state.default_privs.items():
-                    ok = (
-                        self.controller.alter_default_privileges(
-                            role,
-                            schema,
-                            "tables",
-                            privs,
-                            owner=owner,
-                            emit_signal=False,
-                        )
-                        and ok
-                    )
+            for owner in owners_list:
+                res = self.controller.alter_default_privileges(
+                    role, schema, "tables", default_perms, owner=owner, emit_signal=False
+                )
+                ok = ok and res
             return ok
 
         def on_success(success):
