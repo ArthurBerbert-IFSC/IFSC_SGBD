@@ -6,10 +6,22 @@ from .data_models import User, Group
 from typing import Optional, List, Dict, Set, Callable
 import logging
 
+# Core infrastructure imports
+from .core import (
+    get_metrics, get_cache, get_logger, 
+    audit_operation, create_user, delete_user,
+    create_group, delete_group, grant_privilege,
+    CacheSettings, OperationResult
+)
+
 from contracts.permission_contract import filter_managed
 
-logger = logging.getLogger(__name__)
-logger.propagate = True
+# Use structured logger
+logger = get_logger(__name__)
+
+# Get singleton instances
+metrics = get_metrics()
+cache = get_cache()
 
 
 PRIVILEGE_WHITELIST = {
@@ -120,34 +132,112 @@ class DBManager:
                 return 0
 
     def find_user_by_name(self, username: str) -> Optional[User]:
-        self._reset_if_aborted()
-        with self.conn.cursor() as cur:
-            cur.execute("""
-                SELECT rolname, oid, rolvaliduntil, rolcanlogin
-                FROM pg_roles
-                WHERE rolname = %s
-            """, (username,))
-            row = cur.fetchone()
-            if row:
-                return User(username=row[0], oid=row[1], valid_until=row[2], can_login=row[3])
+        """Busca usuário pelo nome com cache e validação.
+        
+        Args:
+            username: Nome do usuário a ser buscado
+            
+        Returns:
+            User object ou None se não encontrado
+        """
+        # Validate input
+        from .core.validation import ValidationSystem
+        validator = ValidationSystem()
+        if not validator.validate_username(username):
+            logger.warning(f"Nome de usuário inválido: {username}")
             return None
+            
+        # Check cache first
+        cache_key = f"user:{username}"
+        cached_user = cache.get(cache_key)
+        if cached_user is not None:
+            metrics.increment_counter("cache_hits", {"type": "user_lookup"})
+            return cached_user
+            
+        # Database lookup
+        self._reset_if_aborted()
+        metrics.start_timer("db_query_time", {"operation": "find_user"})
+        
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT rolname, oid, rolvaliduntil, rolcanlogin
+                    FROM pg_roles
+                    WHERE rolname = %s
+                """, (username,))
+                row = cur.fetchone()
+                
+            user = None
+            if row:
+                user = User(username=row[0], oid=row[1], valid_until=row[2], can_login=row[3])
+                
+            # Cache result (even if None)
+            cache.set(cache_key, user, tags=["users"])
+            metrics.increment_counter("cache_misses", {"type": "user_lookup"})
+            
+            logger.debug(f"Usuário {'encontrado' if user else 'não encontrado'}: {username}")
+            return user
+            
+        finally:
+            metrics.end_timer("db_query_time", {"operation": "find_user"})
 
-    def insert_user(self, username: str, password_hash: str, valid_until: str | None = None):
-        with self.conn.cursor() as cur:
-            if valid_until:
-                cur.execute(
-                    sql.SQL(
-                        "CREATE ROLE {} WITH LOGIN PASSWORD %s VALID UNTIL %s"
-                    ).format(sql.Identifier(username)),
-                    (password_hash, valid_until),
-                )
-            else:
-                cur.execute(
-                    sql.SQL("CREATE ROLE {} WITH LOGIN PASSWORD %s").format(
-                        sql.Identifier(username)
-                    ),
-                    (password_hash,),
-                )
+    @create_user
+    def insert_user(self, username: str, password_hash: str, valid_until: str | None = None) -> OperationResult:
+        """Cria novo usuário com auditoria e validação.
+        
+        Args:
+            username: Nome do usuário
+            password_hash: Hash da senha
+            valid_until: Data de expiração opcional
+            
+        Returns:
+            OperationResult com sucesso ou erro
+        """
+        from .core.validation import ValidationSystem
+        validator = ValidationSystem()
+        
+        # Validate input
+        if not validator.validate_username(username):
+            return OperationResult(
+                success=False,
+                message=f"Nome de usuário inválido: {username}",
+                data={"username": username}
+            )
+            
+        try:
+            with self.conn.cursor() as cur:
+                if valid_until:
+                    cur.execute(
+                        sql.SQL(
+                            "CREATE ROLE {} WITH LOGIN PASSWORD %s VALID UNTIL %s"
+                        ).format(sql.Identifier(username)),
+                        (password_hash, valid_until),
+                    )
+                else:
+                    cur.execute(
+                        sql.SQL("CREATE ROLE {} WITH LOGIN PASSWORD %s").format(
+                            sql.Identifier(username)
+                        ),
+                        (password_hash,),
+                    )
+            
+            # Invalidate user cache
+            cache.invalidate_by_tags(["users"])
+            
+            logger.info(f"Usuário criado com sucesso: {username}")
+            return OperationResult(
+                success=True,
+                message=f"Usuário {username} criado com sucesso",
+                data={"username": username, "valid_until": valid_until}
+            )
+            
+        except Exception as e:
+            logger.error(f"Erro ao criar usuário {username}: {str(e)}")
+            return OperationResult(
+                success=False,
+                message=f"Erro ao criar usuário: {str(e)}",
+                data={"username": username, "error": str(e)}
+            )
 
     def update_user(self, username: str, **fields):
         with self.conn.cursor() as cur:
@@ -168,9 +258,49 @@ class DBManager:
             )
             cur.execute(query, params)
 
-    def delete_user(self, username: str):
-        with self.conn.cursor() as cur:
-            cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(username)))
+    @delete_user
+    def delete_user(self, username: str) -> OperationResult:
+        """Remove usuário com auditoria e validação.
+        
+        Args:
+            username: Nome do usuário a ser removido
+            
+        Returns:
+            OperationResult com sucesso ou erro
+        """
+        from .core.validation import ValidationSystem
+        validator = ValidationSystem()
+        
+        # Validate input
+        if not validator.validate_username(username):
+            return OperationResult(
+                success=False,
+                message=f"Nome de usuário inválido: {username}",
+                data={"username": username}
+            )
+            
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(username)))
+            
+            # Invalidate caches
+            cache.invalidate_by_tags(["users"])
+            cache.delete(f"user:{username}")
+            
+            logger.info(f"Usuário removido com sucesso: {username}")
+            return OperationResult(
+                success=True,
+                message=f"Usuário {username} removido com sucesso",
+                data={"username": username}
+            )
+            
+        except Exception as e:
+            logger.error(f"Erro ao remover usuário {username}: {str(e)}")
+            return OperationResult(
+                success=False,
+                message=f"Erro ao remover usuário: {str(e)}",
+                data={"username": username, "error": str(e)}
+            )
 
     def list_users(self) -> List[str]:
         self._reset_if_aborted()
@@ -225,23 +355,164 @@ class DBManager:
             )
             return cur.fetchone()[0]
 
-    def count_tables(self) -> int:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT count(*) FROM pg_class c
-                JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE c.relkind = 'r'
-                  AND n.nspname NOT LIKE 'pg_%'
-                  AND n.nspname <> 'information_schema'
-                """
-            )
-            return cur.fetchone()[0]
+    def batch_create_users(self, users_data: List[Dict]) -> str:
+        """Cria múltiplos usuários usando task manager.
+        
+        Args:
+            users_data: Lista de dicionários com dados dos usuários
+            
+        Returns:
+            Task ID para acompanhar o progresso
+        """
+        from .core import get_task_manager
+        
+        task_manager = get_task_manager()
+        
+        def create_users_task(progress_callback=None):
+            """Task function para criar usuários em lote."""
+            results = []
+            total = len(users_data)
+            
+            for i, user_data in enumerate(users_data):
+                try:
+                    username = user_data.get('username')
+                    password_hash = user_data.get('password_hash')
+                    valid_until = user_data.get('valid_until')
+                    
+                    result = self.insert_user(username, password_hash, valid_until)
+                    results.append(result)
+                    
+                    # Update progress
+                    if progress_callback:
+                        progress = int((i + 1) / total * 100)
+                        progress_callback(progress, f"Criando usuário {username}")
+                        
+                except Exception as e:
+                    logger.error(f"Erro ao criar usuário em lote: {str(e)}")
+                    results.append(OperationResult(
+                        success=False,
+                        message=str(e),
+                        data=user_data
+                    ))
+                    
+            return results
+        
+        # Submit task
+        task_id = task_manager.submit_task(
+            create_users_task,
+            f"Criação em lote de {len(users_data)} usuários"
+        )
+        
+        logger.info(f"Task de criação em lote iniciada: {task_id}")
+        return task_id
 
-    def create_group(self, group_name: str):
-        with self.conn.cursor() as cur:
-            cur.execute(
-                sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(group_name))
+    def batch_update_privileges(self, operations: List[Dict]) -> str:
+        """Atualiza privilégios em lote usando task manager.
+        
+        Args:
+            operations: Lista de operações de privilégio
+            
+        Returns:
+            Task ID para acompanhar o progresso
+        """
+        from .core import get_task_manager
+        
+        task_manager = get_task_manager()
+        
+        def update_privileges_task(progress_callback=None):
+            """Task function para atualizar privilégios em lote."""
+            results = []
+            total = len(operations)
+            
+            for i, operation in enumerate(operations):
+                try:
+                    # Extract operation details
+                    action = operation.get('action')  # 'grant' or 'revoke'
+                    username = operation.get('username')
+                    privilege = operation.get('privilege')
+                    schema = operation.get('schema')
+                    
+                    # Execute operation based on action
+                    if action == 'grant':
+                        result = self.grant_privilege(username, privilege, schema)
+                    elif action == 'revoke':
+                        result = self.revoke_privilege(username, privilege, schema)
+                    else:
+                        result = OperationResult(
+                            success=False,
+                            message=f"Ação inválida: {action}",
+                            data=operation
+                        )
+                    
+                    results.append(result)
+                    
+                    # Update progress
+                    if progress_callback:
+                        progress = int((i + 1) / total * 100)
+                        progress_callback(progress, f"Processando {action} para {username}")
+                        
+                except Exception as e:
+                    logger.error(f"Erro ao atualizar privilégio em lote: {str(e)}")
+                    results.append(OperationResult(
+                        success=False,
+                        message=str(e),
+                        data=operation
+                    ))
+                    
+            return results
+        
+        # Submit task
+        task_id = task_manager.submit_task(
+            update_privileges_task,
+            f"Atualização em lote de {len(operations)} privilégios"
+        )
+        
+        logger.info(f"Task de atualização em lote iniciada: {task_id}")
+        return task_id
+
+    @create_group
+    def create_group(self, group_name: str) -> OperationResult:
+        """Cria novo grupo com auditoria e validação.
+        
+        Args:
+            group_name: Nome do grupo
+            
+        Returns:
+            OperationResult com sucesso ou erro
+        """
+        from .core.validation import ValidationSystem
+        validator = ValidationSystem()
+        
+        # Validate input
+        if not validator.validate_group_name(group_name):
+            return OperationResult(
+                success=False,
+                message=f"Nome de grupo inválido: {group_name}",
+                data={"group_name": group_name}
+            )
+            
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(group_name))
+                )
+            
+            # Invalidate group cache
+            cache.invalidate_by_tags(["groups"])
+            
+            logger.info(f"Grupo criado com sucesso: {group_name}")
+            return OperationResult(
+                success=True,
+                message=f"Grupo {group_name} criado com sucesso",
+                data={"group_name": group_name}
+            )
+            
+        except Exception as e:
+            logger.error(f"Erro ao criar grupo {group_name}: {str(e)}")
+            return OperationResult(
+                success=False,
+                message=f"Erro ao criar grupo: {str(e)}",
+                data={"group_name": group_name, "error": str(e)}
             )
 
     def delete_group(self, group_name: str):  # <-- NOVO MÉTODO ADICIONADO

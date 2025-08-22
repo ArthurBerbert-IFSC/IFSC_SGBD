@@ -2,16 +2,28 @@ import logging
 from .db_manager import DBManager
 from .config_manager import load_config
 
+# Core infrastructure imports
+from .core import (
+    get_metrics, get_cache, get_logger, get_event_bus,
+    audit_operation, OperationResult, get_task_manager
+)
+
 
 class SchemaManager:
     """Camada de serviço: orquestra operações e controla transações de schemas."""
 
     def __init__(self, dao: DBManager, logger: logging.Logger, operador: str = 'sistema', audit_manager=None):
         self.dao = dao
-        self.logger = logger
+        self.logger = logger or get_logger(__name__)
         self.operador = operador
         self.audit_manager = audit_manager
         self.allowed_group = load_config().get('schema_creation_group', 'Professores')
+        
+        # Core services
+        self.metrics = get_metrics()
+        self.cache = get_cache()
+        self.event_bus = get_event_bus()
+        self.task_manager = get_task_manager()
 
     # --- Helpers de permissão -------------------------------------------------
     def _current_user(self) -> str:
@@ -20,36 +32,77 @@ class SchemaManager:
             return cur.fetchone()[0]
 
     def _has_role(self, username: str, role: str) -> bool:
-        with self.dao.conn.cursor() as cur:
-            cur.execute("SELECT pg_has_role(%s, %s, 'member')", (username, role))
-            row = cur.fetchone()
-            return bool(row and row[0])
+        """Verifica se usuário tem papel específico (com cache)."""
+        cache_key = f"user_role:{username}:{role}"
+        result = self.cache.get(cache_key)
+        
+        if result is None:
+            with self.dao.conn.cursor() as cur:
+                cur.execute("SELECT pg_has_role(%s, %s, 'member')", (username, role))
+                row = cur.fetchone()
+                result = bool(row and row[0])
+            
+            # Cache for 5 minutes
+            self.cache.set(cache_key, result, ttl=300, tags=["user_roles"])
+            
+        return result
 
     def _is_superuser(self, username: str) -> bool:
-        with self.dao.conn.cursor() as cur:
-            cur.execute("SELECT usesuper FROM pg_user WHERE usename = %s", (username,))
-            row = cur.fetchone()
-            return bool(row and row[0])
+        """Verifica se usuário é superuser (com cache)."""
+        cache_key = f"is_superuser:{username}"
+        result = self.cache.get(cache_key)
+        
+        if result is None:
+            with self.dao.conn.cursor() as cur:
+                cur.execute("SELECT usesuper FROM pg_user WHERE usename = %s", (username,))
+                row = cur.fetchone()
+                result = bool(row and row[0])
+            
+            # Cache for 10 minutes (superuser status rarely changes)
+            self.cache.set(cache_key, result, ttl=600, tags=["user_roles"])
+            
+        return result
 
     def _role_exists(self, role: str) -> bool:
+        """Verifica se papel existe (com cache)."""
         if not role:
             return False
-        with self.dao.conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
-            return cur.fetchone() is not None
+            
+        cache_key = f"role_exists:{role}"
+        result = self.cache.get(cache_key)
+        
+        if result is None:
+            with self.dao.conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
+                result = cur.fetchone() is not None
+            
+            # Cache for 5 minutes
+            self.cache.set(cache_key, result, ttl=300, tags=["roles"])
+            
+        return result
 
     def _get_schema_owner(self, schema: str) -> str | None:
-        with self.dao.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT pg_catalog.pg_get_userbyid(nspowner)
-                FROM pg_namespace
-                WHERE nspname = %s
-                """,
-                (schema,),
-            )
-            row = cur.fetchone()
-            return row[0] if row else None
+        """Obtém proprietário do schema (com cache)."""
+        cache_key = f"schema_owner:{schema}"
+        result = self.cache.get(cache_key)
+        
+        if result is None:
+            with self.dao.conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT pg_catalog.pg_get_userbyid(nspowner)
+                    FROM pg_namespace
+                    WHERE nspname = %s
+                    """,
+                    (schema,),
+                )
+                row = cur.fetchone()
+                result = row[0] if row else None
+            
+            # Cache for 10 minutes
+            self.cache.set(cache_key, result, ttl=600, tags=["schemas"])
+            
+        return result
 
     # --- Operações ------------------------------------------------------------
     def create_schema(self, name: str, owner: str | None = None):

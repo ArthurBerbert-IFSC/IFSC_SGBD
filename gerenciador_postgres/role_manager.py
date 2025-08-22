@@ -8,6 +8,17 @@ from psycopg2 import sql
 from .config_manager import load_config
 from config.permission_templates import DEFAULT_TEMPLATE
 
+# Core infrastructure imports
+from .core import (
+    get_metrics, get_cache, get_logger, get_event_bus,
+    audit_operation, create_user, delete_user,
+    create_group, delete_group, grant_privilege,
+    OperationResult, get_task_manager
+)
+
+# Intelligent deletion system
+from .intelligent_deletion import IntelligentUserDeletion, BatchDeletionConfig
+
 class RoleManager:
     """Camada de serviço: orquestra operações, valida regras e controla transações."""
     def __init__(
@@ -25,71 +36,93 @@ class RoleManager:
             Camada de acesso aos dados.
         logger : logging.Logger | None, optional
             Logger usado para registrar operações; se não fornecido, utiliza o
-            logger do módulo, by default None.
+            logger estruturado do core, by default None.
         operador : str, optional
             Identificador do operador executando as ações, by default 'sistema'.
         audit_manager : optional
             Componente responsável pelo registro de auditoria, by default None.
         """
         self.dao = dao
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or get_logger(__name__)
         self.operador = operador
         self.audit_manager = audit_manager
+        
+        # Core services
+        self.metrics = get_metrics()
+        self.cache = get_cache()
+        self.event_bus = get_event_bus()
+        
+        # Intelligent deletion system
+        self.intelligent_deletion = IntelligentUserDeletion(self.dao)
+        self.task_manager = get_task_manager()
 
-    def create_user(self, username: str, password: str, valid_until: str | None = None) -> str:
+    @create_user
+    def create_user(self, username: str, password: str, valid_until: str | None = None) -> OperationResult:
+        """Cria usuário com validação, auditoria e cache.
+        
+        Args:
+            username: Nome do usuário
+            password: Senha do usuário
+            valid_until: Data de expiração opcional
+            
+        Returns:
+            OperationResult com sucesso ou erro
+        """
         # Sanitização do username fornecido direto (fluxo criação individual)
         username = self._sanitize_username(username)
-        dados_antes = None
-        dados_depois = None
-        sucesso = False
+        
+        # Validate input
+        from .core.validation import ValidationSystem
+        validator = ValidationSystem()
+        if not validator.validate_username(username):
+            return OperationResult(
+                success=False,
+                message=f"Nome de usuário inválido: {username}",
+                data={"username": username, "operator": self.operador}
+            )
 
         try:
-            if self.dao.find_user_by_name(username):
-                raise ValueError(f"Usuário '{username}' já existe.")
+            # Check if user already exists (with cache)
+            cache_key = f"user_exists:{username}"
+            user_exists = self.cache.get(cache_key)
+            if user_exists is None:
+                user_exists = self.dao.find_user_by_name(username) is not None
+                self.cache.set(cache_key, user_exists, ttl=60, tags=["users"])
+                
+            if user_exists:
+                return OperationResult(
+                    success=False,
+                    message=f"Usuário '{username}' já existe.",
+                    data={"username": username, "operator": self.operador}
+                )
+                
+            # Create user
             with self.dao.transaction():
-                self.dao.insert_user(username, password, valid_until)
-
-                dados_depois = {
-                    'username': username,
-                    'can_login': True,
-                    'valid_until': valid_until,
-                }
-                sucesso = True
-
-                if self.audit_manager:
-                    self.audit_manager.log_operation(
-                        operador=self.operador,
-                        operacao='CREATE_USER',
-                        objeto_tipo='USER',
-                        objeto_nome=username,
-                        detalhes={'password_set': True, 'valid_until': valid_until},
-                        dados_antes=dados_antes,
-                        dados_depois=dados_depois,
-                        sucesso=sucesso
-                    )
-
-            self.logger.info(f"[{self.operador}] Criou usuário: {username}")
-
-            return username
+                result = self.dao.insert_user(username, password, valid_until)
+                
+            if result.success:
+                # Invalidate relevant caches
+                self.cache.invalidate_by_tags(["users"])
+                self.cache.delete(cache_key)
+                
+                # Emit event
+                self.event_bus.emit("user_created", username, self.operador)
+                
+                # Update metrics
+                self.metrics.increment_counter("users_created", {"operator": self.operador})
+                
+                self.logger.info(f"Usuário criado com sucesso: {username} por {self.operador}")
+                
+            return result
             
         except Exception as e:
-            self.logger.error(f"[{self.operador}] Falha ao criar usuário '{username}': {e}")
-            
-            # Registrar falha na auditoria
-            if self.audit_manager:
-                with self.dao.transaction():
-                    self.audit_manager.log_operation(
-                        operador=self.operador,
-                        operacao='CREATE_USER',
-                        objeto_tipo='USER',
-                        objeto_nome=username,
-                        detalhes={'error': str(e)},
-                        dados_antes=dados_antes,
-                        dados_depois=dados_depois,
-                        sucesso=False
-                    )
-            
-            raise
+            self.logger.error(f"Erro ao criar usuário {username}: {str(e)}")
+            self.metrics.increment_counter("user_creation_errors", {"operator": self.operador})
+            return OperationResult(
+                success=False,
+                message=f"Erro ao criar usuário: {str(e)}",
+                data={"username": username, "operator": self.operador, "error": str(e)}
+            )
 
     def create_users_batch(
         self,
@@ -97,7 +130,8 @@ class RoleManager:
         valid_until: str | None = None,
         group_name: str | None = None,
         renew: bool = False,
-    ):
+        use_background_task: bool = True
+    ) -> str | List[str]:
         """Cria múltiplos usuários gerando usernames a partir do nome completo.
 
         Parameters
@@ -112,6 +146,53 @@ class RoleManager:
             Se ``True``, usuários já existentes terão sua validade
             atualizada para ``valid_until`` ao invés de gerar um novo
             username.
+        use_background_task : bool
+            Se ``True``, executa em background e retorna task_id.
+            Se ``False``, executa sincronamente e retorna lista de usernames.
+            
+        Returns
+        -------
+        str | List[str]
+            Task ID se use_background_task=True, senão lista de usernames criados.
+        """
+        
+        if use_background_task:
+            # Execute as background task
+            def batch_create_task(progress_callback=None):
+                return self._execute_batch_creation(
+                    users_info, valid_until, group_name, renew, progress_callback
+                )
+            
+            task_id = self.task_manager.submit_task(
+                batch_create_task,
+                f"Criação em lote de {len(users_info)} usuários"
+            )
+            
+            self.logger.info(f"Task de criação em lote iniciada: {task_id}")
+            return task_id
+        else:
+            # Execute synchronously
+            return self._execute_batch_creation(users_info, valid_until, group_name, renew)
+            
+    def _execute_batch_creation(
+        self, 
+        users_info: list, 
+        valid_until: str | None, 
+        group_name: str | None, 
+        renew: bool,
+        progress_callback=None
+    ) -> List[str]:
+        """Executa a criação em lote de usuários.
+        
+        Args:
+            users_info: Lista de tuplas (matricula, nome_completo)
+            valid_until: Data de expiração opcional
+            group_name: Nome do grupo opcional
+            renew: Se deve renovar usuários existentes
+            progress_callback: Callback para reportar progresso
+            
+        Returns:
+            Lista de usernames criados
         """
 
         if group_name:
@@ -127,70 +208,129 @@ class RoleManager:
                 raise
 
         created: List[str] = []
-        for matricula, nome_completo in users_info:
-            password = matricula
-            nome_normalizado = unicodedata.normalize('NFKD', nome_completo)
-            nome_ascii = nome_normalizado.encode('ascii', 'ignore').decode('ascii')
-            partes = nome_ascii.strip().split()
-            if not partes:
-                continue
-            first = partes[0].lower()
-            last = partes[-1].lower() if len(partes) > 1 else ""
-            tentativa = 0
-            while True:
-                if tentativa == 0:
-                    candidate = first
-                elif tentativa == 1 and last:
-                    candidate = f"{first}.{last}"
-                else:
-                    base = f"{first}.{last}" if last else first
-                    candidate = f"{base}{tentativa if last else tentativa+1}"
-                username = self._sanitize_username(candidate)
-                # Checagem prévia para evitar exceção de duplicidade e acelerar a próxima tentativa
-                try:
-                    user_exists = self.dao.find_user_by_name(username)
+        total_users = len(users_info)
+        
+        for i, (matricula, nome_completo) in enumerate(users_info):
+            try:
+                # Update progress
+                if progress_callback:
+                    progress = int((i / total_users) * 100)
+                    progress_callback(progress, f"Processando {nome_completo}")
+                
+                password = matricula
+                nome_normalizado = unicodedata.normalize('NFKD', nome_completo)
+                nome_ascii = nome_normalizado.encode('ascii', 'ignore').decode('ascii')
+                partes = nome_ascii.strip().split()
+                
+                if not partes:
+                    self.logger.warning(f"Nome inválido ignorado: {nome_completo}")
+                    continue
+                    
+                first = partes[0].lower()
+                last = partes[-1].lower() if len(partes) > 1 else ""
+                tentativa = 0
+                created_username = None
+                
+                while tentativa <= 100:  # Limite de tentativas
+                    if tentativa == 0:
+                        candidate = first
+                    elif tentativa == 1 and last:
+                        candidate = f"{first}.{last}"
+                    else:
+                        base = f"{first}.{last}" if last else first
+                        candidate = f"{base}{tentativa if last else tentativa+1}"
+                        
+                    username = self._sanitize_username(candidate)
+                    
+                    # Check if user exists (with cache)
+                    cache_key = f"user_exists:{username}"
+                    user_exists = self.cache.get(cache_key)
+                    if user_exists is None:
+                        user_exists = self.dao.find_user_by_name(username) is not None
+                        self.cache.set(cache_key, user_exists, ttl=60, tags=["users"])
+                    
                     if user_exists:
                         if renew:
                             success = self.update_user(username, valid_until=valid_until)
-                            created_username = username if success else None
-                            error = None if success else Exception(
-                                f"Falha ao renovar usuário existente '{username}'"
-                            )
+                            if success:
+                                created_username = username
+                                break
+                            else:
+                                self.logger.error(f"Falha ao renovar usuário '{username}'")
+                                break
                         else:
                             tentativa += 1
-                            if tentativa > 100:  # segurança para não loopar indefinidamente
-                                self.logger.error(
-                                    f"[{self.operador}] Muitas tentativas para gerar username baseado em '{first} {last}'. Abortando este usuário."
-                                )
-                                break
                             continue
                     else:
-                        created_username, error = self._try_create_user(username, password, valid_until)
-                except Exception as e:
-                    created_username, error = None, e
-                if created_username:
-                    if group_name:
-                        self.add_user_to_group(created_username, group_name)
-                    created.append(created_username)
-                    break
-                else:
-                    # Decide se é duplicidade: tentar outro username; senão abortar este usuário
-                    if self._is_duplicate_error(error):
-                        tentativa += 1
-                        if tentativa > 100:
-                            self.logger.error(
-                                f"[{self.operador}] Muitas tentativas para gerar username baseado em '{first} {last}'. Abortando este usuário."
-                            )
+                        # Try to create user
+                        result = self.create_user(username, password, valid_until)
+                        if result.success:
+                            created_username = username
                             break
-                        continue
-                    else:
-                        self.logger.error(
-                            f"[{self.operador}] Falha ao criar usuário '{username}': {error}"
-                        )
-                        break
+                        else:
+                            # Check if it's a duplicate error
+                            if self._is_duplicate_error_from_result(result):
+                                tentativa += 1
+                                continue
+                            else:
+                                self.logger.error(f"Falha ao criar usuário '{username}': {result.message}")
+                                break
+                    
+                    tentativa += 1
+                
+                if created_username:
+                    created.append(created_username)
+                    if group_name:
+                        try:
+                            self.add_user_to_group(created_username, group_name)
+                        except Exception as e:
+                            self.logger.error(f"Falha ao adicionar {created_username} ao grupo {group_name}: {e}")
+                else:
+                    self.logger.error(f"Não foi possível criar usuário para: {nome_completo}")
+                    
+            except Exception as e:
+                self.logger.error(f"Erro ao processar usuário {nome_completo}: {str(e)}")
+                continue
+        
+        # Final progress update
+        if progress_callback:
+            progress_callback(100, f"Concluído: {len(created)} usuários criados")
+            
+        # Emit batch completion event
+        self.event_bus.emit("users_batch_created", created, group_name, self.operador)
+        
+        # Update metrics
+        self.metrics.increment_counter("batch_users_created", {
+            "count": len(created),
+            "operator": self.operador,
+            "group": group_name or "none"
+        })
+        
+        self.logger.info(f"Criação em lote concluída: {len(created)} usuários criados por {self.operador}")
         return created
 
     # ----------------- Helpers internos -----------------
+    def _is_duplicate_error_from_result(self, result: OperationResult) -> bool:
+        """Check if OperationResult indicates a duplicate error."""
+        if result.success:
+            return False
+        return self._is_duplicate_error_message(result.message)
+        
+    def _is_duplicate_error_message(self, message: str) -> bool:
+        """Check if error message indicates a duplicate."""
+        if not message:
+            return False
+        msg_low = message.lower()
+        try:
+            norm = unicodedata.normalize("NFKD", msg_low).encode("ascii", "ignore").decode("ascii")
+        except Exception:
+            norm = msg_low
+        return (
+            "ja existe" in norm
+            or "already exists" in norm
+            or ("existe" in msg_low and "nao existe" not in msg_low)
+        )
+    
     def _is_duplicate_error(self, error: Exception | None) -> bool:
         if not error:
             return False
@@ -242,22 +382,44 @@ class RoleManager:
         """Renova a validade de um usuário existente."""
         return self.update_user(username, valid_until=new_date)
 
-    def delete_user(self, username: str) -> bool:
-        dados_antes = None
-        sucesso = False
+    @delete_user
+    def delete_user(self, username: str) -> OperationResult:
+        """Remove usuário com auditoria e limpeza automática.
         
-        try:
-            # Capturar dados antes da exclusão
-            user = self.dao.find_user_by_name(username)
-            if user:
-                dados_antes = {
-                    'username': user.username,
-                    'oid': user.oid,
-                    'can_login': user.can_login,
-                    'valid_until': user.valid_until.isoformat() if user.valid_until else None
-                }
+        Args:
+            username: Nome do usuário a ser removido
             
-            # Limpeza de objetos antes do DROP ROLE (opcional mas boa prática)
+        Returns:
+            OperationResult com sucesso ou erro
+        """
+        try:
+            # Validate input
+            from .core.validation import ValidationSystem
+            validator = ValidationSystem()
+            if not validator.validate_username(username):
+                return OperationResult(
+                    success=False,
+                    message=f"Nome de usuário inválido: {username}",
+                    data={"username": username, "operator": self.operador}
+                )
+            
+            # Capture data before deletion
+            user = self.dao.find_user_by_name(username)
+            if not user:
+                return OperationResult(
+                    success=False,
+                    message=f"Usuário '{username}' não encontrado.",
+                    data={"username": username, "operator": self.operador}
+                )
+            
+            dados_antes = {
+                'username': user.username,
+                'oid': user.oid,
+                'can_login': user.can_login,
+                'valid_until': user.valid_until.isoformat() if user.valid_until else None
+            }
+            
+            # Clean up objects before DROP ROLE
             with self.dao.transaction():
                 with self.dao.conn.cursor() as cur:
                     cur.execute(
@@ -266,24 +428,32 @@ class RoleManager:
                         )
                     )
 
-                self.dao.delete_user(username)
-
-                sucesso = True
-                if self.audit_manager:
-                    self.audit_manager.log_operation(
-                        operador=self.operador,
-                        operacao='DELETE_USER',
-                        objeto_tipo='USER',
-                        objeto_nome=username,
-                        dados_antes=dados_antes,
-                        sucesso=sucesso
-                    )
-
-            self.logger.info(f"[{self.operador}] Excluiu usuário: {username}")
-
-            return True
+                result = self.dao.delete_user(username)
+                
+            if result.success:
+                # Invalidate caches
+                self.cache.invalidate_by_tags(["users"])
+                self.cache.delete(f"user:{username}")
+                self.cache.delete(f"user_exists:{username}")
+                
+                # Emit event
+                self.event_bus.emit("user_deleted", username, self.operador)
+                
+                # Update metrics
+                self.metrics.increment_counter("users_deleted", {"operator": self.operador})
+                
+                self.logger.info(f"Usuário removido com sucesso: {username} por {self.operador}")
+                
+            return result
             
         except Exception as e:
+            self.logger.error(f"Erro ao remover usuário {username}: {str(e)}")
+            self.metrics.increment_counter("user_deletion_errors", {"operator": self.operador})
+            return OperationResult(
+                success=False,
+                message=f"Erro ao remover usuário: {str(e)}",
+                data={"username": username, "operator": self.operador, "error": str(e)}
+            )
             self.logger.error(f"[{self.operador}] Falha ao excluir usuário '{username}': {e}")
             
             # Registrar falha na auditoria
@@ -298,8 +468,192 @@ class RoleManager:
                         dados_antes=dados_antes,
                         sucesso=False
                     )
+
+    def delete_user_intelligent(self, username: str, reassign_to: str = "postgres") -> OperationResult:
+        """
+        Remove usuário usando análise inteligente da situação.
+        
+        Analisa automaticamente se o usuário possui dados ou apenas permissões
+        e aplica a estratégia apropriada.
+        
+        Args:
+            username: Nome do usuário a ser removido
+            reassign_to: Usuário para quem reatribuir objetos (se houver)
             
-            return False
+        Returns:
+            OperationResult com sucesso ou erro
+        """
+        try:
+            config = BatchDeletionConfig(
+                reassign_to_user=reassign_to,
+                dry_run=False,
+                continue_on_error=False,
+                transaction_per_user=True,
+                log_details=True
+            )
+            
+            with self.metrics.time("delete_user_intelligent"):
+                result = self.intelligent_deletion.delete_user_with_strategy(username, config)
+            
+            if result.success:
+                # Invalidate caches
+                self.cache.invalidate_by_tags(["users"])
+                self.cache.delete(f"user:{username}")
+                self.cache.delete(f"user_exists:{username}")
+                
+                # Emit event
+                self.event_bus.emit("user_deleted_intelligent", username, self.operador)
+                
+                # Update metrics
+                self.metrics.increment_counter("users_deleted_intelligent", {"operator": self.operador})
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Erro na exclusão inteligente do usuário {username}: {str(e)}")
+            self.metrics.increment_counter("user_deletion_intelligent_errors", {"operator": self.operador})
+            return OperationResult(
+                success=False,
+                message=f"Erro na exclusão inteligente: {str(e)}",
+                data={"username": username, "operator": self.operador, "error": str(e)}
+            )
+
+    def analyze_user_for_deletion(self, username: str) -> Dict:
+        """
+        Analisa um usuário para determinar a melhor estratégia de exclusão.
+        
+        Args:
+            username: Nome do usuário a ser analisado
+            
+        Returns:
+            Dict com análise detalhada do usuário
+        """
+        try:
+            analysis = self.intelligent_deletion.analyze_user(username)
+            return {
+                "username": analysis.username,
+                "has_owned_objects": analysis.has_owned_objects,
+                "has_permissions": analysis.has_permissions,
+                "has_blocking_connections": analysis.has_blocking_connections,
+                "strategy": analysis.strategy.value,
+                "details": analysis.details,
+                "recommendation": self._get_deletion_recommendation(analysis)
+            }
+        except Exception as e:
+            self.logger.error(f"Erro ao analisar usuário {username}: {str(e)}")
+            return {
+                "username": username,
+                "error": str(e),
+                "recommendation": "Erro na análise - verificar manualmente"
+            }
+
+    def batch_delete_users_intelligent(
+        self, 
+        usernames: List[str], 
+        reassign_to: str = "postgres",
+        dry_run: bool = False,
+        continue_on_error: bool = True
+    ) -> OperationResult:
+        """
+        Exclui múltiplos usuários usando análise inteligente.
+        
+        Args:
+            usernames: Lista de nomes de usuários
+            reassign_to: Usuário para quem reatribuir objetos
+            dry_run: Se True, apenas simula a operação
+            continue_on_error: Se True, continua mesmo se algum usuário falhar
+            
+        Returns:
+            OperationResult com resultado da operação em lote
+        """
+        try:
+            config = BatchDeletionConfig(
+                reassign_to_user=reassign_to,
+                dry_run=dry_run,
+                continue_on_error=continue_on_error,
+                transaction_per_user=True,
+                log_details=True
+            )
+            
+            with self.metrics.time("batch_delete_users_intelligent"):
+                result = self.intelligent_deletion.batch_delete_users(usernames, config)
+            
+            if result.success and not dry_run:
+                # Invalidate caches for all users
+                self.cache.invalidate_by_tags(["users"])
+                for username in usernames:
+                    self.cache.delete(f"user:{username}")
+                    self.cache.delete(f"user_exists:{username}")
+                
+                # Emit events
+                self.event_bus.emit("batch_users_deleted", usernames, self.operador)
+                
+                # Update metrics
+                if result.data:
+                    self.metrics.increment_counter("batch_users_deleted", result.data.get("successful", 0))
+                    self.metrics.increment_counter("batch_deletion_failures", result.data.get("failed", 0))
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Erro na exclusão em lote inteligente: {str(e)}")
+            self.metrics.increment_counter("batch_deletion_errors", {"operator": self.operador})
+            return OperationResult(
+                success=False,
+                message=f"Erro na exclusão em lote: {str(e)}",
+                data={"usernames": usernames, "operator": self.operador, "error": str(e)}
+            )
+
+    def preview_batch_deletion(self, usernames: List[str]) -> Dict:
+        """
+        Analisa um lote de usuários sem executar a exclusão.
+        
+        Args:
+            usernames: Lista de nomes de usuários
+            
+        Returns:
+            Dict com preview da operação
+        """
+        try:
+            preview = self.intelligent_deletion.preview_batch_deletion(usernames)
+            
+            # Enriquecer com recomendações
+            for strategy, analyses in preview["detailed_analysis"].items():
+                for analysis in analyses:
+                    analysis["recommendation"] = self._get_deletion_recommendation(analysis)
+            
+            return preview
+            
+        except Exception as e:
+            self.logger.error(f"Erro no preview de exclusão em lote: {str(e)}")
+            return {
+                "error": str(e),
+                "total_users": len(usernames),
+                "usernames": usernames
+            }
+
+    def _get_deletion_recommendation(self, analysis) -> str:
+        """
+        Gera recomendação baseada na análise do usuário.
+        
+        Args:
+            analysis: Objeto UserAnalysis
+            
+        Returns:
+            String com recomendação
+        """
+        if hasattr(analysis, 'strategy'):
+            strategy = analysis.strategy.value
+        else:
+            strategy = analysis.get('strategy', 'unknown')
+            
+        recommendations = {
+            "reassign_and_drop": f"✅ Usuário pode ser excluído. Objetos serão reatribuídos antes da exclusão.",
+            "drop_permissions_only": f"✅ Usuário pode ser excluído. Apenas permissões serão removidas.",
+            "skip_blocked": f"❌ Usuário não pode ser excluído no momento. Verificar conexões ativas ou outros bloqueios."
+        }
+        
+        return recommendations.get(strategy, "⚠️ Estratégia desconhecida - verificar manualmente")
 
     def change_password(self, username: str, password: str) -> bool:
         try:

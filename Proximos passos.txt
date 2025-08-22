@@ -1,0 +1,76 @@
+Para um processo automatizado de exclusão em lote que siga sua regra (“se o usuário possui dados, use a primeira opção; se tem apenas permissões, remova essas permissões”), você pode adotar a lógica abaixo:
+
+1. Identificar se a role possui objetos
+Use os catálogos internos do PostgreSQL para verificar se há objetos pertencentes à role:
+
+SELECT 1
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_roles r ON r.oid = c.relowner
+WHERE r.rolname = :role_name
+LIMIT 1;
+Se retornar linha, a role tem objetos (tabelas, seqs, etc.).
+
+Caso não haja resultado, a role não possui objetos.
+
+2. Fluxo para roles com dados
+Reatribuir tudo para um novo dono:
+
+REASSIGN OWNED BY :role_name TO :novo_dono;
+Remover qualquer privilégio ou objeto remanescente:
+
+DROP OWNED BY :role_name;
+Finalmente excluir a role:
+
+DROP ROLE :role_name;
+3. Fluxo para roles com apenas permissões
+Eliminar privilégios/“default privileges”:
+
+DROP OWNED BY :role_name;
+Se houver somente default privileges, use ALTER DEFAULT PRIVILEGES ... REVOKE em schemas relevantes.
+
+Em seguida excluir a role:
+
+DROP ROLE :role_name;
+4. Exclusão em lote
+Para vários usuários:
+
+DO $$
+DECLARE
+    rec RECORD;
+BEGIN
+    FOR rec IN SELECT rolname FROM pg_roles WHERE rolname LIKE 'prefixo_%' LOOP
+        IF EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_class c
+            JOIN pg_roles r ON r.oid = c.relowner
+            WHERE r.rolname = rec.rolname
+        ) THEN
+            -- Role possui dados: reatribuir
+            EXECUTE format('REASSIGN OWNED BY %I TO novo_dono', rec.rolname);
+        END IF;
+
+        -- Remover privilégios e a role
+        EXECUTE format('DROP OWNED BY %I', rec.rolname);
+        EXECUTE format('DROP ROLE %I', rec.rolname);
+    END LOOP;
+END$$;
+Substitua prefixo_% ou ajuste o filtro conforme seu lote de usuários, e defina novo_dono para quem receberá os objetos (quando houver). Assim você garante:
+
+Objetos importantes preservados (primeira opção).
+
+Permissões descartadas quando não há dados associados.
+
+Esse processo evita travamentos, pois cada role é tratada conforme sua situação, e toda a operação pode rodar dentro de uma transação maior (BEGIN … COMMIT) para segurança.
+
+
+Resumo
+Estruture a IA para diagnosticar o estado de cada usuário (possui objetos, apenas permissões, bloqueios).
+
+Caso possua objetos, reatribua ou drope esses objetos antes de remover a role.
+
+Para usuários com apenas permissões, revogue tudo (incluindo default privileges) e então exclua a role.
+
+Em deleções em lote, trate cada usuário de forma transacional, registrando logs e lidando com travas de forma individual.
+
+
+

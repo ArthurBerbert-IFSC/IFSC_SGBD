@@ -1,9 +1,15 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QFormLayout, QHBoxLayout, QFrame
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 import platform
 from ..app_metadata import AppMetadata
+from ..core.constants import UIConstants, EventTypes
+from ..core.event_bus import get_event_bus
+from ..core.models import ConnectionInfo, DatabaseStats
+from ..core.logging import get_logger
+
+logger = get_logger(__name__)
 
 class DashboardPanel(QWidget):
     request_status_refresh = pyqtSignal()
@@ -13,7 +19,22 @@ class DashboardPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._collapsed = False
+        self.connection_info: ConnectionInfo = None
+        self.stats: DatabaseStats = DatabaseStats()
+        
+        # Setup event bus
+        self.event_bus = get_event_bus()
+        self.event_bus.subscribe(EventTypes.CONNECTION_ESTABLISHED, self.on_connection_established)
+        self.event_bus.subscribe(EventTypes.CONNECTION_LOST, self.on_connection_lost)
+        
+        # Auto refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.request_counts_refresh.emit)
+        self.refresh_timer.setInterval(UIConstants.REFRESH_INTERVAL_MS)
+        
         self._build_ui()
+        
+        logger.debug("Dashboard panel initialized")
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -107,7 +128,15 @@ class DashboardPanel(QWidget):
 
         content_layout.addStretch()
         # initial size policy
-        self.setMinimumWidth(180)
+        self.setMinimumWidth(UIConstants.DASHBOARD_MIN_WIDTH)
+        
+        # Quick actions
+        separator("Ações Rápidas")
+        
+        self.btnAutoRefresh = QPushButton("🔄 Auto-refresh")
+        self.btnAutoRefresh.setCheckable(True)
+        self.btnAutoRefresh.toggled.connect(self.toggle_auto_refresh)
+        content_layout.addWidget(self.btnAutoRefresh)
 
     # Public update methods
     def set_connection_info(self, db: str | None, user: str | None, host: str | None, connected: bool):
@@ -117,15 +146,32 @@ class DashboardPanel(QWidget):
         if connected:
             self.lblStatus.setText("Conectado")
             self.lblStatus.setStyleSheet("color:#070;font-weight:bold;")
+            # Publish connection event
+            self.event_bus.publish(EventTypes.CONNECTION_ESTABLISHED, {
+                'database': db, 'user': user, 'host': host
+            })
         else:
             self.lblStatus.setText("Desconectado")
             self.lblStatus.setStyleSheet("color:#b00;font-weight:bold;")
+            self.event_bus.publish(EventTypes.CONNECTION_LOST)
 
     def set_counts(self, users: int | None, groups: int | None, schemas: int | None, tables: int | None):
         self.lblCountUsers.setText("--" if users is None else str(users))
         self.lblCountGroups.setText("--" if groups is None else str(groups))
         self.lblCountSchemas.setText("--" if schemas is None else str(schemas))
         self.lblCountTables.setText("--" if tables is None else str(tables))
+        
+        # Update internal stats
+        if users is not None:
+            self.stats.user_count = users
+        if groups is not None:
+            self.stats.group_count = groups
+        if schemas is not None:
+            self.stats.schema_count = schemas
+        if tables is not None:
+            self.stats.table_count = tables
+            
+        logger.debug(f"Dashboard counts updated: users={users}, groups={groups}, schemas={schemas}, tables={tables}")
 
     def set_collapsed(self, collapsed: bool):
         self._collapsed = collapsed
@@ -137,6 +183,24 @@ class DashboardPanel(QWidget):
             self.setMaximumWidth(40)
             self.lblTitle.setVisible(False)
         else:
-            self.setMinimumWidth(180)
+            self.setMinimumWidth(UIConstants.DASHBOARD_MIN_WIDTH)
             self.setMaximumWidth(400)
             self.lblTitle.setVisible(True)
+            
+    def toggle_auto_refresh(self, enabled: bool):
+        """Ativa/desativa atualização automática"""
+        if enabled:
+            self.refresh_timer.start()
+            logger.info("Auto-refresh ativado")
+        else:
+            self.refresh_timer.stop()
+            logger.info("Auto-refresh desativado")
+            
+    def on_connection_established(self, data):
+        """Handler para conexão estabelecida"""
+        logger.info(f"Conexão estabelecida: {data}")
+        
+    def on_connection_lost(self, data=None):
+        """Handler para conexão perdida"""
+        logger.info("Conexão perdida")
+        self.refresh_timer.stop()  # Para auto-refresh se conexão perdida
