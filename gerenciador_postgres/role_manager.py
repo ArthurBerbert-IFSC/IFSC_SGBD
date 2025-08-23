@@ -671,6 +671,13 @@ class RoleManager:
             )
             return False
 
+    def get_database_privileges(self, role_name: str) -> Set[str]:
+        try:
+            return set(self.dao.get_database_privileges(role_name))
+        except Exception as e:
+            self.logger.warning(f"[{self.operador}] Falha ao obter privilégios de banco de '{role_name}': {e}")
+            return set()
+
     def grant_schema_privileges(self, group_name: str, schema: str, privileges: Set[str]) -> bool:
         try:
             with self.dao.transaction():

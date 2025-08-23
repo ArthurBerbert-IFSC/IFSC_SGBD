@@ -50,10 +50,23 @@ class ConnectThread(QThread):
         try:
             # Teste de conexão sem acionar sinais/GUI: usar psycopg2 direto
             import psycopg2
+            import socket
             test_params = dict(self.params)
             timeout = int(test_params.pop('connect_timeout', 5) or 5)
             # Remove chave não suportada pelo driver
             test_params.pop('profile_name', None)
+
+            # Pré-checagem rápida de TCP para evitar esperar pelo timeout do driver
+            host = test_params.get('host') or 'localhost'
+            port = int(test_params.get('port') or 5432)
+            try:
+                with socket.create_connection((host, port), timeout=timeout):
+                    pass
+            except Exception as sock_err:
+                # Emite erro amigável e aborta antes do driver
+                self.failed.emit(Exception(f"Não foi possível alcançar {host}:{port} ({sock_err})"))
+                return
+
             conn = psycopg2.connect(connect_timeout=timeout, **test_params)
             if self._cancelled:
                 try:
@@ -340,8 +353,12 @@ class MainWindow(QMainWindow):
         params = dlg.get_connection_params()
         params.setdefault('connect_timeout', 5)
 
+        host = params.get('host') or 'localhost'
+        port = params.get('port') or 5432
+        dbname = params.get('dbname') or ''
+
         self._progress = QProgressDialog(
-            "Conectando ao banco de dados...", "Cancelar", 0, 0, self
+            f"Conectando em {host}:{port} (DB: {dbname})...", "Cancelar", 0, 0, self
         )
         self._progress.setWindowModality(Qt.WindowModality.WindowModal)
         self._progress.setMinimumDuration(0)
@@ -421,12 +438,14 @@ class MainWindow(QMainWindow):
                 pass
 
         def finalize_fail(error: Exception):
+            # Se a conexão já foi finalizada (sucesso ou falha anterior), ignore silenciosamente
+            if not getattr(self, "_connect_in_progress", False):
+                # Evita log enganoso após sucesso quando o usuário clicou em Cancelar
+                return
             try:
                 self._mw_logger.error(f"[CONNECTION] finalize_fail: {error}")
             except Exception:
                 pass
-            if not getattr(self, "_connect_in_progress", False):
-                return
             self._connect_in_progress = False
             try:
                 self._connect_timeout_timer.stop()
@@ -451,10 +470,15 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'stacked'):
                 self.stacked.setCurrentIndex(0)
 
-            QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {error}")
+            # Mensagem de erro amigável
+            try:
+                emsg = str(error)
+            except Exception:
+                emsg = "Erro desconhecido"
+            QMessageBox.critical(self, "Erro de conexão", f"Falha ao conectar: {emsg}")
             # Reabrir o diálogo de conexão após o erro para permitir nova tentativa
             try:
-                QTimer.singleShot(0, self.on_conectar)
+                QTimer.singleShot(250, self.on_conectar)
             except Exception:
                 pass
         self._connect_thread.succeeded.connect(finalize_success)
@@ -462,7 +486,11 @@ class MainWindow(QMainWindow):
         self._connect_timeout_timer.timeout.connect(
             lambda: finalize_fail(TimeoutError("Tempo esgotado ao conectar"))
         )
-        self._connect_timeout_timer.start(15000)
+        try:
+            ct = int(params.get('connect_timeout') or 5)
+        except Exception:
+            ct = 5
+        self._connect_timeout_timer.start(max(10000, (ct + 3) * 1000))
         self._progress.canceled.connect(lambda: finalize_fail(Exception("Operação cancelada pelo usuário")))
         self._connect_thread.start()
         try:

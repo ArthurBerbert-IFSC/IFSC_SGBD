@@ -239,6 +239,13 @@ class GroupsController(QObject):
             self.data_changed.emit()
         return success
 
+    def get_database_privileges(self, role_name: str):
+        # Aceita tanto grupos quanto usuários; RoleManager trata genericamente
+        try:
+            return self.role_manager.get_database_privileges(role_name)
+        except Exception:
+            return set()
+
     def grant_schema_privileges(
         self,
         group_name: str,

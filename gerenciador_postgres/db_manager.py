@@ -668,6 +668,29 @@ class DBManager:
                         )
                     )
 
+    def get_database_privileges(self, role: str) -> Set[str]:
+        """Retorna os privilégios atuais do ``role`` no banco atual.
+
+        Usa sufixo "*" quando há WITH GRANT OPTION.
+        Exemplos de retorno: {"CONNECT", "CREATE*", "TEMPORARY"}.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.privilege_type, a.is_grantable
+                FROM pg_database d
+                CROSS JOIN LATERAL aclexplode(
+                    COALESCE(d.datacl, acldefault('d', d.datdba))
+                ) AS a
+                JOIN pg_roles gr ON gr.oid = a.grantee
+                WHERE d.datname = current_database()
+                  AND gr.rolname = %s
+                """,
+                (role,),
+            )
+            rows = cur.fetchall()
+            return {priv + ("*" if grantable else "") for priv, grantable in rows}
+
     def grant_schema_privileges(self, group: str, schema: str, privileges: Set[str]):
         """Concede privilégios de schema ao grupo informado."""
         # Sanitiza marcador de 'sujo' caso tenha escapado da camada GUI
