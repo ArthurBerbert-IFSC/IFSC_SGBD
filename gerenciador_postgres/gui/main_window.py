@@ -333,6 +333,17 @@ class MainWindow(QMainWindow):
 
     def on_privilegios(self):
         """Mostrar aba Privilégios."""
+        # Single-instance: se já existir aba 'Privilégios', apenas focar
+        title = 'Privilégios'
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == title:
+                self.tabs.setCurrentIndex(i)
+                try:
+                    w = self.tabs.widget(i)
+                    w.raise_(); w.activateWindow()
+                except Exception:
+                    pass
+                return
         self.open_panel('privilegios')
 
     def on_conectar(self):

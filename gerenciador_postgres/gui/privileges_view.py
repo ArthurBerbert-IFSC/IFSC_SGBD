@@ -935,6 +935,45 @@ class PrivilegesView(QWidget):
                 return
         self.btnSaveAll.setEnabled(False)
 
+    def _has_unsaved_changes(self) -> bool:
+        if getattr(self, '_db_dirty', False):
+            return True
+        for st in self._priv_cache.values():
+            if st.dirty_schema or st.dirty_table or st.dirty_default:
+                return True
+        return False
+
+    def closeEvent(self, event):  # type: ignore[override]
+        # Se houver alterações não salvas, perguntar Salvar/Descartar/Cancelar
+        try:
+            dirty = self._has_unsaved_changes()
+        except Exception:
+            dirty = False
+        if not dirty:
+            event.accept()
+            return
+        resp = QMessageBox.question(
+            self,
+            "Sair sem salvar?",
+            "Existem alterações não salvas. Deseja salvar antes de fechar?",
+            QMessageBox.StandardButton.Save |
+            QMessageBox.StandardButton.Discard |
+            QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if resp == QMessageBox.StandardButton.Cancel:
+            event.ignore()
+            return
+        if resp == QMessageBox.StandardButton.Discard:
+            event.accept()
+            return
+        # Save
+        try:
+            self._save_all_privileges()
+        except Exception:
+            pass
+        event.accept()
+
     def _save_state_sync(self, role: str, schema: str) -> bool:
         """Default save implementation for one (role, schema)."""
         if not self.controller:
